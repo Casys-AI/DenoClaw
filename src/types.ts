@@ -156,16 +156,23 @@ export interface AgentDefaults {
   sandbox?: SandboxConfig;
 }
 
+export type ChannelRouting = "direct" | "round-robin" | "by-intent" | "broadcast";
+
 export interface AgentEntry {
   model?: string;
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
-  sandbox?: SandboxConfig;
   description?: string;
+  // Sandbox (ADR-005)
+  sandbox?: SandboxConfig;
+  // A2A peers (ADR-006) — fermé par défaut
+  peers?: string[];              // agents à qui je peux envoyer des Tasks
+  acceptFrom?: string[];         // agents dont j'accepte des Tasks ("*" = tous)
+  // Channels — d'où je reçois des messages utilisateur
+  channels?: string[];           // noms des channels assignés
+  channelRouting?: ChannelRouting;
 }
-
-export type ChannelRouting = "direct" | "round-robin" | "by-intent" | "broadcast";
 
 export interface ToolsConfig {
   restrictToWorkspace?: boolean;
@@ -177,24 +184,18 @@ export interface TelegramConfig {
   enabled: boolean;
   token?: string;
   allowFrom?: string[];
-  agents?: string[];
-  routing?: ChannelRouting;
 }
 
 export interface DiscordConfig {
   enabled: boolean;
   token?: string;
   allowFrom?: string[];
-  agents?: string[];
-  routing?: ChannelRouting;
 }
 
 export interface WebhookConfig {
   enabled: boolean;
   port?: number;
   secret?: string;
-  agents?: string[];
-  routing?: ChannelRouting;
 }
 
 export interface ChannelsConfig {

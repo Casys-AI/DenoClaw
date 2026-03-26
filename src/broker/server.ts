@@ -5,6 +5,12 @@ import { SandboxManager } from "../sandbox/mod.ts";
 import { generateId } from "../utils/helpers.ts";
 import { log } from "../utils/log.ts";
 
+interface AgentPeerConfig {
+  peers?: string[];
+  acceptFrom?: string[];
+  sandbox?: { allowedPermissions?: string[] };
+}
+
 /** Known tool → permissions mapping (ADR-005) */
 const TOOL_PERMISSIONS: Record<string, SandboxPermission[]> = {
   shell: ["run"],
@@ -222,11 +228,37 @@ console.log(await r.text());`;
     }
   }
 
-  // ── Inter-agent routing ─────────────────────────────
+  // ── Inter-agent routing (ADR-006: A2A + peers check) ─
 
   private async handleAgentMessage(msg: BrokerMessage): Promise<void> {
     const payload = msg.payload as { targetAgent: string; instruction: string; data?: unknown };
     const kv = await this.getKv();
+
+    // Vérifier les peers (fermé par défaut)
+    const senderConfig = await kv.get<AgentPeerConfig>(["agents", msg.from, "config"]);
+    const targetConfig = await kv.get<AgentPeerConfig>(["agents", payload.targetAgent, "config"]);
+
+    // Sender doit avoir target dans ses peers
+    const senderPeers = senderConfig.value?.peers || [];
+    if (!senderPeers.includes(payload.targetAgent) && !senderPeers.includes("*")) {
+      await this.sendStructuredError(msg.from, msg.id, {
+        code: "PEER_NOT_ALLOWED",
+        context: { from: msg.from, to: payload.targetAgent, senderPeers },
+        recovery: `Add "${payload.targetAgent}" to ${msg.from}.peers`,
+      });
+      return;
+    }
+
+    // Target doit accepter de sender
+    const targetAccept = targetConfig.value?.acceptFrom || [];
+    if (!targetAccept.includes(msg.from) && !targetAccept.includes("*")) {
+      await this.sendStructuredError(msg.from, msg.id, {
+        code: "PEER_REJECTED",
+        context: { from: msg.from, to: payload.targetAgent, targetAcceptFrom: targetAccept },
+        recovery: `Add "${msg.from}" to ${payload.targetAgent}.acceptFrom`,
+      });
+      return;
+    }
 
     const forwarded: BrokerMessage = {
       id: generateId(),
@@ -238,7 +270,7 @@ console.log(await r.text());`;
     };
 
     await kv.enqueue(forwarded);
-    log.info(`Message routé : ${msg.from} → ${payload.targetAgent}`);
+    log.info(`A2A routé : ${msg.from} → ${payload.targetAgent}`);
   }
 
   // ── Tunnel management ───────────────────────────────

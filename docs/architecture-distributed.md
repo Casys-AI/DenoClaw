@@ -114,23 +114,50 @@ class AgentRuntime {
 
 ### 3. Tunnels (WebSocket)
 
-Un tunnel connecte une machine (locale ou VPS) au broker. Le tunnel expose des **capabilities** — la liste des outils disponibles sur cette machine.
+Un tunnel connecte une machine (locale ou VPS) au broker. Il sert à **deux choses** :
+
+**A. Outils locaux** — Exécuter des commandes (shell, FS, scripts) sur une machine distante depuis un agent cloud. Le broker route les tool_calls vers le bon tunnel.
+
+**B. Auth flow navigateur** — Quand un CLI (Claude, Codex) installé sur un VPS a besoin d'une auth navigateur (OAuth/device code), le tunnel route l'URL d'auth vers la machine locale de l'utilisateur qui ouvre son navigateur, se connecte, et le token remonte via le tunnel. Une fois authentifié, le CLI tourne en autonome sur le VPS.
+
+```
+Auth flow via tunnel :
+
+VPS (CLI installé)          Broker                     Machine locale
+ │                              │                          │
+ │ CLI veut s'auth              │                          │
+ │ → device code + URL          │                          │
+ │──── tunnel ─────────────────►│──── tunnel ─────────────►│
+ │                              │                   ouvre le navigateur
+ │                              │                   utilisateur se connecte
+ │                              │◄──── token ──────────────┤
+ │◄──── token ──────────────────│                          │
+ │                              │                          │
+ │ CLI authentifié, autonome    │                          │
+```
+
+**Important** : les CLIs (Claude, Codex) tournent **sur la machine de l'agent** (VPS), PAS en local. Le tunnel ne sert pas à router les requêtes LLM — il sert à l'auth initiale et aux outils locaux. Une fois le CLI authentifié, il fonctionne en autonome.
 
 ```typescript
-// Sur ta machine — expose Claude CLI, Codex, FS local
+// Sur ta machine locale — expose tes outils + reçoit les auth requests
 const tunnel = new LocalRelay({
   brokerUrl: "wss://denoclaw-broker.deno.dev/tunnel",
-  // Auth : token d'invitation à usage unique → échangé contre un token de session éphémère
   inviteToken: "one-time-use-token",
   capabilities: {
-    providers: ["codex-cli", "claude-cli"],
     tools: ["shell", "fs_read", "fs_write"],
   },
 });
 
+// Quand un VPS a besoin d'auth navigateur
+tunnel.onAuthRequest(async (req) => {
+  // Ouvre le navigateur local avec l'URL d'auth
+  await open(req.url);
+  console.log(`Auth demandée : ${req.url} (code: ${req.code})`);
+  // Le token est renvoyé automatiquement après login
+});
+
+// Quand un agent veut exécuter un outil local
 tunnel.onToolCall(async (req) => {
-  // Le broker envoie un tool_call d'un agent Sandbox
-  // Tu peux approuver/refuser ici
   return await localTools.execute(req.tool, req.args);
 });
 
@@ -155,9 +182,8 @@ await tunnel.connect();
 6. Broker résout le provider :
            │  ├─ model = "anthropic/..." → MODE API : fetch() avec clé (broker la détient)
            │  ├─ model = "openai/..."    → MODE API : fetch() avec clé
-           │  ├─ model = "codex-cli"     → MODE CLI : route vers tunnel WS → machine locale
-           │  └─ model = "claude-cli"    → MODE CLI : route vers tunnel WS → machine locale
-           │                               (le CLI local gère sa propre auth)
+           │  ├─ model = "codex-cli"     → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
+           │  └─ model = "claude-cli"    → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
            │
 7. Broker renvoie la réponse à l'agent
            │  KV Queue: { to: "agent-123", type: "llm_response", ... }
@@ -185,13 +211,29 @@ Chaque tunnel déclare au broker ce qu'il expose :
 ```typescript
 {
   tunnelId: "machine-erwan",
-  providers: ["codex-cli", "claude-cli"],     // providers LLM via CLI
-  tools: ["shell", "fs_read", "fs_write"],    // outils locaux
+  tools: ["shell", "fs_read", "fs_write"],    // outils locaux exécutables
+  supportsAuth: true,                          // peut recevoir des auth requests (ouvre navigateur)
   allowedAgents: ["agent-123", "agent-456"],  // qui peut m'utiliser
 }
 ```
 
-Le broker maintient un registre des tunnels actifs. Quand un agent demande un provider CLI ou un outil, le broker cherche un tunnel qui a la capability. Si le tunnel tombe, le broker peut fallback (ex: `codex-cli` → `openai/gpt-4o` en API).
+Le broker maintient un registre des tunnels actifs. Quand un agent demande un outil, le broker cherche un tunnel qui a la capability.
+
+## Auth flow navigateur via tunnel
+
+Les CLIs (Claude, Codex) tournent sur le **VPS/machine de l'agent**, pas en local. Mais l'auth OAuth/device code nécessite un navigateur.
+
+Le tunnel résout ça avec un type de message `auth_request` :
+
+1. Le CLI sur le VPS démarre et a besoin d'auth
+2. Il émet `{ type: "auth_request", url: "https://auth.anthropic.com/...", code: "ABCD-1234" }`
+3. Le broker route vers le tunnel de l'utilisateur (machine locale)
+4. La machine locale ouvre le navigateur avec l'URL
+5. L'utilisateur se connecte
+6. Le token remonte : tunnel → broker → VPS
+7. Le CLI est authentifié et tourne en autonome
+
+**C'est un one-shot** — après l'auth initiale, le CLI stocke son token localement sur le VPS et n'a plus besoin du tunnel pour les requêtes LLM.
 
 ## Communication inter-agents
 

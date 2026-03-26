@@ -38,21 +38,36 @@ Agent (Sandbox)                  Broker (Deploy)              API LLM
      │  { content, toolCalls }        │                          │
 ```
 
-## Flux — Mode CLI via tunnel
+## Flux — Mode CLI (tourne sur le VPS de l'agent)
+
+Les CLIs (Claude, Codex) sont installés **sur le VPS/machine de l'agent**, pas en local. Ils sont appelés directement par l'agent via `Deno.Command`. Pas de tunnel pour les requêtes LLM.
 
 ```
-Agent (Sandbox)                  Broker (Deploy)              Machine locale
-     │                                │                          │
-     │  { messages, model:"codex-cli"}│                          │
-     ├──── KV Queue ─────────────────►│                          │
-     │                                │  route vers tunnel       │
-     │                                ├──── WebSocket ──────────►│
-     │                                │                          │ Deno.Command("codex", [...])
-     │                                │                          │ (CLI gère sa propre auth)
-     │                                │◄──── WebSocket ──────────┤
-     │◄── KV Queue ───────────────────┤                          │
-     │  { content, toolCalls }        │                          │
+Agent (VPS)                                         API LLM
+     │                                                 │
+     │  Deno.Command("claude", ["--print", prompt])    │
+     │  (CLI authentifié localement sur le VPS)         │
+     │  ────────────────────────────────────────────►   │
+     │  ◄────────────────────────────────────────────   │
+     │  response                                        │
 ```
+
+**Auth initiale** : quand le CLI a besoin d'auth navigateur (OAuth/device code), le tunnel route l'URL d'auth vers la machine locale de l'utilisateur :
+
+```
+VPS (CLI)                    Broker (Deploy)              Machine locale
+     │                            │                          │
+     │  auth_request {url, code}  │                          │
+     ├──── tunnel ───────────────►├──── tunnel ─────────────►│
+     │                            │                   ouvre navigateur
+     │                            │                   user se connecte
+     │                            │◄──── token ──────────────┤
+     │◄──── token ────────────────┤                          │
+     │                            │                          │
+     │  CLI authentifié, autonome │                          │
+```
+
+C'est un **one-shot** — le CLI stocke son token sur le VPS et n'a plus besoin du tunnel.
 
 ## Flux — Communication inter-agents
 
@@ -71,26 +86,24 @@ Agent A (Sandbox)                Broker (Deploy)              Agent B (Sandbox)
 ## Le tunnel est un primitif, pas un add-on
 
 Le tunnel WebSocket sert à :
-1. **Providers CLI** — Codex CLI, Claude CLI sur machine locale (gèrent leur propre auth)
-2. **Outils locaux** — shell, filesystem, scripts sur machine locale ou VPS
-3. **Communication inter-agents** — quand deux agents sont sur des machines différentes (hors Deploy), le tunnel permet de les connecter au broker
+1. **Outils locaux** — exécuter shell, filesystem, scripts sur la machine locale de l'utilisateur
+2. **Auth flow navigateur** — quand un CLI sur un VPS a besoin d'auth OAuth/device code, le tunnel route l'URL vers la machine locale qui ouvre le navigateur (one-shot, puis le CLI est autonome)
+3. **Communication inter-agents** — connecter des machines distantes au broker
 
-Chaque tunnel déclare ses **capabilities** :
+Les CLIs (Claude, Codex) tournent **sur le VPS de l'agent**, pas en local. Le tunnel ne route pas les requêtes LLM — seulement l'auth initiale et les outils.
 
 ```typescript
-// Tunnel qui expose des providers CLI + des outils
+// Tunnel = outils locaux + réception des auth requests
 {
-  providers: ["codex-cli", "claude-cli"],       // LLM via CLI
-  tools: ["shell", "fs_read", "fs_write"],      // outils locaux
+  tools: ["shell", "fs_read", "fs_write"],
+  supportsAuth: true,
 }
 ```
 
-Le broker sait quoi router où grâce à ces déclarations.
-
 ## Justification
 
-- **Zero secret dans les Sandboxes** — les clés API restent sur le broker, les tokens CLI restent sur la machine locale
-- **Interface uniforme pour l'agent** — `broker.complete({ messages, model })` que ce soit une API HTTP ou un CLI local, l'agent ne sait pas et n'a pas besoin de savoir
+- **Zero secret dans les Sandboxes** — les clés API restent sur le broker, les tokens CLI restent sur le VPS de l'agent
+- **Interface uniforme pour l'agent** — `broker.complete({ messages, model })` pour les API, `Deno.Command` pour les CLI locaux au VPS
 - **Tracking de coûts** centralisé par agent / par utilisateur
 - **Rate limiting** centralisé
 - **Fallback chains** — model "codex-cli" down → fallback sur "openai/gpt-4o" en API

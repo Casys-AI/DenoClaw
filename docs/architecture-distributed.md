@@ -114,55 +114,69 @@ class AgentRuntime {
 
 ### 3. Tunnels (WebSocket)
 
-Un tunnel connecte une machine (locale ou VPS) au broker. Il sert à **deux choses** :
+Le tunnel est un WebSocket bidirectionnel. Il sert à connecter **tout ce qui n'est pas dans la même instance Deploy**. Deux cas d'usage :
 
-**A. Outils locaux** — Exécuter des commandes (shell, FS, scripts) sur une machine distante depuis un agent cloud. Le broker route les tool_calls vers le bon tunnel.
+#### A. Instance → Local (ou VPS)
 
-**B. Auth flow navigateur** — Quand un CLI (Claude, Codex) installé sur un VPS a besoin d'une auth navigateur (OAuth/device code), le tunnel route l'URL d'auth vers la machine locale de l'utilisateur qui ouvre son navigateur, se connecte, et le token remonte via le tunnel. Une fois authentifié, le CLI tourne en autonome sur le VPS.
+Connecte une machine locale ou un VPS au broker. Sert à :
+- **Outils locaux** — exécuter shell, FS, scripts sur ta machine depuis un agent cloud
+- **Auth flow navigateur** — router l'URL OAuth/device code vers ton navigateur local (one-shot pour les CLIs)
 
 ```
-Auth flow via tunnel :
-
-VPS (CLI installé)          Broker                     Machine locale
- │                              │                          │
- │ CLI veut s'auth              │                          │
- │ → device code + URL          │                          │
- │──── tunnel ─────────────────►│──── tunnel ─────────────►│
- │                              │                   ouvre le navigateur
- │                              │                   utilisateur se connecte
- │                              │◄──── token ──────────────┤
- │◄──── token ──────────────────│                          │
- │                              │                          │
- │ CLI authentifié, autonome    │                          │
+Instance (Deploy)                    Machine locale / VPS
+Broker ◄──── tunnel (WS) ───────── denoclaw tunnel
+  │                                     │
+  │  tool_call → tunnel → exécute       │
+  │  auth_request → tunnel → navigateur │
 ```
 
-**Important** : les CLIs (Claude, Codex) tournent **sur la machine de l'agent** (VPS), PAS en local. Le tunnel ne sert pas à router les requêtes LLM — il sert à l'auth initiale et aux outils locaux. Une fois le CLI authentifié, il fonctionne en autonome.
+#### B. Instance → Instance
+
+Connecte deux instances DenoClaw entre elles. Les agents restent internes (jamais exposés), seuls les brokers se parlent via tunnel.
+
+```
+Instance A (Deploy)                  Instance B (Deploy)
+Broker A ◄──── tunnel (WS) ────────► Broker B
+  │                                      │
+  │ KV interne                           │ KV interne
+  │                                      │
+  agents A                               agents B
+  (pas d'URL publique)                   (pas d'URL publique)
+```
+
+Un agent sur l'instance A peut envoyer une Task A2A à un agent sur l'instance B : le broker A transmet via le tunnel au broker B, qui route en KV Queue interne vers l'agent cible.
+
+#### Commandes CLI
+
+```bash
+# Connecter ta machine locale au broker
+denoclaw tunnel wss://mon-broker.deno.dev/tunnel
+
+# Connecter deux instances entre elles
+# Sur l'instance B, ouvrir le tunnel vers l'instance A :
+denoclaw tunnel wss://instance-a.deno.dev/tunnel
+```
+
+#### Capabilities
+
+Chaque tunnel déclare ce qu'il expose :
 
 ```typescript
-// Sur ta machine locale — expose tes outils + reçoit les auth requests
-const tunnel = new LocalRelay({
-  brokerUrl: "wss://denoclaw-broker.deno.dev/tunnel",
-  inviteToken: "one-time-use-token",
-  capabilities: {
-    tools: ["shell", "fs_read", "fs_write"],
-  },
-});
+// Machine locale → outils + auth
+{
+  type: "local",
+  tools: ["shell", "fs_read", "fs_write"],
+  supportsAuth: true,
+}
 
-// Quand un VPS a besoin d'auth navigateur
-tunnel.onAuthRequest(async (req) => {
-  // Ouvre le navigateur local avec l'URL d'auth
-  await open(req.url);
-  console.log(`Auth demandée : ${req.url} (code: ${req.code})`);
-  // Le token est renvoyé automatiquement après login
-});
-
-// Quand un agent veut exécuter un outil local
-tunnel.onToolCall(async (req) => {
-  return await localTools.execute(req.tool, req.args);
-});
-
-await tunnel.connect();
+// Instance B → agents accessibles via ce tunnel
+{
+  type: "instance",
+  agents: ["support", "billing"],  // agents de l'instance B routables
+}
 ```
+
+Le broker sait quoi router où grâce à ces déclarations.
 
 ## Flux complet d'un message
 

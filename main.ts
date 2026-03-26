@@ -140,31 +140,15 @@ async function tunnel(): Promise<void> {
   const brokerUrl = args._[1] as string || await ask("URL du broker WebSocket", "ws://localhost:3000/tunnel");
   const token = await ask("Token d'invitation", "dev-token");
 
-  const providersCli: string[] = [];
   const tools: string[] = ["shell", "read_file", "write_file"];
 
-  // Detect available CLI providers
-  for (const bin of ["claude", "codex"]) {
-    try {
-      const cmd = new Deno.Command("which", { args: [bin], stdout: "piped", stderr: "piped" });
-      const { success } = await cmd.output();
-      if (success) {
-        providersCli.push(`${bin}-cli`);
-        console.log(`  ✓ ${bin} CLI détecté`);
-      }
-    } catch {
-      // not found
-    }
-  }
-
   console.log(`\nCapabilities:`);
-  console.log(`  Providers: ${providersCli.join(", ") || "aucun"}`);
   console.log(`  Tools: ${tools.join(", ")}`);
 
   const relay = new LocalRelay({
     brokerUrl,
     inviteToken: token,
-    capabilities: { providers: providersCli, tools },
+    capabilities: { tools },
     autoApprove: true,
   });
 

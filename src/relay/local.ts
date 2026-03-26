@@ -1,17 +1,15 @@
-import type { BrokerMessage, TunnelCapabilities } from "../broker/types.ts";
+import type { BrokerMessage } from "../broker/types.ts";
 import type { ToolResult } from "../types.ts";
 import { ToolRegistry } from "../agent/tools/registry.ts";
 import { ShellTool } from "../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../agent/tools/file.ts";
 import { WebFetchTool } from "../agent/tools/web.ts";
-import { CLIProvider } from "../providers/cli.ts";
 import { log } from "../utils/log.ts";
 
 interface LocalRelayConfig {
   brokerUrl: string;
   inviteToken: string;
   capabilities: {
-    providers: string[];
     tools: string[];
   };
   allowedAgents?: string[];
@@ -28,7 +26,6 @@ export class LocalRelay {
   private config: LocalRelayConfig;
   private ws: WebSocket | null = null;
   private tools: ToolRegistry;
-  private cliProviders = new Map<string, CLIProvider>();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
 
@@ -50,11 +47,6 @@ export class LocalRelay {
       this.tools.register(new WebFetchTool());
     }
 
-    // Register CLI providers
-    for (const p of config.capabilities.providers) {
-      const binary = p.replace("-cli", "");
-      this.cliProviders.set(p, new CLIProvider(binary));
-    }
   }
 
   async connect(): Promise<void> {
@@ -68,11 +60,12 @@ export class LocalRelay {
       log.info("Relay: connecté au broker");
 
       // Register capabilities
-      const registration: TunnelCapabilities & { type: string } = {
-        type: "register",
+      const registration = {
+        type: "register" as const,
         tunnelId: "",
-        providers: this.config.capabilities.providers,
+        tunnelType: "local" as const,
         tools: this.config.capabilities.tools,
+        supportsAuth: true,
         allowedAgents: this.config.allowedAgents || [],
       };
 
@@ -131,30 +124,6 @@ export class LocalRelay {
           to: msg.from,
           type: "tool_response",
           payload: result,
-          timestamp: new Date().toISOString(),
-        };
-        break;
-      }
-
-      case "llm_request": {
-        const req = msg.payload as { messages: { role: string; content: string }[]; model: string };
-        const provider = this.cliProviders.get(req.model) || this.cliProviders.values().next().value;
-        if (!provider) {
-          response = {
-            id: msg.id, from: "tunnel", to: msg.from, type: "error",
-            payload: { code: "CLI_NOT_AVAILABLE", context: { model: req.model }, recovery: "Check relay capabilities" },
-            timestamp: new Date().toISOString(),
-          };
-          break;
-        }
-
-        const llmResult = await provider.complete(
-          req.messages.map((m) => ({ role: m.role as "user" | "assistant" | "system", content: m.content })),
-          req.model,
-        );
-        response = {
-          id: msg.id, from: "tunnel", to: msg.from, type: "llm_response",
-          payload: llmResult,
           timestamp: new Date().toISOString(),
         };
         break;

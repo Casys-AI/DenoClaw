@@ -63,9 +63,15 @@ export interface AgentMessagePayload {
 
 // ── Tunnel capabilities ──────────────────────────────────
 
+export type TunnelType = "local" | "instance";
+
 export interface TunnelCapabilities {
   tunnelId: string;
-  providers: string[];
+  type: TunnelType;
+  // Local tunnel: expose tools + auth flow
   tools: string[];
+  supportsAuth?: boolean;
+  // Instance tunnel: expose remote agents via broker-to-broker
+  agents?: string[];
   allowedAgents: string[];
 }

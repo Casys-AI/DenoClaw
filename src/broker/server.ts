@@ -269,24 +269,39 @@ console.log(await r.text());`;
       timestamp: new Date().toISOString(),
     };
 
+    // Check if target agent is on a remote instance (via instance tunnel)
+    const remoteTunnel = this.findTunnelForAgent(payload.targetAgent);
+    if (remoteTunnel) {
+      remoteTunnel.send(JSON.stringify(forwarded));
+      log.info(`A2A routé via tunnel instance : ${msg.from} → ${payload.targetAgent}`);
+      return;
+    }
+
+    // Local agent — route via KV Queue
     await kv.enqueue(forwarded);
-    log.info(`A2A routé : ${msg.from} → ${payload.targetAgent}`);
+    log.info(`A2A routé local : ${msg.from} → ${payload.targetAgent}`);
   }
 
   // ── Tunnel management ───────────────────────────────
 
-  private findTunnelForProvider(model: string): WebSocket | null {
-    for (const [_, t] of this.tunnels) {
-      if (t.capabilities.providers.some((p) => model.startsWith(p))) {
-        return t.ws;
-      }
-    }
+  private findTunnelForProvider(_model: string): WebSocket | null {
+    // CLI providers now run on the agent's VPS, not via tunnel.
+    // Tunnels are for tools and instance-to-instance routing.
     return null;
   }
 
   private findTunnelForTool(tool: string): WebSocket | null {
     for (const [_, t] of this.tunnels) {
       if (t.capabilities.tools.includes(tool)) {
+        return t.ws;
+      }
+    }
+    return null;
+  }
+
+  private findTunnelForAgent(agentId: string): WebSocket | null {
+    for (const [_, t] of this.tunnels) {
+      if (t.capabilities.type === "instance" && t.capabilities.agents?.includes(agentId)) {
         return t.ws;
       }
     }
@@ -340,10 +355,16 @@ console.log(await r.text());`;
 
           // First message = capabilities registration
           if (data.type === "register") {
-            const caps = data as TunnelCapabilities;
-            caps.tunnelId = tunnelId;
+            const caps: TunnelCapabilities = {
+              tunnelId,
+              type: data.tunnelType || "local",
+              tools: data.tools || [],
+              supportsAuth: data.supportsAuth || false,
+              agents: data.agents || [],
+              allowedAgents: data.allowedAgents || [],
+            };
             this.tunnels.set(tunnelId, { ws: socket, capabilities: caps });
-            log.info(`Tunnel enregistré : ${tunnelId} (providers: ${caps.providers}, tools: ${caps.tools})`);
+            log.info(`Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${caps.agents || []})`);
             socket.send(JSON.stringify({ type: "registered", tunnelId }));
             return;
           }

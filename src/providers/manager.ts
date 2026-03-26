@@ -1,6 +1,7 @@
 import type { Config, LLMResponse, Message, ToolDefinition } from "../types.ts";
 import { AnthropicProvider, type BaseProvider, OpenAICompatProvider } from "./base.ts";
 import { CLIProvider } from "./cli.ts";
+import { OllamaProvider } from "./ollama.ts";
 import { ProviderError } from "../utils/errors.ts";
 import { log } from "../utils/log.ts";
 import { spanLLMCall } from "../telemetry/mod.ts";
@@ -51,9 +52,9 @@ const PROVIDERS: ProviderEntry[] = [
   },
   {
     name: "ollama",
-    prefixes: ["ollama/", "nemotron", "llama", "mistral", "phi", "qwen2", "codellama"],
+    prefixes: ["ollama/", "nemotron", "llama", "mistral", "phi", "qwen2", "codellama", "gemma"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://api.ollama.com/v1"),
+    factory: (k, b) => new OllamaProvider(k, b),
   },
   // CLI providers — shell out vers les CLI locaux
   {

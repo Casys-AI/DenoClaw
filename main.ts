@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --unstable-kv --unstable-cron --allow-all
+#!/usr/bin/env -S deno run --unstable-kv --unstable-cron --allow-all --env
 
 import { parseArgs } from "@std/cli/parse-args";
 import { getConfig, getConfigOrDefault } from "./src/config/mod.ts";

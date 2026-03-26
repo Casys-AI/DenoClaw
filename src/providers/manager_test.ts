@@ -18,8 +18,12 @@ Deno.test("ProviderManager resolves Ollama with API key", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
     Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "ollama response" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      model: "nemotron-3-super",
+      message: { role: "assistant", content: "ollama response" },
+      done: true,
+      done_reason: "stop",
+      prompt_eval_count: 10,
+      eval_count: 5,
     })))) as typeof fetch;
 
   try {
@@ -39,7 +43,9 @@ Deno.test("ProviderManager resolves nemotron prefix to Ollama", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
     Promise.resolve(new Response(JSON.stringify({
-      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      model: "nemotron-3-super",
+      message: { role: "assistant", content: "ok" },
+      done: true,
     })))) as typeof fetch;
 
   try {

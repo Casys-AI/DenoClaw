@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "exports": "./mod.ts",
   "tasks": {
-    "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all main.ts",
-    "start": "deno run --unstable-kv --unstable-cron --allow-all main.ts",
-    "gateway": "deno run --unstable-kv --unstable-cron --allow-all main.ts gateway",
+    "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all --env main.ts",
+    "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts",
+    "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
     "test": "deno test --unstable-kv --allow-all",
     "check": "deno check main.ts mod.ts",
     "lint": "deno lint",

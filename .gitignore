@@ -1,0 +1,18 @@
+# Deno
+deno.lock
+
+# KV local database
+*.sqlite3
+*.sqlite3-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*

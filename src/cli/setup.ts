@@ -251,21 +251,47 @@ export async function publishGateway(): Promise<void> {
 
   const projectName = await ask("Nom du projet Deploy", "denoclaw-gateway");
 
-  // Générer un token API
+  // Lire la config locale pour récupérer les clés existantes
+  const config = await getConfigOrDefault();
+  const localKeys: Record<string, string> = {};
+  for (const [name, cfg] of Object.entries(config.providers)) {
+    if (cfg?.apiKey) localKeys[name] = cfg.apiKey;
+  }
+
+  // Générer un token API pour le gateway
   const apiToken = crypto.randomUUID();
+  const envArgs = [`--env=DENOCLAW_API_TOKEN=${apiToken}`];
 
-  print("\nEnv vars à configurer sur le dashboard Deploy :");
-  print(`  DENOCLAW_API_TOKEN=${apiToken}`);
-
-  // Demander les clés LLM
-  const anthropicKey = await ask("ANTHROPIC_API_KEY (vide = skip)");
-  const openaiKey = await ask("OPENAI_API_KEY (vide = skip)");
-
-  if (await confirm("\nDéployer ?")) {
-    // Build env args
-    const envArgs = [`--env=DENOCLAW_API_TOKEN=${apiToken}`];
+  if (Object.keys(localKeys).length > 0) {
+    print(`\nClés API trouvées dans la config locale : ${Object.keys(localKeys).join(", ")}`);
+    if (await confirm("Utiliser ces clés pour le déploiement ?")) {
+      const envMap: Record<string, string> = {
+        anthropic: "ANTHROPIC_API_KEY",
+        openai: "OPENAI_API_KEY",
+        ollama: "OLLAMA_API_KEY",
+        openrouter: "OPENROUTER_API_KEY",
+        deepseek: "DEEPSEEK_API_KEY",
+        groq: "GROQ_API_KEY",
+        gemini: "GEMINI_API_KEY",
+      };
+      for (const [name, key] of Object.entries(localKeys)) {
+        const envName = envMap[name];
+        if (envName) envArgs.push(`--env=${envName}=${key}`);
+      }
+      success("Clés locales récupérées");
+    }
+  } else {
+    print("\nAucune clé dans la config locale. Saisie manuelle :");
+    const anthropicKey = await ask("ANTHROPIC_API_KEY (vide = skip)");
+    const openaiKey = await ask("OPENAI_API_KEY (vide = skip)");
     if (anthropicKey) envArgs.push(`--env=ANTHROPIC_API_KEY=${anthropicKey}`);
     if (openaiKey) envArgs.push(`--env=OPENAI_API_KEY=${openaiKey}`);
+  }
+
+  // Modèle par défaut
+  envArgs.push(`--env=DENOCLAW_DEFAULT_MODEL=${config.agents.defaults.model}`);
+
+  if (await confirm("\nDéployer ?")) {
 
     print("\nDéploiement en cours...");
     const cmd = new Deno.Command("deployctl", {

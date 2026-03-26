@@ -51,7 +51,7 @@ const PROVIDERS: ProviderEntry[] = [
   // Ollama — local LLM, pas de clé requise
   {
     name: "ollama",
-    prefixes: ["ollama/", "llama", "mistral", "phi", "qwen2", "codellama"],
+    prefixes: ["ollama/", "nemotron", "llama", "mistral", "phi", "qwen2", "codellama"],
     requiresKey: false,
     factory: (_k, b) => new OpenAICompatProvider("ollama", b, "http://localhost:11434/v1"),
   },

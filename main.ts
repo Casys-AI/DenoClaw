@@ -104,7 +104,7 @@ Exemples:
   denoclaw setup provider                      # configurer Anthropic, Ollama, etc.
   denoclaw setup channel                       # configurer Telegram
   denoclaw agent -m "Bonjour"                  # message unique
-  denoclaw agent --model ollama/llama3.2       # utiliser Ollama
+  denoclaw agent --model ollama/nemotron-super       # utiliser Ollama
   denoclaw agent --model claude-cli            # utiliser Claude Code CLI
   denoclaw gateway                             # lancer le serveur multi-canal
   denoclaw publish gateway                     # déployer sur Deno Deploy

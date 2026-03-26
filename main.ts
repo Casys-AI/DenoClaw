@@ -18,7 +18,7 @@ import {
 } from "./src/cli/setup.ts";
 import { BrokerServer } from "./src/broker/server.ts";
 import { LocalRelay } from "./src/relay/local.ts";
-import { ask } from "./src/cli/prompt.ts";
+import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/utils/log.ts";
 import type { Config } from "./src/types.ts";
 
@@ -77,6 +77,40 @@ async function gateway(config: Config): Promise<void> {
   } catch {
     await gw.stop();
   }
+}
+
+async function init(): Promise<void> {
+  console.log(`
+╔═══════════════════════════════════╗
+║        DenoClaw — Setup           ║
+╚═══════════════════════════════════╝
+`);
+
+  // 1. Provider
+  console.log("Étape 1/3 — Provider LLM\n");
+  await setupProvider();
+
+  // 2. Channel (optionnel)
+  const wantChannel = await confirm("Étape 2/3 — Configurer un channel (Telegram, webhook) ?", false);
+  if (wantChannel) {
+    await setupChannel();
+  }
+
+  // 3. Agent config
+  const wantCustom = await confirm("Étape 3/3 — Personnaliser l'agent (modèle, température) ?", false);
+  if (wantCustom) {
+    await setupAgent();
+  }
+
+  console.log(`
+✓ Configuration terminée !
+
+Pour démarrer :
+  denoclaw agent              Chat interactif
+  denoclaw agent -m "Hello"   Message unique
+  denoclaw gateway            Gateway multi-canal
+  denoclaw status             Voir l'état
+`);
 }
 
 async function broker(config: Config): Promise<void> {
@@ -154,6 +188,9 @@ function help(): void {
   console.log(`
 DenoClaw — Agent IA Deno-natif
 
+Démarrage:
+  denoclaw init               Setup guidé (provider + channel + agent)
+
 Setup:
   denoclaw setup provider     Configurer un provider LLM
   denoclaw setup channel      Configurer un channel (Telegram, webhook)
@@ -224,9 +261,21 @@ try {
       }
       break;
 
+    case "init": {
+      await init();
+      break;
+    }
+
     case "agent":
     case undefined: {
       const config = await getConfigOrDefault();
+      // Si aucun provider configuré → lancer init
+      const hasProvider = Object.values(config.providers).some((p) => p?.apiKey || p?.enabled);
+      if (!hasProvider) {
+        console.log("Aucun provider configuré. Lançons la config initiale.\n");
+        await init();
+        break;
+      }
       await agent(config);
       break;
     }

@@ -210,10 +210,25 @@ export async function publishGateway(): Promise<void> {
 
   const projectName = await ask("Nom du projet Deploy", "denoclaw-gateway");
 
+  // Générer un token API pour sécuriser les endpoints
+  const apiToken = crypto.randomUUID();
+  print(`\n⚠ Token API généré pour sécuriser le gateway :`);
+  print(`  DENOCLAW_API_TOKEN=${apiToken}`);
+  print(`\n  Ce token protège /chat, /ws, /tunnel.`);
+  print(`  Sans ce token, les endpoints refusent les requêtes.\n`);
+
   if (await confirm("Déployer main.ts comme gateway ?")) {
     print("\nDéploiement en cours...");
+
+    // Deploy avec le token en env var
     const cmd = new Deno.Command("deployctl", {
-      args: ["deploy", `--project=${projectName}`, "--prod", "main.ts"],
+      args: [
+        "deploy",
+        `--project=${projectName}`,
+        "--prod",
+        `--env=DENOCLAW_API_TOKEN=${apiToken}`,
+        "main.ts",
+      ],
       stdout: "inherit",
       stderr: "inherit",
     });
@@ -221,8 +236,13 @@ export async function publishGateway(): Promise<void> {
     const { success: ok } = await cmd.output();
     if (ok) {
       success(`Gateway déployé sur https://${projectName}.deno.dev`);
-      print("\nN'oubliez pas de configurer les env vars sur le dashboard :");
-      print("  ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.");
+      print(`\n  Token API : ${apiToken}`);
+      print("  Gardez-le précieusement — c'est la seule façon d'accéder au gateway.\n");
+      print("  Configurez aussi les clés LLM sur le dashboard Deploy :");
+      print("    ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.");
+      print("  Ou mieux : utilisez GCP Secret Manager (voir ADR-004).\n");
+      print("  Test :");
+      print(`    curl -H "Authorization: Bearer ${apiToken}" https://${projectName}.deno.dev/health`);
     } else {
       error("Échec du déploiement. Vérifiez deployctl et votre auth.");
     }

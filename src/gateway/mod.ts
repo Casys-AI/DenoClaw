@@ -110,8 +110,36 @@ export class Gateway {
     }
   }
 
+  /**
+   * Check API token on protected endpoints.
+   * If DENOCLAW_API_TOKEN is set, all endpoints except / require it.
+   */
+  private checkAuth(req: Request): Response | null {
+    const token = Deno.env.get("DENOCLAW_API_TOKEN");
+    if (!token) return null; // pas de token configuré = pas d'auth (mode local)
+
+    const auth = req.headers.get("authorization");
+    const queryToken = new URL(req.url).searchParams.get("token");
+
+    if (auth === `Bearer ${token}` || queryToken === token) return null;
+
+    return Response.json(
+      { error: { code: "UNAUTHORIZED", recovery: "Add Authorization: Bearer <token> header" } },
+      { status: 401 },
+    );
+  }
+
   private async handleHttp(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
+    // Root — public, pas d'auth
+    if (url.pathname === "/") {
+      return new Response("DenoClaw Gateway");
+    }
+
+    // Auth check sur tous les autres endpoints
+    const authErr = this.checkAuth(req);
+    if (authErr) return authErr;
 
     // Health check
     if (url.pathname === "/health") {

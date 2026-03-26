@@ -29,6 +29,11 @@ export { CronManager } from "./src/cron/mod.ts";
 export { getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/mod.ts";
 
 export { SandboxManager } from "./src/sandbox/mod.ts";
+export { A2AClient } from "./src/a2a/client.ts";
+export { A2AServer } from "./src/a2a/server.ts";
+export { generateAgentCard, generateAllCards } from "./src/a2a/card.ts";
+export { TaskStore } from "./src/a2a/tasks.ts";
+
 export { BrokerClient } from "./src/broker/client.ts";
 export { BrokerServer } from "./src/broker/server.ts";
 export { LocalRelay } from "./src/relay/local.ts";

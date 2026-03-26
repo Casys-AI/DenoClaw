@@ -16,6 +16,9 @@ import {
   setupProvider,
   showStatus,
 } from "./src/cli/setup.ts";
+import { BrokerServer } from "./src/broker/server.ts";
+import { LocalRelay } from "./src/relay/local.ts";
+import { ask } from "./src/cli/prompt.ts";
 import { log } from "./src/utils/log.ts";
 import type { Config } from "./src/types.ts";
 
@@ -76,6 +79,77 @@ async function gateway(config: Config): Promise<void> {
   }
 }
 
+async function broker(config: Config): Promise<void> {
+  const port = parseInt(args._[1] as string) || 3000;
+  const srv = new BrokerServer(config);
+  await srv.start(port);
+
+  console.log(`Broker démarré sur port ${port}`);
+  console.log(`  Health: http://localhost:${port}/health`);
+  console.log(`  Tunnel: ws://localhost:${port}/tunnel`);
+
+  const ac = new AbortController();
+  Deno.addSignalListener("SIGINT", () => ac.abort());
+  Deno.addSignalListener("SIGTERM", () => ac.abort());
+
+  try {
+    await new Promise((_, reject) => {
+      ac.signal.addEventListener("abort", () => reject(new Error("shutdown")));
+    });
+  } catch {
+    await srv.stop();
+  }
+}
+
+async function tunnel(): Promise<void> {
+  const brokerUrl = args._[1] as string || await ask("URL du broker WebSocket", "ws://localhost:3000/tunnel");
+  const token = await ask("Token d'invitation", "dev-token");
+
+  const providersCli: string[] = [];
+  const tools: string[] = ["shell", "read_file", "write_file"];
+
+  // Detect available CLI providers
+  for (const bin of ["claude", "codex"]) {
+    try {
+      const cmd = new Deno.Command("which", { args: [bin], stdout: "piped", stderr: "piped" });
+      const { success } = await cmd.output();
+      if (success) {
+        providersCli.push(`${bin}-cli`);
+        console.log(`  ✓ ${bin} CLI détecté`);
+      }
+    } catch {
+      // not found
+    }
+  }
+
+  console.log(`\nCapabilities:`);
+  console.log(`  Providers: ${providersCli.join(", ") || "aucun"}`);
+  console.log(`  Tools: ${tools.join(", ")}`);
+
+  const relay = new LocalRelay({
+    brokerUrl,
+    inviteToken: token,
+    capabilities: { providers: providersCli, tools },
+    autoApprove: true,
+  });
+
+  await relay.connect();
+  console.log("\nTunnel connecté. Ctrl+C pour déconnecter.");
+
+  const ac = new AbortController();
+  Deno.addSignalListener("SIGINT", () => ac.abort());
+  Deno.addSignalListener("SIGTERM", () => ac.abort());
+
+  try {
+    await new Promise((_, reject) => {
+      ac.signal.addEventListener("abort", () => reject(new Error("shutdown")));
+    });
+  } catch {
+    relay.disconnect();
+    console.log("Tunnel déconnecté.");
+  }
+}
+
 function help(): void {
   console.log(`
 DenoClaw — Agent IA Deno-natif
@@ -90,6 +164,10 @@ Usage:
   denoclaw agent -m "msg"     Message unique
   denoclaw gateway            Lancer le gateway multi-canal
   denoclaw status             Voir l'état du système
+
+Infra:
+  denoclaw broker             Lancer le broker (LLM proxy + message router)
+  denoclaw tunnel             Connecter un tunnel local au broker
 
 Publish:
   denoclaw publish agent      Déployer un agent sur Deno Subhosting
@@ -156,6 +234,17 @@ try {
     case "gateway": {
       const config = await getConfig();
       await gateway(config);
+      break;
+    }
+
+    case "broker": {
+      const config = await getConfig();
+      await broker(config);
+      break;
+    }
+
+    case "tunnel": {
+      await tunnel();
       break;
     }
 

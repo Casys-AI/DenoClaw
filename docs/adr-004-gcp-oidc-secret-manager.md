@@ -1,6 +1,6 @@
 # ADR-004 : Zéro secret statique — GCP Secret Manager via Deno Deploy OIDC
 
-**Statut :** Accepté
+**Statut :** Accepté (optionnel — env vars Deploy suffisent pour commencer)
 **Date :** 2026-03-27
 
 ## Contexte

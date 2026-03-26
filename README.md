@@ -37,7 +37,7 @@ deno task start agent
 deno task start agent -- -m "Bonjour DenoClaw"
 
 # Utiliser Ollama local
-deno task start agent -- --model ollama/nemotron-super
+deno task start agent -- --model ollama/nemotron-3-super
 
 # Utiliser Claude CLI
 deno task start agent -- --model claude-cli

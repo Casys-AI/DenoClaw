@@ -29,7 +29,7 @@ export async function setupProvider(): Promise<void> {
       const base = await ask("URL Ollama", "http://localhost:11434/v1");
       config.providers.ollama = { apiBase: base, enabled: true };
       print("\nPour utiliser Ollama :");
-      print("  denoclaw agent --model ollama/nemotron-super");
+      print("  denoclaw agent --model ollama/nemotron-3-super");
     } else {
       config.providers[providerName] = { enabled: true };
       print(`\n${providerName} utilise l'auth locale du CLI.`);
@@ -58,7 +58,7 @@ function getDefaultModel(provider: string): string {
   const defaults: Record<string, string> = {
     anthropic: "anthropic/claude-sonnet-4-6",
     openai: "openai/gpt-4o",
-    ollama: "ollama/nemotron-super",
+    ollama: "ollama/nemotron-3-super",
     "claude-cli": "claude-cli",
     "codex-cli": "codex-cli",
     openrouter: "openrouter/anthropic/claude-sonnet-4-6",

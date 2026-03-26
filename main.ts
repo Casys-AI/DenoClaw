@@ -18,6 +18,7 @@ import {
 } from "./src/cli/setup.ts";
 import { BrokerServer } from "./src/broker/server.ts";
 import { LocalRelay } from "./src/relay/local.ts";
+import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/utils/log.ts";
 import type { Config } from "./src/types.ts";
@@ -196,9 +197,14 @@ Setup:
   denoclaw setup channel      Configurer un channel (Telegram, webhook)
   denoclaw setup agent        Configurer l'agent (modèle, température, etc.)
 
-Usage:
-  denoclaw agent              Chat interactif
+Agents:
+  denoclaw agent              Chat interactif (agent par défaut)
   denoclaw agent -m "msg"     Message unique
+  denoclaw agent list         Lister tous les agents
+  denoclaw agent create <nom> Créer un agent (modèle, permissions, channel)
+  denoclaw agent delete <nom> Supprimer un agent
+
+Usage:
   denoclaw gateway            Lancer le gateway multi-canal
   denoclaw status             Voir l'état du système
 
@@ -266,10 +272,14 @@ try {
       break;
     }
 
-    case "agent":
-    case undefined: {
+    case "agent": {
+      // Sub-commands: list, create, delete
+      if (subcommand === "list") { await listAgents(); break; }
+      if (subcommand === "create") { await createAgent(args._[2] as string); break; }
+      if (subcommand === "delete") { await deleteAgent(args._[2] as string); break; }
+
+      // Default: run agent (chat)
       const config = await getConfigOrDefault();
-      // Si aucun provider configuré → lancer init
       const hasProvider = Object.values(config.providers).some((p) => p?.apiKey || p?.enabled);
       if (!hasProvider) {
         console.log("Aucun provider configuré. Lançons la config initiale.\n");
@@ -277,6 +287,18 @@ try {
         break;
       }
       await agent(config);
+      break;
+    }
+
+    case undefined: {
+      const config2 = await getConfigOrDefault();
+      const hasProvider2 = Object.values(config2.providers).some((p) => p?.apiKey || p?.enabled);
+      if (!hasProvider2) {
+        console.log("Aucun provider configuré. Lançons la config initiale.\n");
+        await init();
+        break;
+      }
+      await agent(config2);
       break;
     }
 

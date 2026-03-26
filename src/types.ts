@@ -156,6 +156,17 @@ export interface AgentDefaults {
   sandbox?: SandboxConfig;
 }
 
+export interface AgentEntry {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+  sandbox?: SandboxConfig;
+  description?: string;
+}
+
+export type ChannelRouting = "direct" | "round-robin" | "by-intent" | "broadcast";
+
 export interface ToolsConfig {
   restrictToWorkspace?: boolean;
   allowedCommands?: string[];
@@ -166,18 +177,24 @@ export interface TelegramConfig {
   enabled: boolean;
   token?: string;
   allowFrom?: string[];
+  agents?: string[];
+  routing?: ChannelRouting;
 }
 
 export interface DiscordConfig {
   enabled: boolean;
   token?: string;
   allowFrom?: string[];
+  agents?: string[];
+  routing?: ChannelRouting;
 }
 
 export interface WebhookConfig {
   enabled: boolean;
   port?: number;
   secret?: string;
+  agents?: string[];
+  routing?: ChannelRouting;
 }
 
 export interface ChannelsConfig {
@@ -186,9 +203,14 @@ export interface ChannelsConfig {
   webhook?: WebhookConfig;
 }
 
+export interface AgentsConfig {
+  defaults: AgentDefaults;
+  registry?: Record<string, AgentEntry>;
+}
+
 export interface Config {
   providers: ProvidersConfig;
-  agents: { defaults: AgentDefaults };
+  agents: AgentsConfig;
   tools: ToolsConfig;
   channels: ChannelsConfig;
   gateway?: { port: number };

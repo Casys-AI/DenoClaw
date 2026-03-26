@@ -3,6 +3,7 @@ import { AnthropicProvider, type BaseProvider, OpenAICompatProvider } from "./ba
 import { CLIProvider } from "./cli.ts";
 import { ProviderError } from "../utils/errors.ts";
 import { log } from "../utils/log.ts";
+import { spanLLMCall } from "../telemetry/mod.ts";
 
 interface ProviderEntry {
   name: string;
@@ -130,6 +131,16 @@ export class ProviderManager {
     tools?: ToolDefinition[],
   ): Promise<LLMResponse> {
     const provider = this.resolveProvider(model);
-    return await provider.complete(messages, model, temperature, maxTokens, tools);
+    const providerName = this.getProviderName(model);
+    return await spanLLMCall(model, providerName, () =>
+      provider.complete(messages, model, temperature, maxTokens, tools)
+    );
+  }
+
+  private getProviderName(model: string): string {
+    for (const entry of PROVIDERS) {
+      if (entry.prefixes.some((p) => model.startsWith(p))) return entry.name;
+    }
+    return "unknown";
   }
 }

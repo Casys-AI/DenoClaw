@@ -1,5 +1,6 @@
 import type { ChannelMessage } from "../types.ts";
 import { log } from "../utils/log.ts";
+import { spanBusPublish } from "../telemetry/mod.ts";
 
 export type MessageHandler = (message: ChannelMessage) => Promise<void>;
 
@@ -60,13 +61,15 @@ export class MessageBus {
    * Otherwise → direct in-memory dispatch.
    */
   async publish(message: ChannelMessage): Promise<void> {
-    log.info(`Bus: message de ${message.channelType} (${message.id})`);
+    await spanBusPublish(message.channelType, message.id, async () => {
+      log.info(`Bus: message de ${message.channelType} (${message.id})`);
 
-    if (this.kvReady && this.kv) {
-      await this.kv.enqueue(message);
-    } else {
-      await this.dispatch(message);
-    }
+      if (this.kvReady && this.kv) {
+        await this.kv.enqueue(message);
+      } else {
+        await this.dispatch(message);
+      }
+    });
   }
 
   /**

@@ -37,17 +37,43 @@ Broker (Deno Deploy)                    GCP
      │  avec la clé récupérée             │
 ```
 
-## Configuration GCP requise
+## Configuration GCP — Setup intégré dans la CLI
 
-1. **Workload Identity Pool** — créer un pool qui trust Deno Deploy comme OIDC provider
-   - Issuer URL : `https://oidc.deno.com`
-   - Audience : l'ID de l'app Deploy
-2. **Service Account** — avec accès `secretmanager.secretAccessor` uniquement
-3. **Secrets** — stocker les clés API dans Secret Manager :
-   - `ANTHROPIC_API_KEY`
-   - `OPENAI_API_KEY`
-   - `DEEPSEEK_API_KEY`
-   - etc.
+La commande `denoclaw publish gateway` guide le setup en 3 étapes :
+
+### Étape 1 : Deploy
+
+```bash
+deployctl deploy --project=denoclaw-gateway --prod main.ts
+```
+
+### Étape 2 : Connexion GCP OIDC (automatisé)
+
+```bash
+deno deploy setup-gcp --org=mon-org --app=denoclaw-gateway
+```
+
+Cette commande interactive configure :
+- **Workload Identity Pool** — trust Deno Deploy comme OIDC provider
+- **Service Account** — avec accès `secretmanager.secretAccessor`
+- Puis entrer le Workload Provider ID + Service Account Email dans le dashboard Deploy
+
+### Étape 3 : Secrets dans Secret Manager
+
+```bash
+# Token d'accès au gateway
+echo -n "mon-token" | gcloud secrets versions add DENOCLAW_API_TOKEN --data-file=-
+
+# Clés API LLM
+echo -n "sk-ant-..." | gcloud secrets versions add ANTHROPIC_API_KEY --data-file=-
+echo -n "sk-..."     | gcloud secrets versions add OPENAI_API_KEY --data-file=-
+```
+
+Secrets stockés :
+- `DENOCLAW_API_TOKEN` — token d'accès au gateway
+- `ANTHROPIC_API_KEY` — clé API Anthropic
+- `OPENAI_API_KEY` — clé API OpenAI
+- etc.
 
 ## Résultat : zéro secret statique
 

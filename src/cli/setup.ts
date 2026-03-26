@@ -1,6 +1,6 @@
 import type { Config } from "../types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
-import { ask, choose, confirm, error, print, success } from "./prompt.ts";
+import { ask, choose, confirm, error, print, success, warn } from "./prompt.ts";
 
 // ── setup provider ──────────────────────────────────────
 
@@ -195,58 +195,120 @@ export async function publishAgent(): Promise<void> {
 // ── publish gateway (Deploy) ────────────────────────────
 
 export async function publishGateway(): Promise<void> {
-  print("\n=== Déployer le gateway sur Deno Deploy ===");
+  print("\n=== Déployer le gateway sur Deno Deploy ===\n");
 
-  // Check if deployctl is available
-  try {
-    const cmd = new Deno.Command("deployctl", { args: ["--version"], stdout: "piped", stderr: "piped" });
-    const { success: ok } = await cmd.output();
-    if (!ok) throw new Error("not found");
-  } catch {
-    error("deployctl non installé.");
-    print("  Installez-le : deno install -Arf jsr:@deno/deployctl");
-    return;
+  // Check prerequisites
+  for (const bin of ["deployctl", "gcloud"]) {
+    try {
+      const cmd = new Deno.Command(bin, { args: ["--version"], stdout: "piped", stderr: "piped" });
+      const { success: ok } = await cmd.output();
+      if (!ok) throw new Error("not found");
+    } catch {
+      error(`${bin} non installé.`);
+      if (bin === "deployctl") print("  deno install -Arf jsr:@deno/deployctl");
+      if (bin === "gcloud") print("  https://cloud.google.com/sdk/docs/install");
+      return;
+    }
   }
 
+  const orgName = await ask("Nom de l'organisation Deno Deploy", "mon-org");
   const projectName = await ask("Nom du projet Deploy", "denoclaw-gateway");
 
-  // Générer un token API pour sécuriser les endpoints
-  const apiToken = crypto.randomUUID();
-  print(`\n⚠ Token API généré pour sécuriser le gateway :`);
-  print(`  DENOCLAW_API_TOKEN=${apiToken}`);
-  print(`\n  Ce token protège /chat, /ws, /tunnel.`);
-  print(`  Sans ce token, les endpoints refusent les requêtes.\n`);
+  // Étape 1 — Deploy
+  print("\n── Étape 1/3 : Déploiement ──\n");
 
   if (await confirm("Déployer main.ts comme gateway ?")) {
-    print("\nDéploiement en cours...");
-
-    // Deploy avec le token en env var
     const cmd = new Deno.Command("deployctl", {
-      args: [
-        "deploy",
-        `--project=${projectName}`,
-        "--prod",
-        `--env=DENOCLAW_API_TOKEN=${apiToken}`,
-        "main.ts",
-      ],
+      args: ["deploy", `--project=${projectName}`, "--prod", "main.ts"],
       stdout: "inherit",
       stderr: "inherit",
     });
 
     const { success: ok } = await cmd.output();
-    if (ok) {
-      success(`Gateway déployé sur https://${projectName}.deno.dev`);
-      print(`\n  Token API : ${apiToken}`);
-      print("  Gardez-le précieusement — c'est la seule façon d'accéder au gateway.\n");
-      print("  Configurez aussi les clés LLM sur le dashboard Deploy :");
-      print("    ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.");
-      print("  Ou mieux : utilisez GCP Secret Manager (voir ADR-004).\n");
-      print("  Test :");
-      print(`    curl -H "Authorization: Bearer ${apiToken}" https://${projectName}.deno.dev/health`);
-    } else {
-      error("Échec du déploiement. Vérifiez deployctl et votre auth.");
+    if (!ok) {
+      error("Échec du déploiement.");
+      return;
+    }
+    success(`Gateway déployé sur https://${projectName}.deno.dev`);
+  }
+
+  // Étape 2 — GCP OIDC
+  print("\n── Étape 2/3 : Connexion GCP (zéro secret statique) ──\n");
+  print("  Configure GCP pour que Deploy puisse accéder à Secret Manager via OIDC.\n");
+
+  if (await confirm("Lancer le setup GCP interactif ?")) {
+    const cmd = new Deno.Command("deno", {
+      args: ["deploy", "setup-gcp", `--org=${orgName}`, `--app=${projectName}`],
+      stdout: "inherit",
+      stderr: "inherit",
+      stdin: "inherit",
+    });
+    await cmd.output();
+
+    print("\n  Après le setup, entre les credentials dans le dashboard Deploy :");
+    print(`  https://dash.deno.com/projects/${projectName}/settings`);
+    print("    → GCP Workload Provider ID");
+    print("    → GCP Service Account Email");
+    print("  Puis teste la connexion.\n");
+  } else {
+    print("\n  Setup manuel : https://docs.deno.com/deploy/manual/gcp");
+    print(`  deno deploy setup-gcp --org=${orgName} --app=${projectName}\n`);
+  }
+
+  // Étape 3 — Secrets dans GCP Secret Manager
+  print("── Étape 3/3 : Stocker les secrets dans GCP Secret Manager ──\n");
+  print("  Tous les secrets (clés API LLM + token gateway) vont dans Secret Manager.");
+  print("  Le gateway les récupère via OIDC au runtime. Zéro env var statique.\n");
+
+  const gcpProject = await ask("Nom du projet GCP");
+
+  if (gcpProject) {
+    const secrets = [
+      { name: "DENOCLAW_API_TOKEN", desc: "Token d'accès au gateway" },
+      { name: "ANTHROPIC_API_KEY", desc: "Clé API Anthropic" },
+      { name: "OPENAI_API_KEY", desc: "Clé API OpenAI (optionnel)" },
+    ];
+
+    for (const secret of secrets) {
+      const value = await ask(`${secret.desc} (${secret.name}, vide = skip)`);
+      if (value) {
+        print(`  Création du secret ${secret.name}...`);
+        const cmd = new Deno.Command("gcloud", {
+          args: [
+            "secrets", "create", secret.name,
+            `--project=${gcpProject}`,
+            "--replication-policy=automatic",
+          ],
+          stdout: "piped",
+          stderr: "piped",
+        });
+        await cmd.output(); // ignore si existe déjà
+
+        const addVersion = new Deno.Command("sh", {
+          args: ["-c", `echo -n "${value}" | gcloud secrets versions add ${secret.name} --project=${gcpProject} --data-file=-`],
+          stdout: "piped",
+          stderr: "piped",
+        });
+        const { success: ok } = await addVersion.output();
+        if (ok) success(`Secret ${secret.name} créé`);
+        else warn(`Échec création ${secret.name} — créez-le manuellement`);
+      }
     }
   }
+
+  print(`
+✓ Déploiement terminé !
+
+  Gateway : https://${projectName}.deno.dev
+  Health  : https://${projectName}.deno.dev/health
+
+  Les secrets sont dans GCP Secret Manager.
+  Le gateway les récupère via OIDC — zéro secret statique.
+
+  Test :
+    curl -H "Authorization: Bearer <DENOCLAW_API_TOKEN>" \\
+      https://${projectName}.deno.dev/health
+`);
 }
 
 // ── status amélioré ─────────────────────────────────────

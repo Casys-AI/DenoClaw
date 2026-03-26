@@ -4,6 +4,7 @@ import { BaseTool } from "./registry.ts";
 export class ShellTool extends BaseTool {
   name = "shell";
   description = "Execute shell commands (dry_run by default)";
+  permissions = ["run" as const];
 
   private allowedCommands?: string[];
   private deniedCommands?: string[];

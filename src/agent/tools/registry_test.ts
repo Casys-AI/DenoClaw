@@ -5,6 +5,7 @@ import { BaseTool, ToolRegistry } from "./registry.ts";
 class MockTool extends BaseTool {
   name = "mock";
   description = "A mock tool for testing";
+  permissions = [];
 
   getDefinition(): ToolDefinition {
     return {
@@ -25,6 +26,7 @@ class MockTool extends BaseTool {
 class FailTool extends BaseTool {
   name = "fail";
   description = "Always fails";
+  permissions = [];
 
   getDefinition(): ToolDefinition {
     return {

@@ -99,6 +99,16 @@ export interface ChannelMessage {
   metadata?: Record<string, unknown>;
 }
 
+// ── Sandbox permissions ───────────────────────────────────
+
+export type SandboxPermission = "read" | "write" | "run" | "net" | "env" | "ffi";
+
+export interface SandboxConfig {
+  allowedPermissions: SandboxPermission[];
+  networkAllow?: string[];
+  maxDurationSec?: number;
+}
+
 // ── Skills ────────────────────────────────────────────────
 
 export interface Skill {
@@ -143,6 +153,7 @@ export interface AgentDefaults {
   temperature: number;
   maxTokens: number;
   systemPrompt?: string;
+  sandbox?: SandboxConfig;
 }
 
 export interface ToolsConfig {

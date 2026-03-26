@@ -5,6 +5,7 @@ import { dirname } from "@std/path";
 export class ReadFileTool extends BaseTool {
   name = "read_file";
   description = "Read contents of a file";
+  permissions = ["read" as const];
 
   getDefinition(): ToolDefinition {
     return {
@@ -46,6 +47,7 @@ export class ReadFileTool extends BaseTool {
 export class WriteFileTool extends BaseTool {
   name = "write_file";
   description = "Write content to a file (dry_run by default)";
+  permissions = ["write" as const];
 
   getDefinition(): ToolDefinition {
     return {

@@ -1,9 +1,11 @@
-import type { ToolDefinition, ToolResult } from "../../types.ts";
+import type { SandboxPermission, ToolDefinition, ToolResult } from "../../types.ts";
 import { log } from "../../utils/log.ts";
 
 export abstract class BaseTool {
   abstract name: string;
   abstract description: string;
+  /** Permissions requises pour exécuter cet outil en Sandbox (ADR-005) */
+  abstract permissions: SandboxPermission[];
   abstract getDefinition(): ToolDefinition;
   abstract execute(args: Record<string, unknown>): Promise<ToolResult>;
 

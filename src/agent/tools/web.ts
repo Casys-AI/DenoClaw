@@ -4,6 +4,7 @@ import { BaseTool } from "./registry.ts";
 export class WebFetchTool extends BaseTool {
   name = "web_fetch";
   description = "Fetch content from a URL";
+  permissions = ["net" as const];
 
   getDefinition(): ToolDefinition {
     return {

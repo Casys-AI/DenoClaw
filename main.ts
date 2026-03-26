@@ -1,15 +1,22 @@
 #!/usr/bin/env -S deno run --unstable-kv --unstable-cron --allow-all
 
 import { parseArgs } from "@std/cli/parse-args";
-import { getConfig, getConfigOrDefault, saveConfig } from "./src/config/mod.ts";
+import { getConfig, getConfigOrDefault } from "./src/config/mod.ts";
 import { AgentLoop } from "./src/agent/loop.ts";
 import { Gateway } from "./src/gateway/mod.ts";
 import { ConsoleChannel } from "./src/channels/console.ts";
 import { getChannelManager } from "./src/channels/manager.ts";
 import { getMessageBus } from "./src/bus/mod.ts";
 import { getSessionManager } from "./src/session/mod.ts";
+import {
+  publishAgent,
+  publishGateway,
+  setupAgent,
+  setupChannel,
+  setupProvider,
+  showStatus,
+} from "./src/cli/setup.ts";
 import { log } from "./src/utils/log.ts";
-import { createDefaultConfig } from "./src/config/mod.ts";
 import type { Config } from "./src/types.ts";
 
 const args = parseArgs(Deno.args, {
@@ -19,53 +26,28 @@ const args = parseArgs(Deno.args, {
 });
 
 const command = args._[0] as string | undefined;
+const subcommand = args._[1] as string | undefined;
 
-async function onboard(): Promise<void> {
-  const config = createDefaultConfig();
-
-  // Check for API keys in env
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
-
-  if (anthropicKey) {
-    config.providers.anthropic = { apiKey: anthropicKey };
-    log.info("Clé Anthropic détectée depuis l'environnement");
-  }
-  if (openaiKey) {
-    config.providers.openai = { apiKey: openaiKey };
-    log.info("Clé OpenAI détectée depuis l'environnement");
-  }
-
-  if (!anthropicKey && !openaiKey) {
-    console.log("\nAucune clé API détectée. Définissez au moins une variable :");
-    console.log("  export ANTHROPIC_API_KEY=sk-...");
-    console.log("  export OPENAI_API_KEY=sk-...\n");
-  }
-
-  await saveConfig(config);
-  console.log("Configuration initialisée. Lancez 'denoclaw agent' pour discuter.");
-}
+// ── Commands ──────────────────────────────────────────────
 
 async function agent(config: Config): Promise<void> {
   const sessionId = args.session as string;
 
   if (args.message) {
-    // Single message mode
     const loop = new AgentLoop(sessionId, config, args.model ? { model: args.model } : undefined);
     const result = await loop.processMessage(args.message as string);
     console.log(result.content);
     return;
   }
 
-  // Interactive console mode
   const cm = getChannelManager();
   const bus = getMessageBus();
   await bus.init();
   const sm = getSessionManager();
-  const console_ch = new ConsoleChannel();
+  const consoleCh = new ConsoleChannel();
 
-  await console_ch.initialize();
-  cm.register(console_ch);
+  await consoleCh.initialize();
+  cm.register(consoleCh);
 
   bus.subscribeAll(async (msg) => {
     await sm.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
@@ -81,7 +63,6 @@ async function gateway(config: Config): Promise<void> {
   const gw = new Gateway(config);
   await gw.start();
 
-  // Wait for shutdown signal
   const ac = new AbortController();
   Deno.addSignalListener("SIGINT", () => ac.abort());
   Deno.addSignalListener("SIGTERM", () => ac.abort());
@@ -95,38 +76,24 @@ async function gateway(config: Config): Promise<void> {
   }
 }
 
-async function status(): Promise<void> {
-  try {
-    const config = await getConfig();
-    const providers = Object.entries(config.providers)
-      .filter(([_, v]) => v?.apiKey)
-      .map(([k]) => k);
-
-    const sm = getSessionManager();
-    const sessions = await sm.getActive();
-
-    console.log("=== DenoClaw Status ===");
-    console.log(`Providers configurés : ${providers.join(", ") || "aucun"}`);
-    console.log(`Modèle par défaut    : ${config.agents.defaults.model}`);
-    console.log(`Sessions actives     : ${sessions.length}`);
-    console.log(`Channels configurés  : ${Object.keys(config.channels).join(", ") || "aucun"}`);
-    sm.close();
-  } catch (e) {
-    console.error(`Erreur : ${(e as Error).message}`);
-  }
-}
-
 function help(): void {
   console.log(`
 DenoClaw — Agent IA Deno-natif
 
+Setup:
+  denoclaw setup provider     Configurer un provider LLM
+  denoclaw setup channel      Configurer un channel (Telegram, webhook)
+  denoclaw setup agent        Configurer l'agent (modèle, température, etc.)
+
 Usage:
-  denoclaw onboard              Initialiser la configuration
-  denoclaw agent                Chat interactif
-  denoclaw agent -m "message"   Message unique
-  denoclaw gateway              Lancer le gateway multi-canal
-  denoclaw status               Voir l'état du système
-  denoclaw help                 Afficher cette aide
+  denoclaw agent              Chat interactif
+  denoclaw agent -m "msg"     Message unique
+  denoclaw gateway            Lancer le gateway multi-canal
+  denoclaw status             Voir l'état du système
+
+Publish:
+  denoclaw publish agent      Déployer un agent sur Deno Subhosting
+  denoclaw publish gateway    Déployer le gateway sur Deno Deploy
 
 Options:
   -m, --message    Envoyer un message unique
@@ -134,9 +101,13 @@ Options:
   --model          Surcharger le modèle LLM
 
 Exemples:
-  denoclaw agent -m "Bonjour, comment ça va ?"
-  denoclaw agent --model openai/gpt-4o -m "Hello"
-  ANTHROPIC_API_KEY=sk-... denoclaw agent
+  denoclaw setup provider                      # configurer Anthropic, Ollama, etc.
+  denoclaw setup channel                       # configurer Telegram
+  denoclaw agent -m "Bonjour"                  # message unique
+  denoclaw agent --model ollama/llama3.2       # utiliser Ollama
+  denoclaw agent --model claude-cli            # utiliser Claude Code CLI
+  denoclaw gateway                             # lancer le serveur multi-canal
+  denoclaw publish gateway                     # déployer sur Deno Deploy
 `);
 }
 
@@ -144,23 +115,56 @@ Exemples:
 
 try {
   switch (command) {
-    case "onboard":
-      await onboard();
+    case "setup":
+      switch (subcommand) {
+        case "provider":
+          await setupProvider();
+          break;
+        case "channel":
+          await setupChannel();
+          break;
+        case "agent":
+          await setupAgent();
+          break;
+        default:
+          console.log("Usage: denoclaw setup [provider|channel|agent]");
+          break;
+      }
       break;
+
+    case "publish":
+      switch (subcommand) {
+        case "agent":
+          await publishAgent();
+          break;
+        case "gateway":
+          await publishGateway();
+          break;
+        default:
+          console.log("Usage: denoclaw publish [agent|gateway]");
+          break;
+      }
+      break;
+
     case "agent":
     case undefined: {
       const config = await getConfigOrDefault();
       await agent(config);
       break;
     }
+
     case "gateway": {
       const config = await getConfig();
       await gateway(config);
       break;
     }
-    case "status":
-      await status();
+
+    case "status": {
+      const config = await getConfigOrDefault();
+      await showStatus(config);
       break;
+    }
+
     case "help":
     default:
       help();

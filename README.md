@@ -24,8 +24,11 @@ Tout est natif Deno 2.7+ :
 # Installer Deno 2.7+
 curl -fsSL https://deno.land/install.sh | sh
 
-# Configurer (détecte les clés API depuis l'env)
-ANTHROPIC_API_KEY=sk-... deno task start onboard
+# Configurer un provider LLM (interactif)
+deno task start setup provider
+
+# Configurer Telegram
+deno task start setup channel
 
 # Chat interactif
 deno task start agent
@@ -33,8 +36,17 @@ deno task start agent
 # Message unique
 deno task start agent -- -m "Bonjour DenoClaw"
 
-# Gateway multi-canal (HTTP + WebSocket)
+# Utiliser Ollama local
+deno task start agent -- --model ollama/llama3.2
+
+# Utiliser Claude CLI
+deno task start agent -- --model claude-cli
+
+# Gateway multi-canal (HTTP + WebSocket + Telegram)
 deno task start gateway
+
+# Déployer sur Deno Deploy
+deno task start publish gateway
 ```
 
 ## Architecture

@@ -169,15 +169,16 @@ const result = await fetch(card.url, {
 }).then(r => r.json());
 ```
 
-## Modules à créer
+## Modules implémentés
 
-| Module | Rôle |
-|---|---|
-| `src/a2a/types.ts` | Types A2A (AgentCard, Task, Message, Part, Skill) |
-| `src/a2a/server.ts` | Serveur A2A (expose un agent DenoClaw via JSON-RPC) |
-| `src/a2a/client.ts` | Client A2A (appeler un agent distant) |
-| `src/a2a/card.ts` | Génération d'AgentCard depuis le registry |
-| `src/a2a/tasks.ts` | Task store (KV-backed lifecycle) |
+| Module | Rôle | Statut |
+|---|---|---|
+| `src/a2a/types.ts` | Types A2A v1.0 complets (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE) | **fait** |
+| `src/a2a/server.ts` | Serveur A2A : JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming | **fait** |
+| `src/a2a/client.ts` | Client A2A : discover, send, stream (async generator SSE), getTask, cancelTask | **fait** |
+| `src/a2a/card.ts` | Génération d'AgentCard depuis le registry config (permissions → skills) | **fait** |
+| `src/a2a/tasks.ts` | Task store KV (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal state protection) | **fait** |
+| `src/broker/server.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) dans le routage inter-agents | **fait** |
 
 ## Conséquences
 

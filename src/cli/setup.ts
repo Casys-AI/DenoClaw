@@ -192,11 +192,11 @@ export async function setupAgent(): Promise<void> {
 // ── publish agent (Subhosting) ──────────────────────────
 
 export async function publishAgent(): Promise<void> {
-  print("\n=== Publier un agent sur Deno Subhosting ===");
+  print("\n=== Publier un agent sur Deno Subhosting ===\n");
 
   const orgId = await ask("Organization ID Subhosting");
   const token = await ask("Access token Subhosting");
-  const projectName = await ask("Nom du projet", "denoclaw-agent");
+  const agentName = await ask("Nom de l'agent", "denoclaw-agent-1");
 
   if (!orgId || !token) {
     error("Organization ID et token requis.");
@@ -204,34 +204,168 @@ export async function publishAgent(): Promise<void> {
     return;
   }
 
-  print("\nCréation du projet...");
+  // Lire config locale pour le modèle et les permissions sandbox
+  const config = await getConfigOrDefault();
+  const model = config.agents.defaults.model;
+  const sandboxPerms = config.agents.defaults.sandbox?.allowedPermissions || ["read", "write", "run", "net"];
+
+  print(`  Agent: ${agentName}`);
+  print(`  Modèle: ${model}`);
+  print(`  Sandbox permissions: ${sandboxPerms.join(", ")}`);
+
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const apiBase = "https://api.deno.com/v1";
+
   try {
-    // Create project
-    const projRes = await fetch(`https://api.deno.com/v1/organizations/${orgId}/projects`, {
+    // 1. Créer le projet
+    print("\n1. Création du projet Subhosting...");
+    const projRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: projectName }),
+      headers,
+      body: JSON.stringify({ name: agentName }),
     });
 
-    if (!projRes.ok) {
-      const body = await projRes.text();
-      error(`Échec création projet : ${projRes.status} ${body}`);
+    if (!projRes.ok && (await projRes.text()).includes("already exists")) {
+      print("   Projet existe déjà, on continue.");
+    } else if (!projRes.ok) {
+      error(`Échec création projet : ${projRes.status}`);
+      return;
+    } else {
+      const project = await projRes.json() as { id: string };
+      success(`Projet créé : ${project.id}`);
+    }
+
+    // 2. Lister les projets pour trouver l'ID
+    const listRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, { headers });
+    const projects = await listRes.json() as { id: string; name: string }[];
+    const project = projects.find((p) => p.name === agentName);
+    if (!project) {
+      error("Projet introuvable après création");
       return;
     }
 
-    const project = await projRes.json() as { id: string; name: string };
-    success(`Projet créé : ${project.name} (${project.id})`);
+    // 3. Créer le deployment avec le code de l'AgentRuntime
+    print("2. Déploiement de l'AgentRuntime...");
 
-    print("\nPour déployer, poussez le code vers le projet :");
-    print(`  deployctl deploy --project=${project.id}`);
-    print("\nOu via l'API Subhosting :");
-    print(`  POST /v1/projects/${project.id}/deployments`);
+    const entrypoint = generateAgentEntrypoint(agentName, model, sandboxPerms);
+
+    const deployRes = await fetch(`${apiBase}/projects/${project.id}/deployments`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        entryPointUrl: "main.ts",
+        assets: {
+          "main.ts": { kind: "file", content: entrypoint, encoding: "utf-8" },
+        },
+        envVars: {
+          DENOCLAW_AGENT_ID: agentName,
+          DENOCLAW_MODEL: model,
+        },
+      }),
+    });
+
+    if (!deployRes.ok) {
+      const body = await deployRes.text();
+      error(`Échec déploiement : ${deployRes.status} ${body}`);
+      return;
+    }
+
+    const deployment = await deployRes.json() as { id: string; domainMappings?: { domain: string }[] };
+    const domain = deployment.domainMappings?.[0]?.domain;
+
+    success(`Agent déployé : ${deployment.id}`);
+    if (domain) print(`  URL : https://${domain}`);
+
+    print(`
+✓ Agent "${agentName}" publié sur Subhosting !
+
+  L'agent écoute les messages via KV Queues.
+  Il communique avec le broker pour les LLM calls et tool execution.
+
+  Pour envoyer un message à cet agent :
+    Depuis un autre agent : broker.sendToAgent("${agentName}", "instruction")
+    Depuis le broker : route un message avec to="${agentName}"
+`);
   } catch (e) {
     error(`Erreur : ${(e as Error).message}`);
   }
+}
+
+/**
+ * Génère le code entrypoint pour un agent Subhosting.
+ * C'est un AgentRuntime minimal qui écoute KV Queues.
+ */
+function generateAgentEntrypoint(agentId: string, model: string, permissions: string[]): string {
+  return `// Auto-generated DenoClaw Agent Runtime
+// Agent: ${agentId} | Model: ${model}
+
+const kv = await Deno.openKv();
+const agentId = Deno.env.get("DENOCLAW_AGENT_ID") || "${agentId}";
+const model = Deno.env.get("DENOCLAW_MODEL") || "${model}";
+
+console.log("Agent started:", agentId, "model:", model);
+
+// Register agent status
+await kv.set(["agents", agentId, "status"], {
+  status: "running",
+  startedAt: new Date().toISOString(),
+  model,
+  sandboxPermissions: ${JSON.stringify(permissions)},
+});
+
+// Store agent config for broker permission checks
+await kv.set(["agents", agentId, "config"], {
+  model,
+  sandbox: { allowedPermissions: ${JSON.stringify(permissions)} },
+});
+
+// Listen for messages via KV Queue
+kv.listenQueue(async (raw) => {
+  const msg = raw;
+  if (msg.to !== agentId) return;
+
+  console.log("Message received:", msg.type, "from:", msg.from);
+
+  if (msg.type === "agent_message") {
+    const payload = msg.payload;
+
+    // Load conversation history
+    const historyEntry = await kv.get(["memory", agentId, msg.from]);
+    const history = historyEntry.value || [];
+    history.push({ role: "user", content: payload.instruction });
+
+    // Request LLM completion via broker
+    const llmRequestId = crypto.randomUUID();
+    await kv.enqueue({
+      id: llmRequestId,
+      from: agentId,
+      to: "broker",
+      type: "llm_request",
+      payload: { messages: [{ role: "system", content: "You are a helpful agent." }, ...history], model },
+      timestamp: new Date().toISOString(),
+    });
+
+    // Note: response comes back via KV Queue as llm_response
+    // A full implementation would use a promise-based request/response pattern
+    // (see BrokerClient in the full DenoClaw SDK)
+  }
+});
+
+// Heartbeat
+Deno.cron("heartbeat", "*/5 * * * *", async () => {
+  await kv.set(["agents", agentId, "status"], {
+    status: "alive",
+    lastHeartbeat: new Date().toISOString(),
+    model,
+  });
+});
+
+// Keep alive
+Deno.serve({ port: 8000 }, () => new Response("DenoClaw Agent: " + agentId));
+`;
 }
 
 // ── publish gateway (Deploy) ────────────────────────────

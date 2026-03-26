@@ -1,8 +1,17 @@
 import type { BrokerMessage, LLMRequest, ToolRequest, TunnelCapabilities } from "./types.ts";
-import type { Config } from "../types.ts";
+import type { Config, SandboxPermission } from "../types.ts";
 import { ProviderManager } from "../providers/manager.ts";
+import { SandboxManager } from "../sandbox/mod.ts";
 import { generateId } from "../utils/helpers.ts";
 import { log } from "../utils/log.ts";
+
+/** Known tool → permissions mapping (ADR-005) */
+const TOOL_PERMISSIONS: Record<string, SandboxPermission[]> = {
+  shell: ["run"],
+  read_file: ["read"],
+  write_file: ["write"],
+  web_fetch: ["net"],
+};
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -14,13 +23,17 @@ import { log } from "../utils/log.ts";
  * - Agent lifecycle (Subhosting + Sandbox CRUD)
  */
 export class BrokerServer {
+  private config: Config;
   private providers: ProviderManager;
+  private sandbox: SandboxManager;
   private kv: Deno.Kv | null = null;
   private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities }>();
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config) {
+    this.config = config;
     this.providers = new ProviderManager(config);
+    this.sandbox = new SandboxManager();
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -106,18 +119,107 @@ export class BrokerServer {
     await kv.enqueue(reply);
   }
 
-  // ── Tool routing ────────────────────────────────────
+  // ── Tool routing (ADR-005: permissions par intersection) ─
 
   private async handleToolRequest(msg: BrokerMessage): Promise<void> {
     const req = msg.payload as ToolRequest;
+    const kv = await this.getKv();
 
+    // 1. Check permissions (intersection tool × agent)
+    const toolPerms = TOOL_PERMISSIONS[req.tool] || [];
+    const agentConfig = await kv.get<{ sandbox?: { allowedPermissions?: string[] } }>(
+      ["agents", msg.from, "config"],
+    );
+    const agentAllowed = (agentConfig.value?.sandbox?.allowedPermissions ||
+      ["read", "write", "run", "net"]) as SandboxPermission[];
+
+    const granted = toolPerms.filter((p) => agentAllowed.includes(p));
+    const denied = toolPerms.filter((p) => !agentAllowed.includes(p));
+
+    if (denied.length > 0) {
+      await this.sendStructuredError(msg.from, msg.id, {
+        code: "SANDBOX_PERMISSION_DENIED",
+        context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
+        recovery: `Add ${JSON.stringify(denied)} to agent sandbox.allowedPermissions`,
+      });
+      return;
+    }
+
+    // 2. Try tunnel first (local tools)
     const tunnel = this.findTunnelForTool(req.tool);
     if (tunnel) {
       await this.routeToTunnel(tunnel, msg);
       return;
     }
 
-    await this.sendError(msg.from, msg.id, `No tunnel available for tool: ${req.tool}`);
+    // 3. Execute in Sandbox (éphémère)
+    try {
+      const code = this.buildSandboxCode(req.tool, req.args);
+      const networkAllow = this.config.agents?.defaults?.sandbox?.networkAllow || [];
+      const maxDuration = this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
+
+      log.info(`Sandbox: ${req.tool} avec permissions ${JSON.stringify(granted)}`);
+
+      const result = await this.sandbox.run(code, {
+        memoryMb: 256,
+        timeoutSec: maxDuration,
+        networkAllow,
+      });
+
+      const reply: BrokerMessage = {
+        id: msg.id,
+        from: "broker",
+        to: msg.from,
+        type: "tool_response",
+        payload: {
+          success: result.exitCode === 0,
+          output: result.stdout,
+          error: result.exitCode !== 0
+            ? { code: "SANDBOX_EXEC_FAILED", context: { stderr: result.stderr, exitCode: result.exitCode }, recovery: "Check tool arguments" }
+            : undefined,
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      await kv.enqueue(reply);
+    } catch (e) {
+      await this.sendStructuredError(msg.from, msg.id, {
+        code: "SANDBOX_CREATE_FAILED",
+        context: { tool: req.tool, message: (e as Error).message },
+        recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
+      });
+    }
+  }
+
+  /**
+   * Build Deno code to execute a tool inside a Sandbox.
+   */
+  private buildSandboxCode(tool: string, args: Record<string, unknown>): string {
+    switch (tool) {
+      case "shell":
+        return `
+const cmd = new Deno.Command("sh", {
+  args: ["-c", ${JSON.stringify(args.command || "")}],
+  stdout: "piped", stderr: "piped",
+});
+const { stdout, stderr } = await cmd.output();
+console.log(new TextDecoder().decode(stdout));
+if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
+`;
+      case "read_file":
+        return `console.log(await Deno.readTextFile(${JSON.stringify(args.path || "")}));`;
+      case "write_file":
+        return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${JSON.stringify(args.content || "")});
+console.log("Written: ${args.path}");`;
+      case "web_fetch": {
+        const method = (args.method as string) || "GET";
+        return `const r = await fetch(${JSON.stringify(args.url || "")}, { method: ${JSON.stringify(method)} });
+console.log("HTTP " + r.status);
+console.log(await r.text());`;
+      }
+      default:
+        return `console.error("Unknown tool: ${tool}");`;
+    }
   }
 
   // ── Inter-agent routing ─────────────────────────────
@@ -235,13 +337,25 @@ export class BrokerServer {
   // ── Helpers ─────────────────────────────────────────
 
   private async sendError(to: string, requestId: string, message: string): Promise<void> {
+    await this.sendStructuredError(to, requestId, {
+      code: "BROKER_ERROR",
+      context: { message },
+      recovery: "Check broker logs",
+    });
+  }
+
+  private async sendStructuredError(
+    to: string,
+    requestId: string,
+    error: { code: string; context?: Record<string, unknown>; recovery?: string },
+  ): Promise<void> {
     const kv = await this.getKv();
     const reply: BrokerMessage = {
       id: requestId,
       from: "broker",
       to,
       type: "error",
-      payload: { code: "BROKER_ERROR", context: { message }, recovery: "Check broker logs" },
+      payload: error,
       timestamp: new Date().toISOString(),
     };
     await kv.enqueue(reply);

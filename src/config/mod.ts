@@ -24,6 +24,7 @@ function mergeEnvConfig(config: Config): Config {
     DEEPSEEK_API_KEY: "deepseek",
     GROQ_API_KEY: "groq",
     GEMINI_API_KEY: "gemini",
+    OLLAMA_API_KEY: "ollama",
   };
 
   const providers = { ...config.providers };

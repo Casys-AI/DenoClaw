@@ -12,10 +12,9 @@ function makeConfig(overrides?: Partial<Config["providers"]>): Config {
   };
 }
 
-Deno.test("ProviderManager resolves Ollama without API key", async () => {
-  const pm = new ProviderManager(makeConfig());
+Deno.test("ProviderManager resolves Ollama with API key", async () => {
+  const pm = new ProviderManager(makeConfig({ ollama: { apiKey: "ollama-key" } }));
 
-  // Mock fetch for Ollama
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
     Promise.resolve(new Response(JSON.stringify({
@@ -35,7 +34,7 @@ Deno.test("ProviderManager resolves Ollama without API key", async () => {
 });
 
 Deno.test("ProviderManager resolves nemotron prefix to Ollama", async () => {
-  const pm = new ProviderManager(makeConfig());
+  const pm = new ProviderManager(makeConfig({ ollama: { apiKey: "key" } }));
 
   const original = globalThis.fetch;
   globalThis.fetch = (() =>

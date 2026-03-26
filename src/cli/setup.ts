@@ -7,7 +7,7 @@ import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 const PROVIDER_OPTIONS = [
   "anthropic  — Claude (API key)",
   "openai     — GPT (API key)",
-  "ollama     — Local LLM (no key)",
+  "ollama     — Ollama Cloud (API key)",
   "claude-cli — Claude Code CLI (local auth)",
   "codex-cli  — Codex CLI (local auth)",
   "openrouter — Multi-model gateway (API key)",
@@ -16,7 +16,7 @@ const PROVIDER_OPTIONS = [
   "gemini     — Google Gemini (API key)",
 ];
 
-const NO_KEY_PROVIDERS = new Set(["ollama", "claude-cli", "codex-cli"]);
+const NO_KEY_PROVIDERS = new Set(["claude-cli", "codex-cli"]);
 
 export async function setupProvider(): Promise<void> {
   const config = await getConfigOrDefault();
@@ -25,13 +25,7 @@ export async function setupProvider(): Promise<void> {
   const providerName = choice.split("—")[0].trim().split(/\s+/)[0];
 
   if (NO_KEY_PROVIDERS.has(providerName)) {
-    if (providerName === "ollama") {
-      const base = await ask("URL Ollama", "http://localhost:11434/v1");
-      config.providers.ollama = { apiBase: base, enabled: true };
-      print("\nPour utiliser Ollama :");
-      print("  denoclaw agent --model ollama/nemotron-3-super");
-
-    } else if (providerName === "claude-cli" || providerName === "codex-cli") {
+    if (providerName === "claude-cli" || providerName === "codex-cli") {
       const binary = providerName.replace("-cli", "");
 
       // Vérifier si le CLI est installé

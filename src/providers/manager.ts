@@ -49,12 +49,11 @@ const PROVIDERS: ProviderEntry[] = [
     requiresKey: true,
     factory: (k, b) => new OpenAICompatProvider(k, b, "https://generativelanguage.googleapis.com/v1beta/openai"),
   },
-  // Ollama — local LLM, pas de clé requise
   {
     name: "ollama",
     prefixes: ["ollama/", "nemotron", "llama", "mistral", "phi", "qwen2", "codellama"],
-    requiresKey: false,
-    factory: (_k, b) => new OpenAICompatProvider("ollama", b, "http://localhost:11434/v1"),
+    requiresKey: true,
+    factory: (k, b) => new OpenAICompatProvider(k, b, "https://api.ollama.com/v1"),
   },
   // CLI providers — shell out vers les CLI locaux
   {

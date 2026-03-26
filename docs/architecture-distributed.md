@@ -274,7 +274,7 @@ for await (const entries of kv.watch([
 
 ## Sécurité (voir ADR-003)
 
-Principe : **zéro secret statique sauf quand c'est imposé** (clés API LLM).
+Principe : **zéro secret statique.** Partout.
 
 | Frontière | Mécanisme | Secret statique ? |
 |---|---|---|
@@ -282,9 +282,9 @@ Principe : **zéro secret statique sauf quand c'est imposé** (clés API LLM).
 | Sandbox → Broker | Credentials materialization (token invisible au code) | Non |
 | Broker → Sandbox API | `@deno/oidc` (token éphémère) | Non |
 | Tunnel → Broker | OIDC éphémère / token d'invitation à usage unique | Non |
-| Broker → LLM API | API key (env var chiffrée Deploy) | Oui (imposé) |
+| Broker → LLM API | GCP Secret Manager via OIDC (ADR-004) | **Non** |
+| VPS CLI auth | Token CLI local, auth initiale via tunnel (one-shot) | Non |
 | Inter-agents | Le broker valide chaque message (allowedPeers) | N/A |
-| Capabilities tunnels | Chaque tunnel déclare ce qu'il expose | N/A |
 | Transport | TLS (wss://) pour tous les WebSocket | N/A |
 
 ## Avantages du LLM Proxy centralisé

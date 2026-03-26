@@ -48,15 +48,11 @@ Avec credentials materialization :
 
 Couplé au network allowlist (la Sandbox ne peut parler qu'au broker), c'est une double protection.
 
-### Broker → API LLM : Clés API statiques (pas le choix)
+### Broker → API LLM : Via GCP Secret Manager (voir ADR-004)
 
-Anthropic et OpenAI exigent des clés API statiques. Pas de support OIDC côté fournisseur.
+Les clés API LLM sont stockées dans **GCP Secret Manager**. Le broker les récupère via OIDC (Deno Deploy est un OIDC provider natif → Workload Identity Federation → Service Account → Secret Manager).
 
-- Les clés sont stockées en env vars chiffrées sur Deno Deploy
-- Elles ne quittent jamais le broker
-- Rotation manuelle nécessaire
-
-C'est le seul point de l'architecture qui utilise des secrets statiques.
+**Plus aucun secret statique dans l'architecture.** Voir ADR-004 pour les détails.
 
 ## Résumé
 
@@ -65,7 +61,7 @@ C'est le seul point de l'architecture qui utilise des secrets statiques.
 | Broker → Sandbox API | `@deno/oidc` | Non |
 | Tunnel → Broker | OIDC éphémère / token d'invitation | Non |
 | Sandbox → Broker | Credentials materialization | Non (invisible au code) |
-| Broker → LLM API | API key (env var Deploy) | Oui (imposé par les fournisseurs) |
+| Broker → LLM API | GCP Secret Manager via OIDC (ADR-004) | **Non** |
 
 ## Conséquences
 

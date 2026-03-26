@@ -107,3 +107,7 @@ export function spanBusPublish<T>(channelType: string, messageId: string, fn: ()
     "bus.message_id": messageId,
   }, fn);
 }
+
+// Re-export metrics — tout dans telemetry/
+export { MetricsCollector } from "./metrics.ts";
+export type { AgentMetrics } from "./metrics.ts";

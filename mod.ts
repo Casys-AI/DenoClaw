@@ -33,7 +33,8 @@ export { BrokerClient } from "./src/broker/client.ts";
 export { BrokerServer } from "./src/broker/server.ts";
 export { LocalRelay } from "./src/relay/local.ts";
 export { AgentRuntime } from "./src/subhosting/agent_runtime.ts";
-export { initTelemetry, spanAgentLoop, spanBusPublish, spanLLMCall, spanToolCall, withSpan } from "./src/telemetry/mod.ts";
+export { initTelemetry, MetricsCollector, spanAgentLoop, spanBusPublish, spanLLMCall, spanToolCall, withSpan } from "./src/telemetry/mod.ts";
+export type { AgentMetrics } from "./src/telemetry/metrics.ts";
 
 export type {
   AgentConfig,

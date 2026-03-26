@@ -2,6 +2,7 @@ import type { BrokerMessage, LLMRequest, ToolRequest, TunnelCapabilities } from 
 import type { Config, SandboxPermission } from "../types.ts";
 import { ProviderManager } from "../providers/manager.ts";
 import { SandboxManager } from "../sandbox/mod.ts";
+import { MetricsCollector } from "../telemetry/metrics.ts";
 import { generateId } from "../utils/helpers.ts";
 import { log } from "../utils/log.ts";
 
@@ -32,6 +33,7 @@ export class BrokerServer {
   private config: Config;
   private providers: ProviderManager;
   private sandbox: SandboxManager;
+  private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
   private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities }>();
   private httpServer?: Deno.HttpServer;
@@ -40,6 +42,7 @@ export class BrokerServer {
     this.config = config;
     this.providers = new ProviderManager(config);
     this.sandbox = new SandboxManager();
+    this.metrics = new MetricsCollector();
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -99,6 +102,7 @@ export class BrokerServer {
     }
 
     // Otherwise: direct API call (broker has the keys)
+    const start = performance.now();
     const response = await this.providers.complete(
       req.messages.map((m) => ({
         role: m.role as "system" | "user" | "assistant" | "tool",
@@ -112,6 +116,14 @@ export class BrokerServer {
       req.maxTokens,
       req.tools as undefined,
     );
+    const latency = performance.now() - start;
+
+    // Record metrics
+    const provider = req.model.split("/")[0] || req.model;
+    await this.metrics.recordLLMCall(msg.from, provider, {
+      prompt: response.usage?.promptTokens || 0,
+      completion: response.usage?.completionTokens || 0,
+    }, latency);
 
     const reply: BrokerMessage = {
       id: msg.id,
@@ -152,9 +164,11 @@ export class BrokerServer {
     }
 
     // 2. Try tunnel first (local tools)
+    const toolStart = performance.now();
     const tunnel = this.findTunnelForTool(req.tool);
     if (tunnel) {
       await this.routeToTunnel(tunnel, msg);
+      await this.metrics.recordToolCall(msg.from, req.tool, true, performance.now() - toolStart);
       return;
     }
 
@@ -172,15 +186,18 @@ export class BrokerServer {
         networkAllow,
       });
 
+      const toolSuccess = result.exitCode === 0;
+      await this.metrics.recordToolCall(msg.from, req.tool, toolSuccess, performance.now() - toolStart);
+
       const reply: BrokerMessage = {
         id: msg.id,
         from: "broker",
         to: msg.from,
         type: "tool_response",
         payload: {
-          success: result.exitCode === 0,
+          success: toolSuccess,
           output: result.stdout,
-          error: result.exitCode !== 0
+          error: !toolSuccess
             ? { code: "SANDBOX_EXEC_FAILED", context: { stderr: result.stderr, exitCode: result.exitCode }, recovery: "Check tool arguments" }
             : undefined,
         },
@@ -269,6 +286,9 @@ console.log(await r.text());`;
       timestamp: new Date().toISOString(),
     };
 
+    // Record A2A metrics
+    await this.metrics.recordA2AMessage(msg.from, payload.targetAgent);
+
     // Check if target agent is on a remote instance (via instance tunnel)
     const remoteTunnel = this.findTunnelForAgent(payload.targetAgent);
     if (remoteTunnel) {
@@ -323,8 +343,22 @@ console.log(await r.text());`;
 
   // ── HTTP + WebSocket ────────────────────────────────
 
-  private handleHttp(req: Request): Response {
+  private async handleHttp(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
+    // Stats endpoint — per-agent metrics
+    if (url.pathname === "/stats") {
+      const agentId = url.searchParams.get("agent");
+      if (agentId) {
+        return Response.json(await this.metrics.getAgentMetrics(agentId));
+      }
+      return Response.json(await this.metrics.getSummary());
+    }
+
+    // Detailed per-agent stats
+    if (url.pathname === "/stats/agents") {
+      return Response.json(await this.metrics.getAllMetrics());
+    }
 
     // Health check
     if (url.pathname === "/health") {

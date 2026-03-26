@@ -30,9 +30,57 @@ export async function setupProvider(): Promise<void> {
       config.providers.ollama = { apiBase: base, enabled: true };
       print("\nPour utiliser Ollama :");
       print("  denoclaw agent --model ollama/nemotron-3-super");
+
+    } else if (providerName === "claude-cli" || providerName === "codex-cli") {
+      const binary = providerName.replace("-cli", "");
+
+      // Vérifier si le CLI est installé
+      try {
+        const check = new Deno.Command("which", { args: [binary], stdout: "piped", stderr: "piped" });
+        const { success: found } = await check.output();
+        if (!found) throw new Error("not found");
+        success(`${binary} CLI détecté`);
+      } catch {
+        error(`${binary} CLI non trouvé.`);
+        print(`  Installez-le : https://${binary === "claude" ? "claude.ai/download" : "openai.com/codex"}`);
+        return;
+      }
+
+      // Vérifier si déjà authentifié
+      print(`\nVérification de l'auth ${binary}...`);
+      const authCheck = new Deno.Command(binary, {
+        args: binary === "claude" ? ["auth", "status"] : ["auth", "whoami"],
+        stdout: "piped",
+        stderr: "piped",
+      });
+      const { success: authed } = await authCheck.output();
+
+      if (authed) {
+        success(`${binary} CLI déjà authentifié`);
+      } else {
+        // Lancer le flux OAuth navigateur
+        print(`\nLancement de l'authentification ${binary} (ouverture du navigateur)...\n`);
+        const authCmd = new Deno.Command(binary, {
+          args: ["auth", "login"],
+          stdout: "inherit",
+          stderr: "inherit",
+          stdin: "inherit",
+        });
+        const { success: loginOk } = await authCmd.output();
+
+        if (loginOk) {
+          success(`${binary} CLI authentifié`);
+        } else {
+          error(`Échec de l'auth ${binary}. Réessayez manuellement : ${binary} auth login`);
+          return;
+        }
+      }
+
+      config.providers[providerName] = { enabled: true };
+      print(`\n  denoclaw agent --model ${providerName}`);
+
     } else {
       config.providers[providerName] = { enabled: true };
-      print(`\n${providerName} utilise l'auth locale du CLI.`);
       print(`  denoclaw agent --model ${providerName}`);
     }
   } else {

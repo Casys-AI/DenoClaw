@@ -1,4 +1,4 @@
-import type { AgentEntry, ChannelRouting } from "../shared/types.ts";
+import type { AgentEntry, ChannelRouting, SandboxPermission } from "../shared/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 
@@ -30,114 +30,132 @@ export async function listAgents(): Promise<void> {
   }
 }
 
-export async function createAgent(name?: string): Promise<void> {
+/** Options for non-interactive agent creation. If provided, skips interactive prompts. */
+export interface CreateAgentOptions {
+  description?: string;
+  model?: string;
+  systemPrompt?: string;
+  permissions?: string;  // comma-separated: "read,write,run"
+  peers?: string;        // comma-separated: "bob,charlie"
+  acceptFrom?: string;   // comma-separated or "*"
+  force?: boolean;       // overwrite if exists
+}
+
+export async function createAgent(name?: string, opts?: CreateAgentOptions): Promise<void> {
   const config = await getConfigOrDefault();
   if (!config.agents.registry) config.agents.registry = {};
+  const interactive = !opts ||
+    (!opts.description && !opts.model && !opts.systemPrompt &&
+     !opts.permissions && !opts.peers && !opts.acceptFrom && !opts.force);
 
-  const agentName = name || await ask("Nom de l'agent");
+  const agentName = name || (interactive ? await ask("Nom de l'agent") : "");
   if (!agentName) {
     error("Nom requis.");
     return;
   }
 
   if (config.agents.registry[agentName]) {
-    if (!await confirm(`L'agent "${agentName}" existe déjà. Écraser ?`, false)) return;
-  }
-
-  // 1. Identité
-  print("\n── Identité ──\n");
-  const description = await ask("Description (ce que fait cet agent)");
-  const model = await ask("Modèle LLM", config.agents.defaults.model);
-  const systemPrompt = await ask("System prompt (vide = défaut)");
-
-  // 2. Sandbox permissions
-  print("\n── Permissions Sandbox ──\n");
-  const permChoice = await choose("Profil de permissions", [
-    "read-only   — lecture seule (read)",
-    "standard    — lecture, écriture, exécution (read, write, run)",
-    "full        — tout (read, write, run, net)",
-    "custom      — choisir manuellement",
-  ]);
-
-  let permissions: string[];
-  const permKey = permChoice.split("—")[0].trim().split(/\s+/)[0];
-  switch (permKey) {
-    case "read-only": permissions = ["read"]; break;
-    case "standard": permissions = ["read", "write", "run"]; break;
-    case "full": permissions = ["read", "write", "run", "net"]; break;
-    default: {
-      const raw = await ask("Permissions (read,write,run,net,env,ffi)", "read,write,run");
-      permissions = raw.split(",").map((s) => s.trim());
-      break;
+    if (opts?.force) { /* overwrite */ }
+    else if (interactive) {
+      if (!await confirm(`L'agent "${agentName}" existe déjà. Écraser ?`, false)) return;
+    } else {
+      error(`Agent "${agentName}" existe déjà. Utilisez --force pour écraser.`);
+      return;
     }
   }
 
-  // 3. Peers A2A (fermé par défaut)
-  print("\n── Communication A2A (fermé par défaut) ──\n");
-  const otherAgents = Object.keys(config.agents.registry).filter((n) => n !== agentName);
-
+  let description: string | undefined;
+  let model: string | undefined;
+  let systemPrompt: string | undefined;
+  let permissions: string[];
   let peers: string[] = [];
   let acceptFrom: string[] = [];
-
-  if (otherAgents.length > 0) {
-    print(`  Agents existants : ${otherAgents.join(", ")}`);
-    const peersInput = await ask("Peut envoyer des Tasks à (noms séparés par virgule, vide = aucun)");
-    peers = peersInput ? peersInput.split(",").map((s) => s.trim()) : [];
-
-    const acceptInput = await ask("Accepte des Tasks de (* = tous, vide = aucun)");
-    acceptFrom = acceptInput ? acceptInput.split(",").map((s) => s.trim()) : [];
-  } else {
-    print("  Aucun autre agent. Vous pourrez configurer les peers plus tard.");
-  }
-
-  // 4. Channels
-  print("\n── Channels ──\n");
-  const enabledChannels = Object.entries(config.channels)
-    .filter(([_, ch]) => ch && "enabled" in ch && ch.enabled)
-    .map(([name]) => name);
-
   let channels: string[] = [];
   let channelRouting: ChannelRouting = "direct";
 
-  if (enabledChannels.length > 0) {
-    print(`  Channels actifs : ${enabledChannels.join(", ")}`);
-    const chInput = await ask("Assigner à quels channels (virgule, vide = aucun)");
-    channels = chInput ? chInput.split(",").map((s) => s.trim()) : [];
+  if (interactive) {
+    // Interactive mode — prompts
+    print("\n── Identité ──\n");
+    description = await ask("Description (ce que fait cet agent)") || undefined;
+    model = await ask("Modèle LLM", config.agents.defaults.model);
+    systemPrompt = await ask("System prompt (vide = défaut)") || undefined;
 
-    if (channels.length > 0) {
-      const routeChoice = await choose("Mode de routing", [
-        "direct     — cet agent reçoit tous les messages",
-        "by-intent  — un coordinateur route selon l'intention",
-        "round-robin — alternance avec d'autres agents sur le même channel",
-        "broadcast  — reçoit une copie de tous les messages",
-      ]);
-      channelRouting = routeChoice.split("—")[0].trim().split(/\s+/)[0] as ChannelRouting;
+    print("\n── Permissions Sandbox ──\n");
+    const permChoice = await choose("Profil de permissions", [
+      "read-only   — lecture seule (read)",
+      "standard    — lecture, écriture, exécution (read, write, run)",
+      "full        — tout (read, write, run, net)",
+      "custom      — choisir manuellement",
+    ]);
+    const permKey = permChoice.split("—")[0].trim().split(/\s+/)[0];
+    switch (permKey) {
+      case "read-only": permissions = ["read"]; break;
+      case "standard": permissions = ["read", "write", "run"]; break;
+      case "full": permissions = ["read", "write", "run", "net"]; break;
+      default: {
+        const raw = await ask("Permissions (read,write,run,net,env,ffi)", "read,write,run");
+        permissions = raw.split(",").map((s) => s.trim());
+        break;
+      }
+    }
+
+    print("\n── Communication inter-agents (fermé par défaut) ──\n");
+    const otherAgents = Object.keys(config.agents.registry).filter((n) => n !== agentName);
+    if (otherAgents.length > 0) {
+      print(`  Agents existants : ${otherAgents.join(", ")}`);
+      const peersInput = await ask("Peut envoyer des Tasks à (noms séparés par virgule, vide = aucun)");
+      peers = peersInput ? peersInput.split(",").map((s) => s.trim()) : [];
+      const acceptInput = await ask("Accepte des Tasks de (* = tous, vide = aucun)");
+      acceptFrom = acceptInput ? acceptInput.split(",").map((s) => s.trim()) : [];
+    } else {
+      print("  Aucun autre agent. Vous pourrez configurer les peers plus tard.");
+    }
+
+    print("\n── Channels ──\n");
+    const enabledChannels = Object.entries(config.channels)
+      .filter(([_, ch]) => ch && "enabled" in ch && ch.enabled)
+      .map(([n]) => n);
+    if (enabledChannels.length > 0) {
+      print(`  Channels actifs : ${enabledChannels.join(", ")}`);
+      const chInput = await ask("Assigner à quels channels (virgule, vide = aucun)");
+      channels = chInput ? chInput.split(",").map((s) => s.trim()) : [];
+      if (channels.length > 0) {
+        const routeChoice = await choose("Mode de routing", [
+          "direct     — cet agent reçoit tous les messages",
+          "by-intent  — un coordinateur route selon l'intention",
+          "round-robin — alternance avec d'autres agents sur le même channel",
+          "broadcast  — reçoit une copie de tous les messages",
+        ]);
+        channelRouting = routeChoice.split("—")[0].trim().split(/\s+/)[0] as ChannelRouting;
+      }
+    } else {
+      print("  Aucun channel configuré. Lancez 'denoclaw setup channel' d'abord.");
     }
   } else {
-    print("  Aucun channel configuré. Lancez 'denoclaw setup channel' d'abord.");
+    // Non-interactive mode — use options or defaults
+    description = opts?.description;
+    model = opts?.model;
+    systemPrompt = opts?.systemPrompt;
+    permissions = opts?.permissions ? opts.permissions.split(",").map((s) => s.trim()) : ["read", "write", "run"];
+    peers = opts?.peers ? opts.peers.split(",").map((s) => s.trim()) : [];
+    acceptFrom = opts?.acceptFrom ? opts.acceptFrom.split(",").map((s) => s.trim()) : [];
   }
 
-  // Build entry
   const entry: AgentEntry = {
     description: description || undefined,
-    model: model !== config.agents.defaults.model ? model : undefined,
+    model: model && model !== config.agents.defaults.model ? model : undefined,
     systemPrompt: systemPrompt || undefined,
-    sandbox: { allowedPermissions: permissions as AgentEntry["sandbox"] extends { allowedPermissions: infer T } ? T : never },
+    sandbox: { allowedPermissions: permissions as SandboxPermission[] },
     peers: peers.length > 0 ? peers : undefined,
     acceptFrom: acceptFrom.length > 0 ? acceptFrom : undefined,
     channels: channels.length > 0 ? channels : undefined,
     channelRouting: channels.length > 0 ? channelRouting : undefined,
   };
 
-  // Cast sandbox permissions
-  (entry.sandbox as { allowedPermissions: string[] }).allowedPermissions = permissions;
-
   config.agents.registry[agentName] = entry;
   await saveConfig(config);
 
   success(`Agent "${agentName}" créé.`);
-  print(`\n  denoclaw agent list                    — voir tous les agents`);
-  print(`  denoclaw publish agent ${agentName}  — déployer sur Subhosting\n`);
 }
 
 export async function deleteAgent(name?: string): Promise<void> {

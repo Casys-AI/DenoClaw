@@ -11,14 +11,28 @@ export type SendToAgentFn = (toAgent: string, message: string) => Promise<string
  */
 export class SendToAgentTool extends BaseTool {
   name = "send_to_agent";
-  description = "Send a message to another agent and get their response";
+  description = "Send a message to another agent and get their response. The system handles routing and validation — just provide the agent_id and message.";
   permissions: SandboxPermission[] = [];
+  private availablePeers: string[];
 
-  constructor(private sendFn: SendToAgentFn) {
+  private sendFn: SendToAgentFn;
+
+  constructor(sendFn: SendToAgentFn, availablePeers: string[] = []) {
     super();
+    this.sendFn = sendFn;
+    this.availablePeers = availablePeers;
   }
 
   getDefinition(): ToolDefinition {
+    const agentIdProp: Record<string, unknown> = {
+      type: "string",
+      description: "The ID of the target agent to send the message to",
+    };
+    if (this.availablePeers.length > 0) {
+      agentIdProp.enum = this.availablePeers;
+      agentIdProp.description = `The target agent ID. Must be one of: ${this.availablePeers.join(", ")}`;
+    }
+
     return {
       type: "function",
       function: {
@@ -27,10 +41,7 @@ export class SendToAgentTool extends BaseTool {
         parameters: {
           type: "object",
           properties: {
-            agent_id: {
-              type: "string",
-              description: "The ID of the target agent to send the message to",
-            },
+            agent_id: agentIdProp,
             message: {
               type: "string",
               description: "The message/instruction to send to the target agent",

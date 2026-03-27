@@ -26,7 +26,8 @@ import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
 
 const args = parseArgs(Deno.args, {
-  string: ["message", "session", "model", "agent"],
+  string: ["message", "session", "model", "agent", "description", "system-prompt", "permissions", "peers", "accept-from"],
+  boolean: ["force"],
   alias: { m: "message", s: "session", a: "agent" },
   default: { session: "default" },
 });
@@ -345,7 +346,18 @@ try {
 
     case "agent": {
       if (subcommand === "list") { await listAgents(); break; }
-      if (subcommand === "create") { await createAgent(args._[2] as string); break; }
+      if (subcommand === "create") {
+        await createAgent(args._[2] as string, {
+          description: args.description as string | undefined,
+          model: args.model as string | undefined,
+          systemPrompt: args["system-prompt"] as string | undefined,
+          permissions: args.permissions as string | undefined,
+          peers: args.peers as string | undefined,
+          acceptFrom: args["accept-from"] as string | undefined,
+          force: !!args.force,
+        });
+        break;
+      }
       if (subcommand === "delete") { await deleteAgent(args._[2] as string); break; }
 
       const config = await getConfigOrDefault();

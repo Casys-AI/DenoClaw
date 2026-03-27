@@ -1,4 +1,4 @@
-import type { LLMResponse, Message, ToolDefinition } from "../shared/types.ts";
+import type { LLMResponse, Message, ToolCall, ToolDefinition } from "../shared/types.ts";
 import { BaseProvider } from "./base.ts";
 import { ProviderError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
@@ -7,12 +7,22 @@ import { log } from "../shared/log.ts";
  * Ollama provider — native Ollama API format.
  *
  * Ollama Cloud uses /api/chat (not OpenAI-compatible /v1/chat/completions).
- * Works with both Ollama Cloud (https://api.ollama.com) and local (http://localhost:11434).
+ * Supports tool calling (function calling) natively.
  */
+
+interface OllamaToolCall {
+  function: { name: string; arguments: Record<string, unknown> };
+}
+
+interface OllamaMessage {
+  role: string;
+  content: string;
+  tool_calls?: OllamaToolCall[];
+}
 
 interface OllamaResponse {
   model: string;
-  message: { role: string; content: string };
+  message: OllamaMessage;
   done: boolean;
   done_reason?: string;
   total_duration?: number;
@@ -28,30 +38,53 @@ export class OllamaProvider extends BaseProvider {
   async complete(
     messages: Message[],
     model: string,
-    _temperature?: number,
-    _maxTokens?: number,
-    _tools?: ToolDefinition[],
+    temperature?: number,
+    maxTokens?: number,
+    tools?: ToolDefinition[],
   ): Promise<LLMResponse> {
     const cleanModel = model.startsWith("ollama/") ? model.slice(7) : model;
     const url = `${this.apiBase}/api/chat`;
 
-    log.debug(`Ollama: POST ${url} model=${cleanModel}`);
+    log.debug(`Ollama: POST ${url} model=${cleanModel} tools=${tools?.length ?? 0}`);
+    if (tools?.length) log.debug(`Ollama tools: ${JSON.stringify(tools.map(t => t.function.name))}`);
 
     try {
+      // Build request body
+      const body: Record<string, unknown> = {
+        model: cleanModel,
+        messages: messages.map((m) => {
+          if (m.role === "tool") {
+            return { role: "tool", content: m.content, tool_name: m.name ?? "" };
+          }
+          if (m.role === "assistant" && m.tool_calls?.length) {
+            return {
+              role: "assistant",
+              content: m.content || "",
+              tool_calls: m.tool_calls.map((tc) => {
+                let args: Record<string, unknown> = {};
+                try { args = JSON.parse(tc.function.arguments); } catch { /* keep empty */ }
+                return { function: { name: tc.function.name, arguments: args } };
+              }),
+            };
+          }
+          return { role: m.role, content: m.content };
+        }),
+        stream: false,
+      };
+
+      if (tools?.length) body.tools = tools;
+      if (temperature !== undefined) body.temperature = temperature;
+      if (maxTokens !== undefined) body.max_tokens = maxTokens;
+
+      log.debug(`Ollama request body: ${JSON.stringify(body).slice(0, 3000)}`);
+
       const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(this.apiKey ? { "Authorization": `Bearer ${this.apiKey}` } : {}),
         },
-        body: JSON.stringify({
-          model: cleanModel,
-          messages: messages.map((m) => ({
-            role: m.role === "tool" ? "user" : m.role,
-            content: m.content,
-          })),
-          stream: false,
-        }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(120_000),
       });
 
@@ -66,9 +99,23 @@ export class OllamaProvider extends BaseProvider {
 
       const data = await res.json() as OllamaResponse;
 
+      // Parse tool calls if present
+      let toolCalls: ToolCall[] | undefined;
+      if (data.message.tool_calls?.length) {
+        toolCalls = data.message.tool_calls.map((tc, i) => ({
+          id: `call_${i}_${Date.now()}`,
+          type: "function" as const,
+          function: {
+            name: tc.function.name,
+            arguments: JSON.stringify(tc.function.arguments),
+          },
+        }));
+      }
+
       return {
         content: data.message.content,
-        finishReason: data.done_reason || "stop",
+        toolCalls,
+        finishReason: data.done_reason || (toolCalls ? "tool_calls" : "stop"),
         usage: {
           promptTokens: data.prompt_eval_count || 0,
           completionTokens: data.eval_count || 0,

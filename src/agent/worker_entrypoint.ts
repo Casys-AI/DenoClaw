@@ -93,12 +93,13 @@ function createAgentLoop(sessionId: string, model?: string): AgentLoop {
   if (!config) throw new AgentError("WORKER_NOT_INITIALIZED", { agentId }, "Worker has not received init message");
 
   const memory = new Memory(sessionId, 100, kvPrivatePath);
+  const peers = config.agents.registry?.[agentId]?.peers ?? [];
   return new AgentLoop(
     sessionId,
     config,
     model ? { model } : undefined,
     10,
-    { memory, sendToAgent },
+    { memory, sendToAgent, availablePeers: peers },
   );
 }
 

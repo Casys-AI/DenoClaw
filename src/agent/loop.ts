@@ -25,6 +25,7 @@ export interface AgentLoopDeps {
   memory?: Memory;
   tools?: ToolRegistry;
   sendToAgent?: SendToAgentFn;
+  availablePeers?: string[];
 }
 
 export class AgentLoop {
@@ -53,7 +54,7 @@ export class AgentLoop {
     this.maxIterations = maxIterations;
 
     if (!deps?.tools) this.registerBuiltInTools(config);
-    if (deps?.sendToAgent) this.tools.register(new SendToAgentTool(deps.sendToAgent));
+    if (deps?.sendToAgent) this.tools.register(new SendToAgentTool(deps.sendToAgent, deps.availablePeers));
   }
 
   private registerBuiltInTools(config: AgentLoopConfig): void {

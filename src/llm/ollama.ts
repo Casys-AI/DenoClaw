@@ -73,8 +73,12 @@ export class OllamaProvider extends BaseProvider {
       };
 
       if (tools?.length) body.tools = tools;
-      if (temperature !== undefined) body.temperature = temperature;
-      if (maxTokens !== undefined) body.max_tokens = maxTokens;
+
+      // Ollama uses options.temperature and options.num_predict (not top-level)
+      const options: Record<string, unknown> = {};
+      if (temperature !== undefined) options.temperature = temperature;
+      if (maxTokens !== undefined) options.num_predict = maxTokens;
+      if (Object.keys(options).length) body.options = options;
 
       log.debug(`Ollama request body: ${JSON.stringify(body).slice(0, 3000)}`);
 

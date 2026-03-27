@@ -215,7 +215,7 @@ export async function publishAgent(): Promise<void> {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json",
   };
-  const apiBase = "https://api.deno.com/v1";
+  const apiBase = "https://api.deno.com/v2";
 
   try {
     // 1. Créer le projet

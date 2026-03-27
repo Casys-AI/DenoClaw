@@ -196,7 +196,7 @@ Deno.test("LocalProcessBackend ask=on-miss with callback — denied", async () =
   const backend = new LocalProcessBackend(baseSandbox);
   const result = await backend.execute({
     ...shellReq("echo nope", policy),
-    onAskApproval: async () => ({ approved: false }),
+    onAskApproval: () => Promise.resolve({ approved: false }),
   });
   assertEquals(result.success, false);
   assertEquals(result.error?.code, "EXEC_DENIED");
@@ -215,7 +215,7 @@ Deno.test("LocalProcessBackend ask callback — allowAlways adds to session allo
   // First call: callback approves with allowAlways
   const r1 = await backend.execute({
     ...shellReq("echo first", policy),
-    onAskApproval: async () => ({ approved: true, allowAlways: true }),
+    onAskApproval: () => Promise.resolve({ approved: true, allowAlways: true }),
   });
   assertEquals(r1.success, true);
 

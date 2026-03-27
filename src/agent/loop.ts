@@ -2,12 +2,13 @@ import type { AgentConfig, AgentDefaults, AgentResponse, ToolsConfig } from "./t
 import type { SandboxConfig } from "../shared/types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
+import { createSandboxBackend } from "./tools/backends/factory.ts";
 
 /** Projection minimale de Config nécessaire à AgentLoop — pas de dépendance sur config/ */
 interface AgentLoopConfig {
   agents: { defaults: AgentDefaults };
   providers: ProvidersConfig;
-  tools: ToolsConfig;
+  tools?: ToolsConfig;
 }
 import { Memory } from "./memory.ts";
 import type { MemoryPort } from "./memory_port.ts";
@@ -24,6 +25,10 @@ import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
 
+import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
+
+export type AskApprovalFn = (req: ApprovalRequest) => Promise<ApprovalResponse>;
+
 export interface AgentLoopDeps {
   providers?: ProviderManager;
   memory?: MemoryPort;
@@ -31,6 +36,7 @@ export interface AgentLoopDeps {
   sendToAgent?: SendToAgentFn;
   availablePeers?: string[];
   sandboxConfig?: SandboxConfig;
+  askApproval?: AskApprovalFn;
   traceWriter?: TraceWriter;
   traceId?: string;
   agentId?: string;
@@ -72,12 +78,16 @@ export class AgentLoop {
     if (!deps?.tools) this.registerBuiltInTools(config);
     if (deps?.sendToAgent) this.tools.register(new SendToAgentTool(deps.sendToAgent, deps.availablePeers));
     this.tools.register(new MemoryTool(this.memory));
-    if (deps?.sandboxConfig) this.tools.setSandbox(deps.sandboxConfig, config.tools);
+    if (deps?.sandboxConfig) {
+      const backend = createSandboxBackend(deps.sandboxConfig);
+      this.tools.setBackend(backend, deps.sandboxConfig.execPolicy, config.tools);
+      if (deps.askApproval) this.tools.setAskApproval(deps.askApproval);
+    }
   }
 
   private registerBuiltInTools(config: AgentLoopConfig): void {
     const t = config.tools;
-    this.tools.register(new ShellTool(t?.restrictToWorkspace, t?.allowedCommands, t?.deniedCommands));
+    this.tools.register(new ShellTool(t?.restrictToWorkspace));
     this.tools.register(new ReadFileTool());
     this.tools.register(new WriteFileTool());
     this.tools.register(new WebFetchTool());
@@ -241,7 +251,8 @@ export class AgentLoop {
     return this.tools;
   }
 
-  close(): void {
+  async close(): Promise<void> {
+    await this.tools.close();
     this.memory.close();
   }
 }

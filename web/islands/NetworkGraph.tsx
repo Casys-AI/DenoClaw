@@ -13,15 +13,8 @@ interface NetworkGraphProps {
   brokerUrl: string;
 }
 
-declare const cytoscape: (opts: Record<string, unknown>) => CyInstance;
-interface CyInstance {
-  add: (elems: Record<string, unknown>[]) => void;
-  layout: (opts: Record<string, unknown>) => { run: () => void };
-  on: (event: string, selector: string, cb: (evt: { target: { id: () => string; data: (k: string) => string } }) => void) => void;
-  style: () => { selector: (s: string) => { style: (s: Record<string, unknown>) => { selector: (s: string) => unknown } } };
-  resize: () => void;
-  destroy: () => void;
-}
+// deno-lint-ignore no-explicit-any
+const getCytoscape = (): any => (globalThis as any).cytoscape;
 
 const STATUS_COLORS: Record<string, string> = {
   running: "#22c55e",
@@ -48,8 +41,9 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
 
   // Init graph
   useEffect(() => {
-    if (!cyLoaded || !containerRef.current) return;
+    if (!cyLoaded || !containerRef.current || !getCytoscape()) return;
 
+    const cy = getCytoscape();
     const elements: Record<string, unknown>[] = [];
 
     // Broker node
@@ -85,7 +79,7 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
       });
     }
 
-    const cy = cytoscape({
+    const cyInstance = cy({
       container: containerRef.current,
       elements,
       style: [
@@ -107,7 +101,7 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
         {
           selector: "node[type='agent']",
           style: {
-            "background-color": (ele: { data: (k: string) => string }) => STATUS_COLORS[ele.data("status")] || "#666",
+            "background-color": "#22c55e",
             "label": "data(label)",
             "color": "#e5e5e5",
             "text-valign": "bottom",
@@ -154,24 +148,32 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
       layout: {
         name: "cose",
         animate: false,
-        nodeRepulsion: () => 8000,
-        idealEdgeLength: () => 120,
+        nodeRepulsion: 8000,
+        idealEdgeLength: 120,
         gravity: 0.3,
       },
       userZoomingEnabled: true,
       userPanningEnabled: true,
     });
 
+    // Color agents by status
+    for (const agent of agents) {
+      const node = cyInstance.getElementById(agent.agentId);
+      if (node) {
+        node.style("background-color", STATUS_COLORS[agent.status] || "#666");
+      }
+    }
+
     // Click handler
-    cy.on("tap", "node[type='agent']", (evt: { target: { id: () => string; data: (k: string) => string } }) => {
+    cyInstance.on("tap", "node[type='agent']", (evt: { target: { id: () => string; data: (k: string) => string } }) => {
       const id = evt.target.id();
       const agent = agents.find((a) => a.agentId === id);
       if (agent) setSelected(agent);
     });
 
-    cy.on("tap", "node[type='broker']", () => setSelected(null));
+    cyInstance.on("tap", "node[type='broker']", () => setSelected(null));
 
-    return () => cy.destroy();
+    return () => cyInstance.destroy();
   }, [cyLoaded, agents, tunnels]);
 
   return (

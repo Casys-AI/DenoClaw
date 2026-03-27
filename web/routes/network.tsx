@@ -50,9 +50,39 @@ export default function Network({ data }: { data: NetworkData }) {
 
       <InstanceSelector instances={instances} selected={selectedInstance} basePath="/network" />
 
-      <div class="card bg-base-200">
-        <div class="card-body p-4">
-          <NetworkGraph agents={agents} tunnels={tunnels} brokerUrl={brokerUrl} />
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Graph — 3/4 */}
+        <div class="lg:col-span-3 card bg-base-200">
+          <div class="card-body p-4">
+            <NetworkGraph agents={agents} tunnels={tunnels} brokerUrl={brokerUrl} />
+          </div>
+        </div>
+
+        {/* Sidebar — 1/4 */}
+        <div class="space-y-4">
+          <div class="stats stats-vertical w-full bg-base-200">
+            <div class="stat">
+              <div class="stat-title">Agents</div>
+              <div class="stat-value font-data text-lg">{agents.length}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Tunnels</div>
+              <div class="stat-value font-data text-lg">{tunnels.length}</div>
+            </div>
+          </div>
+          <div class="card bg-base-200">
+            <div class="card-body p-4">
+              <h3 class="font-display text-sm text-neutral-content">AGENTS</h3>
+              <ul class="space-y-2">
+                {agents.map((agent) => (
+                  <li key={agent.agentId} class="flex items-center justify-between">
+                    <a href={`/agents/${agent.agentId}`} class="link link-primary text-sm">{agent.agentId}</a>
+                    <span class={`w-2 h-2 rounded-full ${agent.status === "running" ? "bg-success" : agent.status === "stopped" ? "bg-error" : "bg-info"}`} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -111,10 +111,10 @@ src/
 
 ```
 shared/          <- rien (racine du graphe)
-llm/             <- shared/
-telemetry/       <- shared/
+telemetry/       <- shared/ (cross-cutting, importable par tous les domaines)
+llm/             <- shared/, telemetry/
 agent/           <- shared/, telemetry/
-messaging/       <- shared/, agent/ (a2a/card utilise AgentEntry)
+messaging/       <- shared/, agent/ (a2a/card), telemetry/
 config/          <- shared/, agent/, messaging/, llm/
 orchestration/   <- shared/, agent/, llm/, messaging/, telemetry/, config/
 cli/             <- shared/, config/, agent/, messaging/, orchestration/

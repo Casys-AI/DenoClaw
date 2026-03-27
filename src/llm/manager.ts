@@ -1,4 +1,4 @@
-import type { Config } from "../config/types.ts";
+import type { ProvidersConfig } from "./types.ts";
 import type { LLMResponse, Message, ToolDefinition } from "../shared/types.ts";
 import { AnthropicProvider, type BaseProvider, OpenAICompatProvider } from "./base.ts";
 import { CLIProvider } from "./cli.ts";
@@ -73,11 +73,11 @@ const PROVIDERS: ProviderEntry[] = [
 ];
 
 export class ProviderManager {
-  private config: Config;
+  private providers: ProvidersConfig;
   private cache = new Map<string, BaseProvider>();
 
-  constructor(config: Config) {
-    this.config = config;
+  constructor(providers: ProvidersConfig) {
+    this.providers = providers;
   }
 
   private resolveProvider(model: string): BaseProvider {
@@ -89,7 +89,7 @@ export class ProviderManager {
       if (!matches) continue;
 
       if (entry.requiresKey) {
-        const providerCfg = this.config.providers[entry.name];
+        const providerCfg = this.providers[entry.name];
         if (!providerCfg?.apiKey) continue;
         const provider = entry.factory(providerCfg.apiKey, providerCfg.apiBase);
         this.cache.set(model, provider);
@@ -98,7 +98,7 @@ export class ProviderManager {
       }
 
       // No key required (ollama, CLI)
-      const providerCfg = this.config.providers[entry.name];
+      const providerCfg = this.providers[entry.name];
       const provider = entry.factory("", providerCfg?.apiBase);
       this.cache.set(model, provider);
       log.debug(`Provider résolu (no-key) : ${entry.name} pour ${model}`);
@@ -108,7 +108,7 @@ export class ProviderManager {
     // Fallback: try any provider with a key
     for (const entry of PROVIDERS) {
       if (!entry.requiresKey) continue;
-      const providerCfg = this.config.providers[entry.name];
+      const providerCfg = this.providers[entry.name];
       if (providerCfg?.apiKey && providerCfg.enabled !== false) {
         const provider = entry.factory(providerCfg.apiKey, providerCfg.apiBase);
         this.cache.set(model, provider);

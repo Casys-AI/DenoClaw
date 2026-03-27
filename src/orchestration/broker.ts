@@ -32,7 +32,7 @@ export class BrokerServer {
 
   constructor(config: Config) {
     this.config = config;
-    this.providers = new ProviderManager(config);
+    this.providers = new ProviderManager(config.providers);
     this.sandbox = new SandboxManager();
     this.metrics = new MetricsCollector();
   }

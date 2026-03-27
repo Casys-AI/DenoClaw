@@ -5,7 +5,7 @@ import type {
   ToolRequest,
   ToolResponsePayload,
 } from "./types.ts";
-import type { LLMResponse, Message, StructuredError, ToolDefinition, ToolResult } from "../shared/types.ts";
+import type { AgentBrokerPort, LLMResponse, Message, StructuredError, ToolDefinition, ToolResult } from "../shared/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
@@ -16,7 +16,7 @@ import { log } from "../shared/log.ts";
  * In local mode: calls providers/tools directly (pass-through).
  * In Subhosting mode: sends requests via KV Queues to the broker.
  */
-export class BrokerClient {
+export class BrokerClient implements AgentBrokerPort {
   private agentId: string;
   private kv: Deno.Kv | null = null;
   private pendingRequests = new Map<string, {

@@ -30,7 +30,7 @@ export class AgentLoop {
       ...agentConfig,
     };
 
-    this.providers = new ProviderManager(config);
+    this.providers = new ProviderManager(config.providers);
     this.memory = new Memory(sessionId);
     this.context = new ContextBuilder(this.config);
     this.skills = new SkillsLoader();

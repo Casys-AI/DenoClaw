@@ -1,6 +1,4 @@
-import type { AgentConfig, Message } from "../shared/types.ts";
-import type { BrokerMessage } from "../orchestration/types.ts";
-import { BrokerClient } from "../orchestration/client.ts";
+import type { AgentConfig, AgentBrokerPort, BrokerEnvelope, Message } from "../shared/types.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";
@@ -11,27 +9,28 @@ import { log } from "../shared/log.ts";
  *
  * This is the orchestrator:
  * - Listens for messages via KV Queues
- * - Calls LLM via BrokerClient (never directly)
- * - Dispatches tool execution to Sandbox (via BrokerClient)
+ * - Calls LLM via AgentBrokerPort (never directly)
+ * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
  * - Persists state in its own KV
  * - Runs heartbeat via Deno.cron
  *
  * No code executes here — all execution goes through Sandbox.
+ * Depends on AgentBrokerPort interface (DI), not on BrokerClient concret.
  */
 export class AgentRuntime {
   private agentId: string;
   private config: AgentConfig;
-  private broker: BrokerClient;
+  private broker: AgentBrokerPort;
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
   private skills: SkillsLoader;
   private cron: CronManager;
   private maxIterations: number;
 
-  constructor(agentId: string, config: AgentConfig, maxIterations = 10) {
+  constructor(agentId: string, config: AgentConfig, broker: AgentBrokerPort, maxIterations = 10) {
     this.agentId = agentId;
     this.config = config;
-    this.broker = new BrokerClient(agentId);
+    this.broker = broker;
     this.context = new ContextBuilder(config);
     this.skills = new SkillsLoader();
     this.cron = new CronManager();
@@ -43,19 +42,15 @@ export class AgentRuntime {
     return this.kv;
   }
 
-  /**
-   * Start the agent runtime. Listens for messages and runs heartbeat.
-   */
   async start(): Promise<void> {
     log.info(`AgentRuntime démarré : ${this.agentId}`);
 
     await this.skills.loadSkills();
     await this.broker.startListening();
 
-    // Listen for incoming messages via KV Queue
     const kv = await this.getKv();
     kv.listenQueue(async (raw: unknown) => {
-      const msg = raw as BrokerMessage;
+      const msg = raw as BrokerEnvelope;
       if (msg.to !== this.agentId) return;
 
       switch (msg.type) {
@@ -67,7 +62,6 @@ export class AgentRuntime {
       }
     });
 
-    // Heartbeat — check for pending tasks, health check
     await this.cron.heartbeat(async () => {
       log.debug(`Heartbeat: ${this.agentId}`);
       const kv = await this.getKv();
@@ -77,7 +71,6 @@ export class AgentRuntime {
       });
     }, 5);
 
-    // Register agent status
     await kv.set(["agents", this.agentId, "status"], {
       status: "running",
       startedAt: new Date().toISOString(),
@@ -85,32 +78,24 @@ export class AgentRuntime {
     });
   }
 
-  /**
-   * Handle an incoming user/agent message.
-   * Runs the ReAct loop: LLM → tool calls → LLM → ... → final response.
-   */
-  private async handleUserMessage(msg: BrokerMessage): Promise<void> {
+  private async handleUserMessage(msg: BrokerEnvelope): Promise<void> {
     const payload = msg.payload as { instruction: string; data?: unknown };
     log.info(`Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`);
 
     const kv = await this.getKv();
 
-    // Load conversation history from KV
     const historyEntry = await kv.get<Message[]>(["memory", this.agentId, msg.from]);
     const history: Message[] = historyEntry.value || [];
 
-    // Add user message
     history.push({ role: "user", content: payload.instruction });
 
     let iteration = 0;
     while (iteration < this.maxIterations) {
       iteration++;
 
-      // Build context
       const skillsList = this.skills.getSkills();
       const contextMessages = this.context.buildContextMessages(history, skillsList, []);
 
-      // Call LLM via broker (broker handles API keys / CLI tunnel routing)
       const response = await this.broker.complete(
         contextMessages,
         this.config.model,
@@ -125,7 +110,6 @@ export class AgentRuntime {
           tool_calls: response.toolCalls,
         });
 
-        // Execute tools via broker → routed to Sandbox or tunnel
         for (const tc of response.toolCalls) {
           let args: Record<string, unknown>;
           try {
@@ -155,20 +139,14 @@ export class AgentRuntime {
         continue;
       }
 
-      // Final response
       history.push({ role: "assistant", content: response.content });
-
-      // Persist history
       await kv.set(["memory", this.agentId, msg.from], history);
-
-      // Send response back to sender via broker
       await this.broker.sendToAgent(msg.from, response.content);
 
       log.info(`Réponse envoyée à ${msg.from} (${iteration} itérations)`);
       return;
     }
 
-    // Max iterations
     await this.broker.sendToAgent(msg.from, "Max iterations reached.");
     await kv.set(["memory", this.agentId, msg.from], history);
   }

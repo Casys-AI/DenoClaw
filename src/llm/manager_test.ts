@@ -1,19 +1,14 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { ProviderManager } from "./manager.ts";
 import { ProviderError } from "../shared/errors.ts";
-import type { Config } from "../config/types.ts";
+import type { ProvidersConfig } from "./types.ts";
 
-function makeConfig(overrides?: Partial<Config["providers"]>): Config {
-  return {
-    providers: { ...overrides },
-    agents: { defaults: { model: "test", temperature: 0.7, maxTokens: 4096 } },
-    tools: {},
-    channels: {},
-  };
+function makeProviders(overrides?: Partial<ProvidersConfig>): ProvidersConfig {
+  return { ...overrides };
 }
 
 Deno.test("ProviderManager resolves Ollama with API key", async () => {
-  const pm = new ProviderManager(makeConfig({ ollama: { apiKey: "ollama-key" } }));
+  const pm = new ProviderManager(makeProviders({ ollama: { apiKey: "ollama-key" } }));
 
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
@@ -38,7 +33,7 @@ Deno.test("ProviderManager resolves Ollama with API key", async () => {
 });
 
 Deno.test("ProviderManager resolves nemotron prefix to Ollama", async () => {
-  const pm = new ProviderManager(makeConfig({ ollama: { apiKey: "key" } }));
+  const pm = new ProviderManager(makeProviders({ ollama: { apiKey: "key" } }));
 
   const original = globalThis.fetch;
   globalThis.fetch = (() =>
@@ -60,7 +55,7 @@ Deno.test("ProviderManager resolves nemotron prefix to Ollama", async () => {
 });
 
 Deno.test("ProviderManager throws NO_PROVIDER when no key", async () => {
-  const pm = new ProviderManager(makeConfig());
+  const pm = new ProviderManager(makeProviders());
 
   await assertRejects(
     () => pm.complete([{ role: "user", content: "test" }], "anthropic/claude-sonnet-4-6"),
@@ -69,7 +64,7 @@ Deno.test("ProviderManager throws NO_PROVIDER when no key", async () => {
 });
 
 Deno.test("ProviderManager resolves Anthropic with key", async () => {
-  const pm = new ProviderManager(makeConfig({ anthropic: { apiKey: "test-key" } }));
+  const pm = new ProviderManager(makeProviders({ anthropic: { apiKey: "test-key" } }));
 
   const original = globalThis.fetch;
   globalThis.fetch = (() =>

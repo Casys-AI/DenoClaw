@@ -75,6 +75,37 @@ export interface LLMResponse {
   };
 }
 
+// ── Ports (interfaces pour DI cross-domain sans violation de boundary) ────
+
+/** Message enveloppe pour la communication inter-agent via le broker. */
+export interface BrokerEnvelope {
+  id: string;
+  from: string;
+  to: string;
+  type: string;
+  payload: unknown;
+  timestamp: string;
+}
+
+/**
+ * Port d'accès au broker pour les agents (DI).
+ * L'agent dépend de cette interface, pas du BrokerClient concret.
+ * Résout la violation de boundary agent/ → orchestration/.
+ */
+export interface AgentBrokerPort {
+  startListening(): Promise<void>;
+  complete(
+    messages: Message[],
+    model: string,
+    temperature?: number,
+    maxTokens?: number,
+    tools?: ToolDefinition[],
+  ): Promise<LLMResponse>;
+  execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult>;
+  sendToAgent(targetAgentId: string, instruction: string, data?: unknown): Promise<BrokerEnvelope>;
+  close(): void;
+}
+
 // ── Sandbox permissions (cross-domain: utilisé par agent/tools, orchestration, config) ─
 
 export type SandboxPermission = "read" | "write" | "run" | "net" | "env" | "ffi";

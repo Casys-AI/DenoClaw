@@ -1,6 +1,6 @@
 import type { AgentConfig, Message } from "../shared/types.ts";
-import type { BrokerMessage } from "../broker/types.ts";
-import { BrokerClient } from "../broker/client.ts";
+import type { BrokerMessage } from "../orchestration/types.ts";
+import { BrokerClient } from "../orchestration/client.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";

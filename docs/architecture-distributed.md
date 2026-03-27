@@ -2,13 +2,16 @@
 
 ## Principe fondamental
 
-**L'agent vit en Subhosting. Il exécute son code en Sandbox.**
+**Le Broker orchestre. L'agent réagit. Le code s'exécute en Sandbox.**
 
-Deux couches, chacune avec son rôle (ADR-001) :
-- **Subhosting** = l'agent (long-running, KV propre, orchestration, écoute les messages)
+Trois couches, chacune avec son rôle (ADR-001) :
+- **Broker** (Deno Deploy) = orchestrateur central (LLM proxy, cron, message routing, agent lifecycle). Seul composant réellement long-running.
+- **Subhosting** = l'agent (warm-cached V8 isolates, KV pour état/mémoire). Se réveille sur HTTP du Broker, se rendort quand idle. **Pas de `Deno.cron()`, pas de `listenQueue()`.**
 - **Sandbox** = l'exécution (éphémère, permissions hardened, code skills/outils/LLM-generated)
 
 Aucun code ne s'exécute directement dans le Subhosting. Tout passe par une Sandbox avec des permissions verrouillées.
+
+> **API Subhosting** : utiliser **v2** (`api.deno.com/v2`). La v1 est dépréciée (sunset juillet 2026).
 
 ## Vue d'ensemble
 
@@ -61,20 +64,23 @@ Le Broker est le seul composant qui tourne en dehors d'une Sandbox. C'est le pla
   - L'agent ne sait pas quel mode est utilisé — interface uniforme `broker.complete()`
 - **Message Router** — Route les messages entre agents via KV Queues. Contrôle qui parle à qui (permissions). Même mécanisme pour LLM, outils, et inter-agents.
 - **Tunnel Hub** — Maintient les connexions WebSocket vers les machines locales / VPS. Chaque tunnel déclare ses **capabilities** (providers CLI, outils). Le broker route selon ces déclarations.
-- **Agent Lifecycle** — Crée, détruit, monitore les agents via l'API Subhosting (deployments) et les exécutions via l'API Sandbox (instances éphémères).
+- **Cron Scheduler** — Gère les crons de tous les agents via `Deno.cron()` (fonctionne sur Deploy). Quand un cron se déclenche, le broker envoie un HTTP POST à l'agent Subhosting concerné.
+- **Agent Lifecycle** — Crée, détruit, monitore les agents via l'API Subhosting **v2** (deployments) et les exécutions via l'API Sandbox (instances éphémères).
 - **Auth** — `@deno/oidc` pour les tunnels, credentials materialization pour les agents (ADR-003). Zéro secret statique sauf les clés API LLM.
 
 ### 2. Agents (Deno Subhosting + Sandbox)
 
-Chaque agent = un deployment Subhosting (long-running, KV propre). L'exécution de code passe par des Sandboxes éphémères.
+Chaque agent = un deployment Subhosting (warm-cached V8 isolate, KV bindé). L'exécution de code passe par des Sandboxes éphémères.
 
-**Le Subhosting (orchestrateur)** :
-- Vit en permanence, KV propre pour mémoire et sessions
-- Écoute les messages via KV Queues
+**Le Subhosting (endpoint stateful réactif)** :
+- Se réveille sur HTTP POST du Broker, se rendort quand idle (warm-cached, pas un daemon)
+- KV bindé pour mémoire et sessions (persiste indépendamment de l'isolate)
+- Reçoit les messages du Broker par HTTP, pas par KV Queues (`listenQueue` ne fonctionne pas en Subhosting)
 - Demande les completions LLM au broker
 - Dispatche l'exécution de code vers des Sandboxes
 - Persiste les résultats en KV
 - N'exécute JAMAIS de code arbitraire
+- **Pas de `Deno.cron()`** — les tâches planifiées sont gérées par le Broker
 
 **La Sandbox (exécuteur)** :
 - Éphémère (30 min max), créée à la demande
@@ -84,12 +90,21 @@ Chaque agent = un deployment Subhosting (long-running, KV propre). L'exécution 
 - Renvoie le résultat et meurt
 
 ```typescript
-// Côté Subhosting — le runtime agent orchestrateur
+// Côté Subhosting — le runtime agent (réactif, piloté par HTTP du Broker)
 class AgentRuntime {
   private broker: BrokerClient;
-  private kv: Deno.Kv;  // KV propre, mémoire persistante
+  private kv: Deno.Kv;  // KV bindé, mémoire persistante (survit aux redémarrages isolate)
 
-  async handleMessage(msg: Message): Promise<AgentResponse> {
+  // Point d'entrée HTTP — le Broker appelle cet endpoint
+  async handleRequest(req: Request): Promise<Response> {
+    const msg = await req.json() as BrokerMessage;
+
+    if (msg.type === "user_message") return this.handleMessage(msg);
+    if (msg.type === "cron_trigger") return this.handleCron(msg);
+    // ... autres types de messages du Broker
+  }
+
+  async handleMessage(msg: Message): Promise<Response> {
     // LLM call via broker
     const llmResponse = await this.broker.llmComplete({
       messages: await this.buildContext(msg),
@@ -103,11 +118,11 @@ class AgentRuntime {
           tool: tc.function.name,
           args: JSON.parse(tc.function.arguments),
         });
-        await this.kv.set(["results", tc.id], result);  // persiste en KV
+        await this.kv.set(["results", tc.id], result);
       }
     }
 
-    return { content: llmResponse.content };
+    return Response.json({ content: llmResponse.content });
   }
 }
 ```
@@ -185,13 +200,13 @@ Le broker sait quoi router où grâce à ces déclarations.
            │
 2. Broker reçoit, crée/récupère une session
            │
-3. Broker enqueue le message vers l'agent Sandbox
-           │  KV Queue: { to: "agent-123", type: "user_message", content: "..." }
+3. Broker envoie le message à l'agent via HTTP POST
+           │  POST https://<agent>.deno.dev/ { type: "user_message", content: "..." }
            │
-4. Agent Sandbox reçoit le message via listenQueue
+4. Agent Subhosting se réveille (ou est déjà warm), traite le message
            │
-5. Agent demande un LLM completion au broker
-           │  KV Queue: { to: "broker", type: "llm_request", model: "...", messages: [...] }
+5. Agent demande un LLM completion au broker (fetch HTTP)
+           │  POST https://<broker>/llm { model: "...", messages: [...] }
            │
 6. Broker résout le provider :
            │  ├─ model = "anthropic/..." → MODE API : fetch() avec clé (broker la détient)
@@ -199,23 +214,26 @@ Le broker sait quoi router où grâce à ces déclarations.
            │  ├─ model = "codex-cli"     → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
            │  └─ model = "claude-cli"    → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
            │
-7. Broker renvoie la réponse à l'agent
-           │  KV Queue: { to: "agent-123", type: "llm_response", ... }
+7. Broker renvoie la réponse LLM dans la réponse HTTP
            │
-8. Si tool_call : agent demande l'exécution au broker
-           │  KV Queue: { to: "broker", type: "tool_request", tool: "shell", args: {...} }
+8. Si tool_call : agent demande l'exécution au broker (fetch HTTP)
+           │  POST https://<broker>/tool { tool: "shell", args: {...} }
            │
 9. Broker route vers le bon tunnel (selon les capabilities déclarées)
            │  WebSocket: { tool: "shell", args: {...} }
            │
 10. Machine locale exécute, renvoie le résultat via WS
            │
-11. Broker renvoie le résultat à l'agent
-           │  KV Queue: { to: "agent-123", type: "tool_response", result: {...} }
+11. Broker renvoie le résultat dans la réponse HTTP
            │
 12. Agent continue sa boucle (retour à l'étape 5) ou répond
            │
-13. Broker envoie la réponse finale à l'utilisateur
+13. Réponse finale remonte au Broker → utilisateur
+```
+
+**Cron / Heartbeat (mode Deploy)** :
+```
+Broker (Deno.cron) → HTTP POST https://<agent>.deno.dev/cron/heartbeat → Agent se réveille, exécute, répond
 ```
 
 ## Capabilities des tunnels
@@ -251,18 +269,18 @@ Le tunnel résout ça avec un type de message `auth_request` :
 
 ## Communication inter-agents
 
-Les agents Sandbox ne se parlent JAMAIS directement (network isolation). Tout passe par le broker via KV Queues.
+Les agents ne se parlent JAMAIS directement (network isolation). Tout passe par le Broker qui route via HTTP.
 
 ```typescript
-// Agent A veut déléguer une tâche à Agent B
+// Agent A veut déléguer une tâche à Agent B — il demande au Broker
 await broker.sendToAgent({
   to: "agent-b",
   type: "task",
   payload: { instruction: "Analyse ce fichier", data: "..." },
 });
+// → Le Broker fait HTTP POST vers agent-b.deno.dev avec le message
 
-// Agent B reçoit via son listenQueue
-// Agent B répond via le broker
+// Agent B reçoit via HTTP (pas listenQueue), traite, répond via le Broker
 await broker.sendToAgent({
   to: "agent-a",
   type: "task_result",
@@ -317,32 +335,55 @@ DenoClaw fonctionne dans les deux modes. Le code est le même, seul l'environnem
 
 | | Mode local | Mode Deploy |
 |---|---|---|
-| Agent runtime | Process Deno local | Subhosting (deployment) |
-| Exécution code | Deno.Command local | Sandbox (microVM) |
-| KV | SQLite local (Deno.openKv()) | FoundationDB (Deno.openKv()) |
-| Cron / Heartbeat | Deno.cron() (--unstable-cron) | Deno.cron() natif |
-| Message bus | KV Queues local | KV Queues Deploy |
+| Broker / Main | **Process** Deno principal | Deno Deploy |
+| Agent runtime | **Worker** (un par agent) | Subhosting (warm-cached V8 isolate) |
+| Exécution code | **Subprocess** (`Deno.Command`) | Sandbox (microVM) |
+| Transport Broker → Agent | `postMessage` / `onmessage` | HTTP POST |
+| Transport Agent → Sandbox | `Deno.Command` (spawn + stdin/stdout) | API Sandbox (HTTP) |
+| KV | SQLite par agent (`Deno.openKv("./data/<agent>.db")`) | FoundationDB (KV bindé via API v2) |
+| Cron / Heartbeat | Main process `Deno.cron()` → `postMessage` vers Worker | Broker `Deno.cron()` → HTTP POST vers Subhosting |
 | LLM | Direct fetch() (clés locales) | Via broker (LLM Proxy) |
 | Tunnels | Pas nécessaire (tout est local) | WebSocket vers machines distantes |
 | Auth | Pas nécessaire | OIDC + credentials materialization |
 
-Le même `CronManager` utilise `Deno.cron()` dans les deux cas (flag `--unstable-cron` requis en local). Le même `MessageBus` : KV Queues si KV disponible, in-memory sinon.
+**Trois niveaux d'isolation en local — Process / Worker / Subprocess :**
+- **Process** (main) = le Broker. Détient les crons, route les messages, gère le lifecycle.
+- **Worker** = un agent. Même contraintes que Subhosting (pas de `Deno.cron()`, pas de mémoire partagée, communication par messages). Code agent identique dans les deux modes.
+- **Subprocess** (`Deno.Command`) = exécution de code isolée. Équivalent local du Sandbox (microVM en deploy). Process éphémère avec permissions contrôlées.
+
+Le code agent est identique dans les deux modes — seul le transport change (`postMessage` vs HTTP, `Deno.Command` vs API Sandbox).
+
+En local, le main process détient les crons (`Deno.cron()`) et dispatche vers les Workers. En Deploy, le Broker fait pareil via HTTP vers les agents Subhosting.
 
 ## Heartbeat
 
-Le heartbeat n'est pas un module séparé — c'est un cron comme un autre.
+Le heartbeat est un cron comme un autre — mais son exécution dépend du mode.
 
+**Mode local** — le main process détient le cron, dispatche vers le Worker :
 ```typescript
-// L'agent se réveille toutes les 5 minutes
+// Main process (broker local)
 const cron = new CronManager();
 await cron.heartbeat(async () => {
-  // Vérifie s'il y a des tâches en attente
-  // Envoie des messages proactifs si nécessaire
-  // Check l'état des tunnels connectés
+  // Envoie au Worker de l'agent
+  agentWorker.postMessage({ type: "cron_trigger", job: "heartbeat" });
 }, 5);
 ```
 
-Fonctionne en local (`--unstable-cron`) et sur Deploy (natif). Même API, même comportement.
+**Mode Deploy** — le **Broker** détient le cron et appelle l'agent par HTTP :
+```typescript
+// Côté Broker (Deno Deploy) — Deno.cron() fonctionne ici
+Deno.cron("heartbeat-agent-123", "*/5 * * * *", async () => {
+  await fetch("https://agent-123.deno.dev/cron/heartbeat", { method: "POST" });
+});
+
+// Côté Agent (Subhosting) — reçoit le HTTP, pas de cron local
+async handleCron(req: Request): Promise<Response> {
+  // Vérifie s'il y a des tâches en attente
+  return Response.json({ status: "ok" });
+}
+```
+
+L'agent **déclare** ses crons dans sa config, le Broker les **exécute**.
 
 ## Modules à créer
 

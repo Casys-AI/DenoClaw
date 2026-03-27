@@ -1,4 +1,4 @@
-import type { Config } from "../types.ts";
+import type { Config } from "../config/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 
@@ -476,7 +476,7 @@ export async function showStatus(config: Config): Promise<void> {
 
   // Sessions (KV)
   try {
-    const { getSessionManager } = await import("../session/mod.ts");
+    const { getSessionManager } = await import("../messaging/session.ts");
     const sm = getSessionManager();
     const sessions = await sm.getActive();
     print(`Sessions     : ${sessions.length} active(s)`);

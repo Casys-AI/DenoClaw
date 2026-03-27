@@ -17,17 +17,32 @@ export class MessageBus {
   private kv: Deno.Kv | null = null;
   private kvReady = false;
 
-  async init(): Promise<void> {
-    try {
-      this.kv = await Deno.openKv();
+  constructor(kv?: Deno.Kv) {
+    if (kv) {
+      this.kv = kv;
+      this.kvReady = true;
+    }
+  }
 
-      // Listen for queued messages — this is the consumer side
+  async init(): Promise<void> {
+    if (this.kvReady && this.kv) {
+      // KV déjà injecté via constructeur — just start listening
       this.kv.listenQueue(async (raw: unknown) => {
         const message = raw as ChannelMessage;
         log.debug(`KV Queue: message reçu (${message.id})`);
         await this.dispatch(message);
       });
+      log.info("MessageBus: KV Queues activées (injecté)");
+      return;
+    }
 
+    try {
+      this.kv = await Deno.openKv();
+      this.kv.listenQueue(async (raw: unknown) => {
+        const message = raw as ChannelMessage;
+        log.debug(`KV Queue: message reçu (${message.id})`);
+        await this.dispatch(message);
+      });
       this.kvReady = true;
       log.info("MessageBus: KV Queues activées");
     } catch (e) {

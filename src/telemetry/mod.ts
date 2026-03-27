@@ -12,7 +12,7 @@
  * Or on Deno Deploy: automatic.
  */
 
-import { log } from "../utils/log.ts";
+import { log } from "../shared/log.ts";
 
 // Use the npm OTEL API which Deno wires to its built-in implementation
 let trace: typeof import("npm:@opentelemetry/api").trace | null = null;

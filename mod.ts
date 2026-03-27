@@ -1,89 +1,73 @@
 /**
- * DenoClaw — Deno-native AI agent, inspired by nano-claw.
- * Zero external dependencies. Powered by Deno KV, Deno.cron, Deno.serve.
+ * DenoClaw — Deno-native AI agent framework.
+ * Zero Node.js dependencies. Powered by Deno KV, Deno.cron, Deno.serve.
+ *
+ * Bounded contexts: agent, messaging, orchestration, llm, config, telemetry.
  */
 
+// ── Agent domain ─────────────────────────────────────────
 export { AgentLoop } from "./src/agent/loop.ts";
+export { AgentRuntime } from "./src/agent/runtime.ts";
 export { Memory } from "./src/agent/memory.ts";
 export { ContextBuilder } from "./src/agent/context.ts";
 export { SkillsLoader } from "./src/agent/skills.ts";
+export { CronManager } from "./src/agent/cron.ts";
 export { BaseTool, ToolRegistry } from "./src/agent/tools/registry.ts";
 export { ShellTool } from "./src/agent/tools/shell.ts";
 export { ReadFileTool, WriteFileTool } from "./src/agent/tools/file.ts";
 export { WebFetchTool } from "./src/agent/tools/web.ts";
+export { BUILTIN_TOOL_PERMISSIONS } from "./src/agent/tools/types.ts";
+export type { AgentDefaults, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
+export type { BuiltinToolName } from "./src/agent/tools/types.ts";
 
-export { AnthropicProvider, BaseProvider, OpenAICompatProvider } from "./src/providers/base.ts";
-export { CLIProvider } from "./src/providers/cli.ts";
-export { ProviderManager } from "./src/providers/manager.ts";
-
-export { MessageBus, getMessageBus } from "./src/bus/mod.ts";
-export { SessionManager, getSessionManager } from "./src/session/mod.ts";
-export { ChannelManager, getChannelManager } from "./src/channels/manager.ts";
-export { BaseChannel } from "./src/channels/base.ts";
-export { ConsoleChannel } from "./src/channels/console.ts";
-export { TelegramChannel } from "./src/channels/telegram.ts";
-export { WebhookChannel } from "./src/channels/webhook.ts";
-export { Gateway } from "./src/gateway/mod.ts";
-export { CronManager } from "./src/cron/mod.ts";
-
-export { getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/mod.ts";
-
-export { SandboxManager } from "./src/sandbox/mod.ts";
-
-// A2A — classes + types + constantes
-export { A2AClient } from "./src/a2a/client.ts";
-export { A2AServer } from "./src/a2a/server.ts";
-export { generateAgentCard, generateAllCards } from "./src/a2a/card.ts";
-export { TaskStore } from "./src/a2a/tasks.ts";
-export { A2A_ERRORS, TERMINAL_STATES } from "./src/a2a/types.ts";
+// ── Messaging domain ────────────────────────────────────
+export { MessageBus } from "./src/messaging/bus.ts";
+export { SessionManager } from "./src/messaging/session.ts";
+export { ChannelManager } from "./src/messaging/channels/manager.ts";
+export { BaseChannel } from "./src/messaging/channels/base.ts";
+export { ConsoleChannel } from "./src/messaging/channels/console.ts";
+export { TelegramChannel } from "./src/messaging/channels/telegram.ts";
+export { WebhookChannel } from "./src/messaging/channels/webhook.ts";
+export { A2AClient } from "./src/messaging/a2a/client.ts";
+export { A2AServer } from "./src/messaging/a2a/server.ts";
+export { generateAgentCard, generateAllCards } from "./src/messaging/a2a/card.ts";
+export { TaskStore } from "./src/messaging/a2a/tasks.ts";
+export { A2A_ERRORS, TERMINAL_STATES } from "./src/messaging/a2a/types.ts";
 export type {
-  A2AMessage,
-  A2AMethod,
-  A2ARole,
-  AgentCard,
-  AgentSkill,
-  Artifact,
-  JsonRpcError,
-  JsonRpcRequest,
-  JsonRpcResponse,
-  Part,
-  Task,
-  TaskState,
-  TaskStatus,
-} from "./src/a2a/types.ts";
+  A2AMessage, A2AMethod, A2ARole, AgentCard, AgentSkill, Artifact,
+  JsonRpcError, JsonRpcRequest, JsonRpcResponse, Part, Task, TaskState, TaskStatus,
+} from "./src/messaging/a2a/types.ts";
+export type { ChannelMessage, ChannelsConfig, Session } from "./src/messaging/types.ts";
 
-// Auth (ADR-003)
-export { AuthManager } from "./src/broker/auth.ts";
-export type { AuthErrorCode, AuthResult, InviteToken, SessionToken } from "./src/broker/auth.ts";
-export { BrokerClient } from "./src/broker/client.ts";
-export { BrokerServer } from "./src/broker/server.ts";
-export { LocalRelay } from "./src/relay/local.ts";
-export { AgentRuntime } from "./src/subhosting/agent_runtime.ts";
+// ── Orchestration domain ─────────────────────────────────
+export { AuthManager } from "./src/orchestration/auth.ts";
+export type { AuthErrorCode, AuthResult, InviteToken, SessionToken } from "./src/orchestration/auth.ts";
+export { BrokerClient } from "./src/orchestration/client.ts";
+export { BrokerServer } from "./src/orchestration/broker.ts";
+export { LocalRelay } from "./src/orchestration/relay.ts";
+export { Gateway } from "./src/orchestration/gateway.ts";
+export type { GatewayDeps } from "./src/orchestration/gateway.ts";
+export { SandboxManager } from "./src/orchestration/sandbox.ts";
+
+// ── LLM domain ───────────────────────────────────────────
+export { AnthropicProvider, BaseProvider, OpenAICompatProvider } from "./src/llm/base.ts";
+export { CLIProvider } from "./src/llm/cli.ts";
+export { ProviderManager } from "./src/llm/manager.ts";
+export type { ProviderConfig, ProvidersConfig } from "./src/llm/types.ts";
+
+// ── Config ───────────────────────────────────────────────
+export { getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/loader.ts";
+export type { Config } from "./src/config/types.ts";
+
+// ── Telemetry ────────────────────────────────────────────
 export { initTelemetry, MetricsCollector, spanAgentLoop, spanBusPublish, spanLLMCall, spanToolCall, withSpan } from "./src/telemetry/mod.ts";
 export type { AgentMetrics } from "./src/telemetry/metrics.ts";
 
-export { BUILTIN_TOOL_PERMISSIONS } from "./src/types.ts";
+// ── Shared kernel ────────────────────────────────────────
 export type {
-  AgentConfig,
-  AgentDefaults,
-  AgentEntry,
-  AgentResponse,
-  AgentsConfig,
-  BuiltinToolName,
-  ChannelMessage,
-  ChannelRouting,
-  Config,
-  CronJob,
-  LLMResponse,
-  Message,
-  SandboxConfig,
-  SandboxPermission,
-  Session,
-  Skill,
-  StructuredError,
-  ToolCall,
-  ToolDefinition,
-  ToolResult,
-} from "./src/types.ts";
-
-export { ChannelError, ConfigError, DenoClawError, ProviderError, ToolError } from "./src/utils/errors.ts";
+  AgentConfig, AgentEntry, AgentResponse, ChannelRouting,
+  LLMResponse, Message, MessageRole, SandboxConfig, SandboxPermission,
+  StructuredError, ToolCall, ToolDefinition, ToolResult,
+} from "./src/shared/types.ts";
+export type { CronJob, Skill } from "./src/agent/types.ts";
+export { ChannelError, ConfigError, DenoClawError, ProviderError, ToolError } from "./src/shared/errors.ts";

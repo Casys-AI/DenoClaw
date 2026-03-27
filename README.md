@@ -52,13 +52,14 @@ deno task start publish gateway
 ## Architecture
 
 ```
-Local : Process Deno → KV SQLite → Deno.cron
-Deploy : Subhosting (agent) → Sandbox (exécution) → Broker (routeur)
+Local  : Main process (broker) → Workers (agents) → Deno.Command (exécution)
+Deploy : Broker (Deno Deploy)  → Subhosting (agents) → Sandbox (exécution)
 ```
 
-- **Subhosting** = héberge l'agent (long-running, KV propre)
+- **Broker** = orchestrateur central (LLM proxy, cron, tunnels, inter-agents). Seul composant long-running.
+- **Subhosting** = héberge l'agent (warm-cached, KV pour état). Réactif — se réveille sur HTTP du Broker.
 - **Sandbox** = exécute le code (éphémère, permissions hardened)
-- **Broker** = routeur central (LLM proxy, tunnels, inter-agents)
+- **Local** : Workers (= Subhosting) + `Deno.Command` (= Sandbox), même code, `postMessage` au lieu de HTTP
 - **Tunnels** = WebSocket vers machines locales (Codex CLI, Claude CLI)
 
 Voir `docs/architecture-distributed.md` et les ADRs dans `docs/`.

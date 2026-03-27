@@ -1,9 +1,10 @@
 import type { BrokerMessage, LLMRequest, ToolRequest, TunnelCapabilities } from "./types.ts";
-import type { BuiltinToolName, Config } from "../types.ts";
 import type { AgentEntry, SandboxPermission } from "../shared/types.ts";
-import { BUILTIN_TOOL_PERMISSIONS } from "../types.ts";
+import type { Config } from "../config/types.ts";
+import type { BuiltinToolName } from "../agent/tools/types.ts";
+import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
 import { AuthManager } from "./auth.ts";
-import { ProviderManager } from "../providers/manager.ts";
+import { ProviderManager } from "../llm/manager.ts";
 import { SandboxManager } from "./sandbox.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { ConfigError } from "../shared/errors.ts";

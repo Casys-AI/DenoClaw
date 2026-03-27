@@ -1,7 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { ProviderManager } from "./manager.ts";
 import { ProviderError } from "../shared/errors.ts";
-import type { Config } from "../types.ts";
+import type { Config } from "../config/types.ts";
 
 function makeConfig(overrides?: Partial<Config["providers"]>): Config {
   return {

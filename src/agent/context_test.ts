@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { ContextBuilder } from "./context.ts";
-import type { Message } from "../types.ts";
+import type { Message } from "../shared/types.ts";
 
 const builder = new ContextBuilder({
   model: "test",

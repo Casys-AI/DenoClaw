@@ -11,7 +11,31 @@
 
 ## Project Overview
 
-DenoClaw is a Deno-native AI agent framework inspired by nano-claw/PicoClaw. Zero Node.js dependencies. Agents live in Deno Subhosting (long-running, own KV), execute code in Deno Sandbox (ephemeral, hardened permissions), and communicate via a Broker on Deno Deploy (LLM proxy, message router, tunnel hub). Inter-agent communication uses A2A protocol. See `docs/architecture-distributed.md` and ADRs in `docs/`.
+DenoClaw is a Deno-native AI agent framework inspired by nano-claw/PicoClaw. Zero Node.js dependencies. Agents live in Deno Subhosting (warm-cached isolates, stateful via KV), execute code in Deno Sandbox (ephemeral, hardened permissions), and communicate via a Broker on Deno Deploy (LLM proxy, message router, tunnel hub, cron scheduler). The Broker orchestrates — agents are reactive (HTTP request/response). Inter-agent communication uses A2A protocol. See `docs/architecture-distributed.md` and ADRs in `docs/`.
+
+## AX — Agent Experience Principles
+
+All interfaces designed for agents, not humans.
+
+> *"Reliability comes not from better prompts, but from better execution interfaces."*
+
+| # | Principle | Rule |
+|---|---|---|
+| 1 | **No Verb Overlap** | Unique commands + explicit enums. No two operations share a name or ambiguous alias. |
+| 2 | **Safe Defaults** | `dry_run: true` on all write ops. Opt-in explicit for mutations. |
+| 3 | **Structured Outputs** | Machine-readable returns (`taskId`, `status`, `progress`). No console spinners, no prose-only responses. |
+| 4 | **Machine-Readable Errors** | Structured codes (`code` + `context` + `recovery`). Agents parse codes, not sentences. |
+| 5 | **Fast Fail Early** | Validate inputs at the boundary, reject before costly operations. Never let bad data travel deep. |
+| 6 | **Deterministic Outputs** | Same inputs = same outputs. Zero hidden dependency on time or randomness. |
+| 7 | **Explicit Over Implicit** | No magic defaults that silently change behavior. Every flag, every mode, every side-effect is visible. |
+| 8 | **Composable Primitives** | Each function does one thing. Pipeline steps are independent and recombinable. |
+| 9 | **Narrow Contracts** | Take the minimum input, return the minimum useful output. No God objects. |
+| 10 | **Co-located Documentation** | Docs live next to code. Tests are executable documentation. |
+| 11 | **Test-First Invariants** | Every behavior has a test. Prioritize edge cases over happy path. |
+
+**Operational loop:** Plan → Scope → Act → Verify → Recover.
+
+Every tool, error, broker interface, and agent API must be AX-compliant. Review code through this lens.
 
 ## Import Boundaries
 
@@ -103,8 +127,7 @@ All commands require `--unstable-kv --unstable-cron`. Already configured in `den
 
 ### Key Patterns
 
-- **AX (Agent Experience)**: All interfaces designed for agents, not humans. Structured errors (`code` + `context` + `recovery`), safe defaults (`dry_run: true`), enums over free strings. Source: https://casys.ai/blog/from-dx-to-ax
-- **Subhosting + Sandbox split**: Agent orchestration (long-running, KV) in Subhosting. Code execution (ephemeral, hardened) in Sandbox. No code runs in Subhosting directly.
+- **Broker → Subhosting → Sandbox**: Broker orchestrates (cron, routing, lifecycle). Agents in Subhosting are reactive (warm-cached V8 isolates, wake on HTTP, sleep when idle). Code execution in Sandbox (ephemeral, hardened). No `Deno.cron()` or `listenQueue()` in Subhosting. In local mode: **Process** (broker) → **Worker** (agent) → **Subprocess** (`Deno.Command`, sandbox). Same 3-layer model, same code, different transport.
 - **Broker as single entry point**: All LLM calls, tool executions, and inter-agent messages go through the broker. Agents and tunnels never exposed publicly.
 - **A2A protocol**: Inter-agent communication via Google's Agent-to-Agent protocol (JSON-RPC 2.0). Peers explicitly declared, closed by default.
 - **Tunnel dual mode**: `local` (machine → broker for tools + auth), `instance` (broker → broker for cross-instance A2A).
@@ -113,10 +136,11 @@ All commands require `--unstable-kv --unstable-cron`. Already configured in `den
 ### Data Flow
 
 ```
-User → Channel (Telegram/Webhook) → Broker → KV Queue → Agent (Subhosting)
+User → Channel (Telegram/Webhook) → Broker → HTTP POST → Agent (Subhosting)
 Agent → Broker (llm_request) → LLM API or CLI on VPS → Broker → Agent
 Agent → Broker (tool_request) → Sandbox or Tunnel → Broker → Agent
-Agent → Broker (agent_message) → peer check → KV Queue or Tunnel → Target Agent
+Agent → Broker (agent_message) → peer check → HTTP POST or Tunnel → Target Agent
+Broker → Deno.cron() → HTTP POST /cron/:job → Agent (Subhosting)  [scheduled tasks]
 ```
 
 ## Error Handling
@@ -141,9 +165,10 @@ Do NOT add local try/catch unless the error needs transformation or a specific r
 
 ### Deno Deploy / Subhosting
 
-- API: `https://api.deno.com/v1`
+- API: **v2** (`https://api.deno.com/v2`) — v1 sunsets July 2026, use v2 for all new code
 - Auth: Bearer token (Subhosting access token)
 - Used for: agent lifecycle (CRUD deployments)
+- Limitations: no `Deno.cron()`, no `Deno.Kv.listenQueue()`, isolates are warm-cached (not persistent)
 
 ### Deno Sandbox
 

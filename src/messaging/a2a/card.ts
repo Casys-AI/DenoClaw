@@ -1,6 +1,6 @@
 import type { AgentCard, AgentSkill } from "./types.ts";
 import type { AgentEntry } from "../../shared/types.ts";
-import type { AgentsConfig } from "../../types.ts";
+import type { AgentsConfig } from "../../agent/types.ts";
 
 /**
  * Generate A2A AgentCards from the DenoClaw agent registry.

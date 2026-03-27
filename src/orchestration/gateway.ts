@@ -1,25 +1,38 @@
-import type { ChannelMessage, Config } from "../types.ts";
-import { getChannelManager } from "../channels/manager.ts";
-import { TelegramChannel } from "../channels/telegram.ts";
-import { WebhookChannel } from "../channels/webhook.ts";
-import { getMessageBus } from "../bus/mod.ts";
-import { getSessionManager } from "../session/mod.ts";
+import type { ChannelMessage } from "../messaging/types.ts";
+import type { Config } from "../config/types.ts";
+import type { MessageBus } from "../messaging/bus.ts";
+import type { SessionManager } from "../messaging/session.ts";
+import type { ChannelManager } from "../messaging/channels/manager.ts";
+import { TelegramChannel } from "../messaging/channels/telegram.ts";
+import { WebhookChannel } from "../messaging/channels/webhook.ts";
 import { AgentLoop } from "../agent/loop.ts";
 import { log } from "../shared/log.ts";
 
+export interface GatewayDeps {
+  bus: MessageBus;
+  session: SessionManager;
+  channels: ChannelManager;
+}
+
 /**
- * Gateway — central orchestrator.
+ * Gateway — central orchestrator (mode local).
  * Wires channels, bus, sessions and agent loop together.
- * Uses Deno.serve() for the HTTP API endpoint.
+ * Toutes les dépendances injectées via constructeur (DI).
  */
 export class Gateway {
   private config: Config;
+  private bus: MessageBus;
+  private session: SessionManager;
+  private channels: ChannelManager;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
 
-  constructor(config: Config) {
+  constructor(config: Config, deps: GatewayDeps) {
     this.config = config;
+    this.bus = deps.bus;
+    this.session = deps.session;
+    this.channels = deps.channels;
   }
 
   async start(): Promise<void> {
@@ -27,31 +40,27 @@ export class Gateway {
 
     log.info("Démarrage du gateway...");
 
-    const cm = getChannelManager();
-    const bus = getMessageBus();
-    await bus.init();
-
-    // WebSocket connections for real-time clients / relay tunnels
+    await this.bus.init();
     this.wsClients = new Map();
 
     // Register configured channels
     if (this.config.channels?.telegram?.enabled) {
       const tg = new TelegramChannel(this.config.channels.telegram);
       await tg.initialize();
-      cm.register(tg);
+      this.channels.register(tg);
     }
 
     if (this.config.channels?.webhook?.enabled) {
       const wh = new WebhookChannel(this.config.channels.webhook);
       await wh.initialize();
-      cm.register(wh);
+      this.channels.register(wh);
     }
 
     // Subscribe bus → handle messages
-    bus.subscribeAll(async (msg) => await this.handleMessage(msg));
+    this.bus.subscribeAll(async (msg) => await this.handleMessage(msg));
 
     // Start all channels
-    await cm.startAll();
+    await this.channels.startAll();
 
     // HTTP API gateway
     const port = this.config.gateway?.port || 3000;
@@ -72,8 +81,8 @@ export class Gateway {
       try { ws.close(); } catch { /* ignore */ }
     }
     this.wsClients.clear();
-    await getChannelManager().stopAll();
-    getMessageBus().close();
+    await this.channels.stopAll();
+    this.bus.close();
 
     this.running = false;
     log.info("Gateway arrêté");
@@ -83,13 +92,12 @@ export class Gateway {
     log.info(`Message de ${msg.channelType} (user: ${msg.userId})`);
 
     try {
-      const sm = getSessionManager();
-      await sm.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
+      await this.session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
 
       const agent = new AgentLoop(msg.sessionId, this.config);
       const result = await agent.processMessage(msg.content);
 
-      await getChannelManager().send(
+      await this.channels.send(
         msg.channelType,
         msg.userId,
         result.content,
@@ -98,7 +106,7 @@ export class Gateway {
     } catch (e) {
       log.error("Erreur traitement message", e);
       try {
-        await getChannelManager().send(
+        await this.channels.send(
           msg.channelType,
           msg.userId,
           "Désolé, une erreur s'est produite. Réessayez.",
@@ -110,13 +118,9 @@ export class Gateway {
     }
   }
 
-  /**
-   * Check API token on protected endpoints.
-   * If DENOCLAW_API_TOKEN is set, all endpoints except / require it.
-   */
   private checkAuth(req: Request): Response | null {
     const token = Deno.env.get("DENOCLAW_API_TOKEN");
-    if (!token) return null; // pas de token configuré = pas d'auth (mode local)
+    if (!token) return null;
 
     const auth = req.headers.get("authorization");
     const queryToken = new URL(req.url).searchParams.get("token");
@@ -132,25 +136,21 @@ export class Gateway {
   private async handleHttp(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
-    // Root — public, pas d'auth
     if (url.pathname === "/") {
       return new Response("DenoClaw Gateway");
     }
 
-    // Auth check sur tous les autres endpoints
     const authErr = this.checkAuth(req);
     if (authErr) return authErr;
 
-    // Health check
     if (url.pathname === "/health") {
       return Response.json({
         status: "ok",
-        channels: getChannelManager().getAllStatuses(),
-        sessions: (await getSessionManager().getActive()).length,
+        channels: this.channels.getAllStatuses(),
+        sessions: (await this.session.getActive()).length,
       });
     }
 
-    // POST /chat — direct API
     if (req.method === "POST" && url.pathname === "/chat") {
       try {
         const body = await req.json() as {
@@ -160,8 +160,7 @@ export class Gateway {
         };
 
         const sessionId = body.sessionId || crypto.randomUUID();
-        const sm = getSessionManager();
-        await sm.getOrCreate(sessionId, "api", "http");
+        await this.session.getOrCreate(sessionId, "api", "http");
 
         const agent = new AgentLoop(sessionId, this.config, body.model ? { model: body.model } : undefined);
         const result = await agent.processMessage(body.message);
@@ -173,7 +172,6 @@ export class Gateway {
       }
     }
 
-    // WebSocket upgrade — /ws?token=xxx
     if (url.pathname === "/ws") {
       const upgrade = req.headers.get("upgrade") || "";
       if (upgrade.toLowerCase() !== "websocket") {
@@ -198,8 +196,7 @@ export class Gateway {
 
           if (data.type === "chat" && data.message) {
             const sessionId = data.sessionId || `ws-${token}`;
-            const sm = getSessionManager();
-            await sm.getOrCreate(sessionId, token, "websocket");
+            await this.session.getOrCreate(sessionId, token, "websocket");
 
             const agent = new AgentLoop(sessionId, this.config);
             const result = await agent.processMessage(data.message);

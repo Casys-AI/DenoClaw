@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { ToolDefinition, ToolResult } from "../../types.ts";
+import type { ToolDefinition, ToolResult } from "../../shared/types.ts";
 import { BaseTool, ToolRegistry } from "./registry.ts";
 
 class MockTool extends BaseTool {

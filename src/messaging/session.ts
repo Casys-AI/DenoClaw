@@ -7,6 +7,10 @@ import { log } from "../shared/log.ts";
 export class SessionManager {
   private kv: Deno.Kv | null = null;
 
+  constructor(kv?: Deno.Kv) {
+    if (kv) this.kv = kv;
+  }
+
   private async getKv(): Promise<Deno.Kv> {
     if (!this.kv) this.kv = await Deno.openKv();
     return this.kv;

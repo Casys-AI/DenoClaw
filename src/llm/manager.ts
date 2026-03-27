@@ -1,4 +1,4 @@
-import type { Config } from "../types.ts";
+import type { Config } from "../config/types.ts";
 import type { LLMResponse, Message, ToolDefinition } from "../shared/types.ts";
 import { AnthropicProvider, type BaseProvider, OpenAICompatProvider } from "./base.ts";
 import { CLIProvider } from "./cli.ts";

@@ -1,4 +1,4 @@
-import type { AgentEntry, ChannelRouting } from "../types.ts";
+import type { AgentEntry, ChannelRouting } from "../shared/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 

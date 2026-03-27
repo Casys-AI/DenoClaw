@@ -1,6 +1,6 @@
 import type { AgentConfig, AgentResponse } from "../shared/types.ts";
-import type { Config } from "../types.ts";
-import { ProviderManager } from "../providers/manager.ts";
+import type { Config } from "../config/types.ts";
+import { ProviderManager } from "../llm/manager.ts";
 import { Memory } from "./memory.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";

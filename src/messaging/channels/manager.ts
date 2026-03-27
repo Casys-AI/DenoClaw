@@ -1,10 +1,15 @@
 import type { BaseChannel } from "./base.ts";
-import { getMessageBus } from "../bus.ts";
+import type { MessageBus } from "../bus.ts";
 import { ChannelError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 
 export class ChannelManager {
   private channels = new Map<string, BaseChannel>();
+  private bus: MessageBus;
+
+  constructor(bus: MessageBus) {
+    this.bus = bus;
+  }
 
   register(channel: BaseChannel): void {
     if (this.channels.has(channel.channelType)) {
@@ -16,14 +21,12 @@ export class ChannelManager {
   }
 
   async startAll(): Promise<void> {
-    const bus = getMessageBus();
-
     const promises = [...this.channels.entries()]
       .filter(([_, ch]) => ch.enabled)
       .map(async ([type, ch]) => {
         try {
           await ch.start((msg) => {
-            bus.publish(msg).catch((e: unknown) => log.error(`Bus publish error (${type})`, e));
+            this.bus.publish(msg).catch((e: unknown) => log.error(`Bus publish error (${type})`, e));
           });
         } catch (e) {
           log.error(`Échec démarrage ${type}`, e);
@@ -68,10 +71,4 @@ export class ChannelManager {
     for (const [type, ch] of this.channels) result[type] = ch.getStatus();
     return result;
   }
-}
-
-let _cm: ChannelManager | null = null;
-export function getChannelManager(): ChannelManager {
-  if (!_cm) _cm = new ChannelManager();
-  return _cm;
 }

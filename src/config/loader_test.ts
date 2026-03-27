@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { createDefaultConfig, getConfigOrDefault, loadConfig, saveConfig } from "./mod.ts";
-import { ConfigError } from "../utils/errors.ts";
+import { createDefaultConfig, getConfigOrDefault, loadConfig, saveConfig } from "./loader.ts";
+import { ConfigError } from "../shared/errors.ts";
 
 Deno.test("createDefaultConfig returns valid config", () => {
   const config = createDefaultConfig();
@@ -11,7 +11,6 @@ Deno.test("createDefaultConfig returns valid config", () => {
 });
 
 Deno.test("loadConfig throws ConfigError when file missing", async () => {
-  // Override home to a nonexistent path
   const originalHome = Deno.env.get("HOME");
   Deno.env.set("HOME", "/tmp/denoclaw-test-nonexistent");
   try {

@@ -1,13 +1,14 @@
 #!/usr/bin/env -S deno run --unstable-kv --unstable-cron --allow-all --env
 
 import { parseArgs } from "@std/cli/parse-args";
-import { getConfig, getConfigOrDefault } from "./src/config/mod.ts";
+import { getConfig, getConfigOrDefault } from "./src/config/loader.ts";
+import type { Config } from "./src/config/types.ts";
 import { AgentLoop } from "./src/agent/loop.ts";
-import { Gateway } from "./src/gateway/mod.ts";
-import { ConsoleChannel } from "./src/channels/console.ts";
-import { getChannelManager } from "./src/channels/manager.ts";
-import { getMessageBus } from "./src/bus/mod.ts";
-import { getSessionManager } from "./src/session/mod.ts";
+import { Gateway } from "./src/orchestration/gateway.ts";
+import { ConsoleChannel } from "./src/messaging/channels/console.ts";
+import { ChannelManager } from "./src/messaging/channels/manager.ts";
+import { MessageBus } from "./src/messaging/bus.ts";
+import { SessionManager } from "./src/messaging/session.ts";
 import {
   publishAgent,
   publishGateway,
@@ -16,12 +17,11 @@ import {
   setupProvider,
   showStatus,
 } from "./src/cli/setup.ts";
-import { BrokerServer } from "./src/broker/server.ts";
-import { LocalRelay } from "./src/relay/local.ts";
+import { BrokerServer } from "./src/orchestration/broker.ts";
+import { LocalRelay } from "./src/orchestration/relay.ts";
 import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
-import { log } from "./src/utils/log.ts";
-import type { Config } from "./src/types.ts";
+import { log } from "./src/shared/log.ts";
 
 const args = parseArgs(Deno.args, {
   string: ["message", "session", "model"],
@@ -44,27 +44,32 @@ async function agent(config: Config): Promise<void> {
     return;
   }
 
-  const cm = getChannelManager();
-  const bus = getMessageBus();
+  // DI : wiring explicite
+  const bus = new MessageBus();
   await bus.init();
-  const sm = getSessionManager();
+  const session = new SessionManager();
+  const channels = new ChannelManager(bus);
   const consoleCh = new ConsoleChannel();
 
   await consoleCh.initialize();
-  cm.register(consoleCh);
+  channels.register(consoleCh);
 
   bus.subscribeAll(async (msg) => {
-    await sm.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
+    await session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
     const loop = new AgentLoop(msg.sessionId, config, args.model ? { model: args.model } : undefined);
     const result = await loop.processMessage(msg.content);
-    await cm.send(msg.channelType, msg.userId, result.content, msg.metadata);
+    await channels.send(msg.channelType, msg.userId, result.content, msg.metadata);
   });
 
-  await cm.startAll();
+  await channels.startAll();
 }
 
 async function gateway(config: Config): Promise<void> {
-  const gw = new Gateway(config);
+  // DI : wiring explicite
+  const bus = new MessageBus();
+  const session = new SessionManager();
+  const channels = new ChannelManager(bus);
+  const gw = new Gateway(config, { bus, session, channels });
   await gw.start();
 
   const ac = new AbortController();
@@ -257,12 +262,10 @@ try {
     }
 
     case "agent": {
-      // Sub-commands: list, create, delete
       if (subcommand === "list") { await listAgents(); break; }
       if (subcommand === "create") { await createAgent(args._[2] as string); break; }
       if (subcommand === "delete") { await deleteAgent(args._[2] as string); break; }
 
-      // Default: run agent (chat)
       const config = await getConfigOrDefault();
       const hasProvider = Object.values(config.providers).some((p) => p?.apiKey || p?.enabled);
       if (!hasProvider) {

@@ -1,4 +1,4 @@
-import { log } from "../utils/log.ts";
+import { log } from "../shared/log.ts";
 
 /**
  * Metrics collector — KV-backed, queryable via /stats endpoint.

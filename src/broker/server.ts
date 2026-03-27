@@ -1,24 +1,13 @@
 import type { BrokerMessage, LLMRequest, ToolRequest, TunnelCapabilities } from "./types.ts";
-import type { Config, SandboxPermission } from "../types.ts";
+import type { BuiltinToolName, Config, AgentEntry, SandboxPermission } from "../types.ts";
+import { BUILTIN_TOOL_PERMISSIONS } from "../types.ts";
+import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../providers/manager.ts";
 import { SandboxManager } from "../sandbox/mod.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
+import { ConfigError } from "../utils/errors.ts";
 import { generateId } from "../utils/helpers.ts";
 import { log } from "../utils/log.ts";
-
-interface AgentPeerConfig {
-  peers?: string[];
-  acceptFrom?: string[];
-  sandbox?: { allowedPermissions?: string[] };
-}
-
-/** Known tool → permissions mapping (ADR-005) */
-const TOOL_PERMISSIONS: Record<string, SandboxPermission[]> = {
-  shell: ["run"],
-  read_file: ["read"],
-  write_file: ["write"],
-  web_fetch: ["net"],
-};
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -31,11 +20,12 @@ const TOOL_PERMISSIONS: Record<string, SandboxPermission[]> = {
  */
 export class BrokerServer {
   private config: Config;
+  private auth!: AuthManager;
   private providers: ProviderManager;
   private sandbox: SandboxManager;
   private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
-  private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities }>();
+  private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }>();
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config) {
@@ -46,12 +36,30 @@ export class BrokerServer {
   }
 
   private async getKv(): Promise<Deno.Kv> {
-    if (!this.kv) this.kv = await Deno.openKv();
+    if (!this.kv) {
+      try {
+        this.kv = await Deno.openKv();
+      } catch (e) {
+        throw new ConfigError(
+          "KV_UNAVAILABLE",
+          { cause: (e instanceof Error ? e : new Error(String(e))).message },
+          "Check Deno Deploy KV permissions or quota",
+        );
+      }
+    }
     return this.kv;
   }
 
   async start(port = 3000): Promise<void> {
+    // Warning si pas de token configuré (ADR-003)
+    if (!Deno.env.get("DENOCLAW_API_TOKEN")) {
+      log.warn("DENOCLAW_API_TOKEN not set — broker running in unauthenticated mode. Do not use in production.");
+    }
+
     const kv = await this.getKv();
+
+    // Initialiser AuthManager avec le KV partagé (une seule connexion)
+    this.auth = new AuthManager(kv);
 
     // Listen for agent requests via KV Queue
     kv.listenQueue(async (raw: unknown) => {
@@ -84,7 +92,17 @@ export class BrokerServer {
           log.warn(`Type de message inconnu : ${msg.type}`);
       }
     } catch (e) {
-      await this.sendError(msg.from, msg.id, (e as Error).message);
+      const err = e instanceof Error ? e : new Error(String(e));
+      log.error(`Message handler failed for ${msg.type} from ${msg.from}`, err);
+      try {
+        await this.sendStructuredError(msg.from, msg.id, {
+          code: "BROKER_ERROR",
+          context: { messageType: msg.type, from: msg.from, cause: err.message },
+          recovery: "Check broker logs for details",
+        });
+      } catch (sendErr) {
+        log.error("Failed to send error reply to agent (KV unavailable?)", sendErr);
+      }
     }
   }
 
@@ -143,13 +161,14 @@ export class BrokerServer {
     const req = msg.payload as ToolRequest;
     const kv = await this.getKv();
 
-    // 1. Check permissions (intersection tool × agent)
-    const toolPerms = TOOL_PERMISSIONS[req.tool] || [];
-    const agentConfig = await kv.get<{ sandbox?: { allowedPermissions?: string[] } }>(
+    // 1. Résoudre les permissions de l'outil (built-in > tunnel pour outils customs)
+    const toolPerms = this.resolveToolPermissions(req.tool);
+
+    // 2. Check permissions (intersection tool × agent) — deny by default (ADR-005)
+    const agentConfig = await kv.get<AgentEntry>(
       ["agents", msg.from, "config"],
     );
-    const agentAllowed = (agentConfig.value?.sandbox?.allowedPermissions ||
-      ["read", "write", "run", "net"]) as SandboxPermission[];
+    const agentAllowed = agentConfig.value?.sandbox?.allowedPermissions || [];
 
     const granted = toolPerms.filter((p) => agentAllowed.includes(p));
     const denied = toolPerms.filter((p) => !agentAllowed.includes(p));
@@ -163,7 +182,7 @@ export class BrokerServer {
       return;
     }
 
-    // 2. Try tunnel first (local tools)
+    // 3. Try tunnel first (local tools)
     const toolStart = performance.now();
     const tunnel = this.findTunnelForTool(req.tool);
     if (tunnel) {
@@ -172,13 +191,18 @@ export class BrokerServer {
       return;
     }
 
-    // 3. Execute in Sandbox (éphémère)
+    // 4. Execute in Sandbox (éphémère)
     try {
       const code = this.buildSandboxCode(req.tool, req.args);
-      const networkAllow = this.config.agents?.defaults?.sandbox?.networkAllow || [];
-      const maxDuration = this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
 
-      log.info(`Sandbox: ${req.tool} avec permissions ${JSON.stringify(granted)}`);
+      // networkAllow : agent-specific > defaults > [] (ADR-005)
+      const agentNetwork = agentConfig.value?.sandbox?.networkAllow;
+      const defaultNetwork = this.config.agents?.defaults?.sandbox?.networkAllow;
+      const networkAllow = agentNetwork || defaultNetwork || [];
+
+      const maxDuration = agentConfig.value?.sandbox?.maxDurationSec || this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
+
+      log.info(`Sandbox: ${req.tool} avec permissions ${JSON.stringify(granted)}, network: ${JSON.stringify(networkAllow)}`);
 
       const result = await this.sandbox.run(code, {
         memoryMb: 256,
@@ -215,6 +239,30 @@ export class BrokerServer {
   }
 
   /**
+   * Résout les permissions d'un outil (ADR-005).
+   * Built-in map = source de vérité pour les outils connus.
+   * Tunnel-advertised = pour les outils custom pas dans la map.
+   */
+  private isBuiltinTool(tool: string): tool is BuiltinToolName {
+    return tool in BUILTIN_TOOL_PERMISSIONS;
+  }
+
+  private resolveToolPermissions(tool: string): SandboxPermission[] {
+    // 1. Built-in map (source de vérité, non-overridable par un tunnel)
+    if (this.isBuiltinTool(tool)) return [...BUILTIN_TOOL_PERMISSIONS[tool]];
+
+    // 2. Tunnel-advertised (outils custom uniquement)
+    for (const [_, t] of this.tunnels) {
+      if (t.capabilities.toolPermissions?.[tool]) {
+        return [...t.capabilities.toolPermissions[tool]];
+      }
+    }
+
+    // 3. Deny by default — outil inconnu = aucune permission
+    return [];
+  }
+
+  /**
    * Build Deno code to execute a tool inside a Sandbox.
    */
   private buildSandboxCode(tool: string, args: Record<string, unknown>): string {
@@ -233,7 +281,7 @@ if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
         return `console.log(await Deno.readTextFile(${JSON.stringify(args.path || "")}));`;
       case "write_file":
         return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${JSON.stringify(args.content || "")});
-console.log("Written: ${args.path}");`;
+console.log("Written: " + ${JSON.stringify(String(args.path || ""))});`;
       case "web_fetch": {
         const method = (args.method as string) || "GET";
         return `const r = await fetch(${JSON.stringify(args.url || "")}, { method: ${JSON.stringify(method)} });
@@ -241,7 +289,7 @@ console.log("HTTP " + r.status);
 console.log(await r.text());`;
       }
       default:
-        return `console.error("Unknown tool: ${tool}");`;
+        return `console.error("Unknown tool: " + ${JSON.stringify(tool)}); Deno.exit(1);`;
     }
   }
 
@@ -252,8 +300,8 @@ console.log(await r.text());`;
     const kv = await this.getKv();
 
     // Vérifier les peers (fermé par défaut)
-    const senderConfig = await kv.get<AgentPeerConfig>(["agents", msg.from, "config"]);
-    const targetConfig = await kv.get<AgentPeerConfig>(["agents", payload.targetAgent, "config"]);
+    const senderConfig = await kv.get<AgentEntry>(["agents", msg.from, "config"]);
+    const targetConfig = await kv.get<AgentEntry>(["agents", payload.targetAgent, "config"]);
 
     // Sender doit avoir target dans ses peers
     const senderPeers = senderConfig.value?.peers || [];
@@ -328,23 +376,84 @@ console.log(await r.text());`;
     return null;
   }
 
-  private async routeToTunnel(ws: WebSocket, msg: BrokerMessage): Promise<void> {
-    // Send to tunnel via WebSocket, tunnel will respond, we relay back via KV Queue
+  private routeToTunnel(ws: WebSocket, msg: BrokerMessage): void {
+    if (ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`Tunnel not open (readyState: ${ws.readyState})`);
+    }
     ws.send(JSON.stringify(msg));
-    // Response comes back via ws.onmessage → relayed in handleTunnelMessage
-    await Promise.resolve();
   }
 
-  private async handleTunnelMessage(data: string): Promise<void> {
-    const msg = JSON.parse(data) as BrokerMessage;
-    const kv = await this.getKv();
-    await kv.enqueue(msg);
+  private async handleTunnelMessage(tunnelId: string, data: string): Promise<void> {
+    let msg: BrokerMessage;
+    try {
+      msg = JSON.parse(data) as BrokerMessage;
+    } catch {
+      log.error(`Malformed JSON from tunnel ${tunnelId}, message dropped`, { preview: data.slice(0, 200) });
+      return;
+    }
+    try {
+      const kv = await this.getKv();
+      await kv.enqueue(msg);
+    } catch (e) {
+      log.error(`Failed to enqueue tunnel message from ${tunnelId}`, e);
+    }
   }
 
-  // ── HTTP + WebSocket ────────────────────────────────
+  // ── HTTP + WebSocket (ADR-003: auth intégré) ───────
 
   private async handleHttp(req: Request): Promise<Response> {
+    try {
+      return await this.handleHttpInner(req);
+    } catch (e) {
+      log.error("Unhandled HTTP error", e);
+      return Response.json(
+        { error: { code: "INTERNAL_ERROR", recovery: "Check broker logs" } },
+        { status: 500 },
+      );
+    }
+  }
+
+  private async handleHttpInner(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
+    // Root — public, pas d'auth
+    if (url.pathname === "/") {
+      return new Response("DenoClaw Broker");
+    }
+
+    // Health — public (monitoring)
+    if (url.pathname === "/health") {
+      return Response.json({
+        status: "ok",
+        tunnels: [...this.tunnels.keys()],
+        tunnelCount: this.tunnels.size,
+      });
+    }
+
+    // Tunnel WebSocket — auth par invite token (ADR-003)
+    if (url.pathname === "/tunnel") {
+      return await this.handleTunnelUpgrade(req);
+    }
+
+    // Invite token generation — admin endpoint
+    if (req.method === "POST" && url.pathname === "/auth/invite") {
+      const authResult = await this.auth.checkRequest(req);
+      if (!authResult.ok) {
+        return Response.json({ error: { code: authResult.code, recovery: authResult.recovery } }, { status: 401 });
+      }
+      const body = await req.json().catch(() => ({})) as { tunnelId?: string };
+      const invite = await this.auth.generateInviteToken(body.tunnelId);
+      return Response.json({ token: invite.token, expiresAt: invite.expiresAt });
+    }
+
+    // Tous les autres endpoints nécessitent auth (ADR-003)
+    const authResult = await this.auth.checkRequest(req);
+    if (!authResult.ok) {
+      return Response.json(
+        { error: { code: authResult.code, recovery: authResult.recovery } },
+        { status: 401 },
+      );
+    }
 
     // Stats endpoint — per-agent metrics
     if (url.pathname === "/stats") {
@@ -360,76 +469,111 @@ console.log(await r.text());`;
       return Response.json(await this.metrics.getAllMetrics());
     }
 
-    // Health check
-    if (url.pathname === "/health") {
-      return Response.json({
-        status: "ok",
-        tunnels: [...this.tunnels.keys()],
-        tunnelCount: this.tunnels.size,
-      });
+    return new Response("Not Found", { status: 404 });
+  }
+
+  private async handleTunnelUpgrade(req: Request): Promise<Response> {
+    const upgrade = req.headers.get("upgrade") || "";
+    if (upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
     }
 
-    // Tunnel WebSocket upgrade
-    if (url.pathname === "/tunnel") {
-      const upgrade = req.headers.get("upgrade") || "";
-      if (upgrade.toLowerCase() !== "websocket") {
-        return new Response("Expected WebSocket", { status: 426 });
+    const url = new URL(req.url);
+    const inviteTokenParam = url.searchParams.get("token");
+
+    // Vérifier le token d'invitation (ADR-003)
+    if (inviteTokenParam) {
+      const inviteResult = await this.auth.verifyInviteToken(inviteTokenParam);
+      if (!inviteResult.ok) {
+        return Response.json(
+          { error: { code: inviteResult.code, recovery: inviteResult.recovery } },
+          { status: 401 },
+        );
       }
-
-      const { socket, response } = Deno.upgradeWebSocket(req);
-      const tunnelId = url.searchParams.get("id") || generateId();
-
-      socket.onopen = () => {
-        log.info(`Tunnel connecté : ${tunnelId}`);
-      };
-
-      socket.onmessage = async (e) => {
-        try {
-          const data = JSON.parse(e.data as string);
-
-          // First message = capabilities registration
-          if (data.type === "register") {
-            const caps: TunnelCapabilities = {
-              tunnelId,
-              type: data.tunnelType || "local",
-              tools: data.tools || [],
-              supportsAuth: data.supportsAuth || false,
-              agents: data.agents || [],
-              allowedAgents: data.allowedAgents || [],
-            };
-            this.tunnels.set(tunnelId, { ws: socket, capabilities: caps });
-            log.info(`Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${caps.agents || []})`);
-            socket.send(JSON.stringify({ type: "registered", tunnelId }));
-            return;
-          }
-
-          // Otherwise = response to a routed request
-          await this.handleTunnelMessage(e.data as string);
-        } catch (err) {
-          log.error(`Erreur tunnel ${tunnelId}`, err);
-        }
-      };
-
-      socket.onclose = () => {
-        this.tunnels.delete(tunnelId);
-        log.info(`Tunnel déconnecté : ${tunnelId}`);
-      };
-
-      return response;
+    } else {
+      const authResult = await this.auth.checkRequest(req);
+      if (!authResult.ok) {
+        return Response.json(
+          { error: { code: authResult.code, recovery: authResult.recovery } },
+          { status: 401 },
+        );
+      }
     }
 
-    return new Response("DenoClaw Broker", { status: 200 });
+    const { socket, response } = Deno.upgradeWebSocket(req);
+    const tunnelId = url.searchParams.get("id") || generateId();
+
+    // Pré-créer l'entrée tunnel pour que onopen puisse y attacher le session token
+    const placeholderCaps: TunnelCapabilities = {
+      tunnelId,
+      type: "local",
+      tools: [],
+      allowedAgents: [],
+    };
+    this.tunnels.set(tunnelId, { ws: socket, capabilities: placeholderCaps });
+
+    socket.onopen = async () => {
+      log.info(`Tunnel connecté : ${tunnelId}`);
+
+      try {
+        // Émettre un session token éphémère pour ce tunnel (ADR-003)
+        const session = await this.auth.generateSessionToken(tunnelId);
+        // Stocker le token pour révocation à la déconnexion
+        const entry = this.tunnels.get(tunnelId);
+        if (entry) {
+          this.tunnels.set(tunnelId, { ...entry, sessionToken: session.token });
+        }
+        socket.send(JSON.stringify({ type: "session_token", token: session.token, expiresAt: session.expiresAt }));
+      } catch (e) {
+        log.error(`Failed to generate session token for tunnel ${tunnelId}`, e);
+        socket.send(JSON.stringify({ type: "error", code: "SESSION_TOKEN_FAILED", recovery: "Reconnect" }));
+        socket.close(1011, "Session token generation failed");
+      }
+    };
+
+    socket.onmessage = async (e) => {
+      try {
+        const data = JSON.parse(e.data as string);
+
+        // First message = capabilities registration (met à jour l'entrée placeholder)
+        if (data.type === "register") {
+          const caps: TunnelCapabilities = {
+            tunnelId,
+            type: data.tunnelType || "local",
+            tools: data.tools || [],
+            toolPermissions: data.toolPermissions,
+            supportsAuth: data.supportsAuth || false,
+            agents: data.agents || [],
+            allowedAgents: data.allowedAgents || [],
+          };
+          const existing = this.tunnels.get(tunnelId);
+          this.tunnels.set(tunnelId, { ws: socket, capabilities: caps, sessionToken: existing?.sessionToken });
+          log.info(`Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${caps.agents || []})`);
+          socket.send(JSON.stringify({ type: "registered", tunnelId }));
+          return;
+        }
+
+        // Otherwise = response to a routed request
+        await this.handleTunnelMessage(tunnelId, e.data as string);
+      } catch (err) {
+        log.error(`Erreur tunnel ${tunnelId}`, err);
+      }
+    };
+
+    socket.onclose = async () => {
+      // Révoquer le session token (ADR-003)
+      const tunnel = this.tunnels.get(tunnelId);
+      if (tunnel?.sessionToken) {
+        await this.auth.revokeSessionToken(tunnel.sessionToken);
+      }
+      this.tunnels.delete(tunnelId);
+      log.info(`Tunnel déconnecté : ${tunnelId}`);
+    };
+
+    return response;
   }
 
   // ── Helpers ─────────────────────────────────────────
-
-  private async sendError(to: string, requestId: string, message: string): Promise<void> {
-    await this.sendStructuredError(to, requestId, {
-      code: "BROKER_ERROR",
-      context: { message },
-      recovery: "Check broker logs",
-    });
-  }
 
   private async sendStructuredError(
     to: string,
@@ -450,8 +594,12 @@ console.log(await r.text());`;
 
   async stop(): Promise<void> {
     if (this.httpServer) await this.httpServer.shutdown();
-    for (const [_, t] of this.tunnels) {
-      try { t.ws.close(); } catch { /* */ }
+    for (const [tunnelId, t] of this.tunnels) {
+      try {
+        t.ws.close(1001, "Broker shutting down");
+      } catch (e) {
+        log.warn(`Failed to close tunnel ${tunnelId} cleanly`, e);
+      }
     }
     this.tunnels.clear();
     if (this.kv) { this.kv.close(); this.kv = null; }

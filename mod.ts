@@ -29,11 +29,32 @@ export { CronManager } from "./src/cron/mod.ts";
 export { getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/mod.ts";
 
 export { SandboxManager } from "./src/sandbox/mod.ts";
+
+// A2A — classes + types + constantes
 export { A2AClient } from "./src/a2a/client.ts";
 export { A2AServer } from "./src/a2a/server.ts";
 export { generateAgentCard, generateAllCards } from "./src/a2a/card.ts";
 export { TaskStore } from "./src/a2a/tasks.ts";
+export { A2A_ERRORS, TERMINAL_STATES } from "./src/a2a/types.ts";
+export type {
+  A2AMessage,
+  A2AMethod,
+  A2ARole,
+  AgentCard,
+  AgentSkill,
+  Artifact,
+  JsonRpcError,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  Part,
+  Task,
+  TaskState,
+  TaskStatus,
+} from "./src/a2a/types.ts";
 
+// Auth (ADR-003)
+export { AuthManager } from "./src/broker/auth.ts";
+export type { AuthErrorCode, AuthResult, InviteToken, SessionToken } from "./src/broker/auth.ts";
 export { BrokerClient } from "./src/broker/client.ts";
 export { BrokerServer } from "./src/broker/server.ts";
 export { LocalRelay } from "./src/relay/local.ts";
@@ -41,14 +62,22 @@ export { AgentRuntime } from "./src/subhosting/agent_runtime.ts";
 export { initTelemetry, MetricsCollector, spanAgentLoop, spanBusPublish, spanLLMCall, spanToolCall, withSpan } from "./src/telemetry/mod.ts";
 export type { AgentMetrics } from "./src/telemetry/metrics.ts";
 
+export { BUILTIN_TOOL_PERMISSIONS } from "./src/types.ts";
 export type {
   AgentConfig,
+  AgentDefaults,
+  AgentEntry,
   AgentResponse,
+  AgentsConfig,
+  BuiltinToolName,
   ChannelMessage,
+  ChannelRouting,
   Config,
   CronJob,
   LLMResponse,
   Message,
+  SandboxConfig,
+  SandboxPermission,
   Session,
   Skill,
   StructuredError,

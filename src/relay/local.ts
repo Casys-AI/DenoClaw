@@ -59,12 +59,13 @@ export class LocalRelay {
       this.reconnectAttempts = 0;
       log.info("Relay: connecté au broker");
 
-      // Register capabilities
+      // Register capabilities (ADR-005 : inclut les permissions de chaque outil)
       const registration = {
         type: "register" as const,
         tunnelId: "",
         tunnelType: "local" as const,
         tools: this.config.capabilities.tools,
+        toolPermissions: this.tools.getToolPermissions(),
         supportsAuth: true,
         allowedAgents: this.config.allowedAgents || [],
       };
@@ -138,12 +139,11 @@ export class LocalRelay {
   }
 
   private async executeTool(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
-    // AX: log what we're about to do
-    log.info(`Relay: exécution locale — ${tool}`);
-
-    if (!this.config.autoApprove) {
-      // In a real implementation, this would prompt the user for approval
-      log.info(`Relay: auto-approve activé pour ${tool}`);
+    if (this.config.autoApprove) {
+      log.info(`Relay: exécution locale (auto-approve) — ${tool}`);
+    } else {
+      // TODO: implémenter le prompt interactif d'approbation
+      log.warn(`Relay: manual approval not implemented, executing — ${tool}`);
     }
 
     return await this.tools.execute(tool, args);

@@ -3,6 +3,8 @@
  * All messages go through KV Queues as JSON.
  */
 
+import type { SandboxPermission } from "../types.ts";
+
 // ── Message envelope ─────────────────────────────────────
 
 export type BrokerMessageType =
@@ -70,6 +72,8 @@ export interface TunnelCapabilities {
   type: TunnelType;
   // Local tunnel: expose tools + auth flow
   tools: string[];
+  /** Permissions requises par chaque outil (ADR-005). Clé = nom outil, valeur = permissions. */
+  toolPermissions?: Record<string, SandboxPermission[]>;
   supportsAuth?: boolean;
   // Instance tunnel: expose remote agents via broker-to-broker
   agents?: string[];

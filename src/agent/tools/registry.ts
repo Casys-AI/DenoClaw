@@ -34,6 +34,15 @@ export class ToolRegistry {
     return [...this.tools.values()].map((t) => t.getDefinition());
   }
 
+  /** Retourne la map nom → permissions requises pour tous les outils enregistrés (ADR-005). */
+  getToolPermissions(): Record<string, SandboxPermission[]> {
+    const perms: Record<string, SandboxPermission[]> = {};
+    for (const [name, tool] of this.tools) {
+      perms[name] = [...tool.permissions];
+    }
+    return perms;
+  }
+
   async execute(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {

@@ -103,6 +103,22 @@ export interface ChannelMessage {
 
 export type SandboxPermission = "read" | "write" | "run" | "net" | "env" | "ffi";
 
+/** Noms des outils built-in. Ajouter un outil ici sans mettre à jour la map → erreur de compilation. */
+export type BuiltinToolName = "shell" | "read_file" | "write_file" | "web_fetch";
+
+/**
+ * Permissions requises par chaque outil built-in (ADR-005). Source unique de vérité.
+ *
+ * Placé dans types.ts (et non agent/tools/) car le broker doit y accéder
+ * et la boundary d'import interdit broker → agent/tools.
+ */
+export const BUILTIN_TOOL_PERMISSIONS: Readonly<Record<BuiltinToolName, readonly SandboxPermission[]>> = {
+  shell: ["run"],
+  read_file: ["read"],
+  write_file: ["write"],
+  web_fetch: ["net"],
+} as const;
+
 export interface SandboxConfig {
   allowedPermissions: SandboxPermission[];
   networkAllow?: string[];

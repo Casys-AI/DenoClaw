@@ -1,10 +1,11 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getCronJobs } from "../lib/api-client.ts";
 import { formatRelative } from "../lib/format.ts";
 import type { CronJob } from "../lib/types.ts";
 
 export const handler = {
-  async GET(_req: Request) {
+  async GET(_ctx: FreshContext) {
     const jobs = await getCronJobs();
     return page(jobs);
   },

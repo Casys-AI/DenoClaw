@@ -1,4 +1,5 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, getAllAgentMetrics, type InstanceData } from "../../lib/api-client.ts";
 import { formatCompact, formatCost, formatLatency } from "../../lib/format.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
@@ -7,9 +8,8 @@ import type { AgentStatusEntry, AgentMetrics } from "../../lib/types.ts";
 
 
 export const handler = {
-  async GET(req: Request) {
-    const url = new URL(req.url);
-    const selectedInstance = url.searchParams.get("instance") || "all";
+  async GET(ctx: FreshContext) {
+    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
     const instances = await getAllInstancesData();
 
     const agents = selectedInstance === "all"

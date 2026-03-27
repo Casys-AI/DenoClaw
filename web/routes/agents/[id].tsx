@@ -47,7 +47,7 @@ interface AgentDetailData {
 }
 
 export const handler = {
-  async GET(_req: Request, ctx: FreshContext) {
+  async GET(ctx: FreshContext) {
     const agentId = ctx.params.id ?? "unknown";
     const brokerUrl = getBrokerUrl();
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";

@@ -1,9 +1,10 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getBrokerUrl } from "../lib/api-client.ts";
 import ActivityFeed from "../islands/ActivityFeed.tsx";
 
 export const handler = {
-  GET(_req: Request) {
+  GET(_ctx: FreshContext) {
     return page({ brokerUrl: getBrokerUrl() });
   },
 };

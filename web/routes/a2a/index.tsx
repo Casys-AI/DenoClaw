@@ -1,4 +1,5 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getBrokerUrl } from "../../lib/api-client.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
 import type { AgentTaskEntry } from "../../lib/types.ts";
@@ -9,7 +10,7 @@ interface A2AData {
 }
 
 export const handler = {
-  async GET(_req: Request) {
+  async GET(_ctx: FreshContext) {
     const brokerUrl = getBrokerUrl();
     let tasks: AgentTaskEntry[] = [];
     try {

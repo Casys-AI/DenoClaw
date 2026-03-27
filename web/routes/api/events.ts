@@ -1,3 +1,4 @@
+import type { FreshContext } from "@fresh/core";
 import { getBrokerUrl } from "../../lib/api-client.ts";
 
 /**
@@ -5,7 +6,7 @@ import { getBrokerUrl } from "../../lib/api-client.ts";
  * et on relaie le SSE de la gateway cote serveur. Zero CORS.
  */
 export const handler = {
-  GET(_req: Request) {
+  GET(_ctx: FreshContext) {
     const brokerUrl = getBrokerUrl();
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
     const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};

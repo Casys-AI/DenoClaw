@@ -1,4 +1,5 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, aggregateSummaries, type InstanceData } from "../lib/api-client.ts";
 import { formatCompact, formatCost } from "../lib/format.ts";
 import { StatusDot } from "../components/StatusBadge.tsx";
@@ -15,9 +16,8 @@ interface OverviewData {
 }
 
 export const handler = {
-  async GET(req: Request) {
-    const url = new URL(req.url);
-    const selectedInstance = url.searchParams.get("instance") || "all";
+  async GET(ctx: FreshContext) {
+    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
 
     const instances = await getAllInstancesData();
     const summary = aggregateSummaries(

@@ -1,4 +1,5 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, type InstanceData } from "../lib/api-client.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { StatusDot } from "../components/StatusBadge.tsx";
@@ -14,9 +15,8 @@ interface NetworkData {
 }
 
 export const handler = {
-  async GET(req: Request) {
-    const url = new URL(req.url);
-    const selectedInstance = url.searchParams.get("instance") || "all";
+  async GET(ctx: FreshContext) {
+    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
     const instances = await getAllInstancesData();
 
     const filteredInstances = selectedInstance === "all"

@@ -1,4 +1,5 @@
 import { page } from "@fresh/core";
+import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, aggregateSummaries, getAllAgentMetrics, type InstanceData, getBrokerUrl } from "../lib/api-client.ts";
 import { formatCompact, formatCost } from "../lib/format.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
@@ -21,9 +22,8 @@ interface CostData {
 }
 
 export const handler = {
-  async GET(req: Request) {
-    const url = new URL(req.url);
-    const selectedInstance = url.searchParams.get("instance") || "all";
+  async GET(ctx: FreshContext) {
+    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
     const instances = await getAllInstancesData();
     const filtered = selectedInstance === "all" ? instances : instances.filter((i) => i.instance.name === selectedInstance);
     const summary = aggregateSummaries(filtered);

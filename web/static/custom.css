@@ -1,32 +1,5 @@
 /* ── DenoClaw Dashboard — Digital Monolith overrides ── */
 
-/* Pure black & white theme — override DaisyUI "black" theme */
-[data-theme="black"] {
-  --b1: 0 0% 0%;           /* base-100: pure black #000000 */
-  --b2: 0 0% 5%;           /* base-200: #0d0d0d */
-  --b3: 0 0% 8%;           /* base-300: #141414 */
-  --bc: 0 0% 90%;          /* base-content: #e5e5e5 */
-  --n: 0 0% 10%;           /* neutral: #1a1a1a */
-  --nc: 0 0% 67%;          /* neutral-content: #ababab */
-  --p: 193 100% 50%;       /* primary: #00C2FF (Deno cyan) */
-  --pc: 0 0% 100%;         /* primary-content: white */
-  --s: 218 100% 50%;       /* secondary: #0055FF (Deno blue) */
-  --sc: 0 0% 100%;         /* secondary-content: white */
-  --a: 193 100% 50%;       /* accent: same as primary */
-  --ac: 0 0% 100%;
-  --su: 142 71% 45%;       /* success: #22c55e */
-  --suc: 0 0% 100%;
-  --er: 0 84% 60%;         /* error: #ef4444 */
-  --erc: 0 0% 100%;
-  --wa: 38 92% 50%;        /* warning: #f59e0b */
-  --wac: 0 0% 0%;
-  --in: 217 91% 60%;       /* info: #3b82f6 */
-  --inc: 0 0% 100%;
-  --rounded-box: 0;        /* sharp corners */
-  --rounded-btn: 0;
-  --rounded-badge: 0;
-}
-
 /* Fonts */
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 

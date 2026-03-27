@@ -12,6 +12,7 @@ import {
 } from "../shared/helpers.ts";
 import { ensureDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
+import type { AgentEntry } from "../shared/types.ts";
 
 interface PendingRequest {
   resolve: (value: AgentResponse) => void;
@@ -79,11 +80,10 @@ export class WorkerPool {
 
   async start(agentIds: string[]): Promise<void> {
     if (agentIds.length === 0) {
-      throw new AgentError(
-        "NO_AGENTS",
-        {},
-        "Add agents to config.agents.registry first",
+      log.warn(
+        "WorkerPool: no agents configured — starting empty. Add agents via API or dashboard.",
       );
+      return;
     }
     await Deno.mkdir(DATA_DIR, { recursive: true });
     // Ensure each agent's workspace dir exists (for memory.db)
@@ -388,6 +388,40 @@ export class WorkerPool {
 
     this.agents.clear();
     log.info("WorkerPool arrêté");
+  }
+
+  /** Add an agent dynamically (hot-add, no restart needed). */
+  async addAgent(agentId: string, entry: AgentEntry): Promise<void> {
+    if (this.agents.has(agentId)) {
+      throw new AgentError(
+        "AGENT_EXISTS",
+        { agentId },
+        "Agent already running",
+      );
+    }
+    // Update config registry so the worker sees the agent config
+    if (!this.config.agents.registry) this.config.agents.registry = {};
+    this.config.agents.registry[agentId] = entry;
+
+    await Deno.mkdir(DATA_DIR, { recursive: true });
+    await ensureDir(getAgentDir(agentId));
+    await this.spawnWorker(agentId);
+    log.info(`Agent ajouté à chaud : ${agentId}`);
+  }
+
+  /** Remove an agent dynamically. */
+  removeAgent(agentId: string): void {
+    const entry = this.agents.get(agentId);
+    if (!entry) return;
+    try {
+      entry.worker.terminate();
+    } catch { /* already dead */ }
+    this.agents.delete(agentId);
+    if (this.config.agents.registry) {
+      delete this.config.agents.registry[agentId];
+    }
+    this.callbacks.onWorkerStopped?.(agentId);
+    log.info(`Agent supprimé : ${agentId}`);
   }
 
   // ── Shared KV writes (observability, on behalf of Workers) ──

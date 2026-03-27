@@ -10,7 +10,8 @@
     "test": "deno test --unstable-kv --allow-all",
     "check": "deno check main.ts mod.ts",
     "lint": "deno lint",
-    "fmt": "deno fmt"
+    "fmt": "deno fmt",
+    "sync-agents": "deno run --allow-all --env scripts/sync_agents.ts"
   },
   "imports": {
     "@std/cli": "jsr:@std/cli@^1",
@@ -38,5 +39,9 @@
     "noImplicitReturns": true,
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
+  },
+  "deploy": {
+    "org": "casys",
+    "app": "denoclaw"
   }
 }

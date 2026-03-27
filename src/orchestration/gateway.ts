@@ -23,6 +23,7 @@ import {
 } from "../telemetry/traces.ts";
 import { RateLimiter } from "./rate_limit.ts";
 import { GitHubOAuth } from "./github_oauth.ts";
+import { AgentStore } from "./agent_store.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
@@ -53,6 +54,7 @@ export class Gateway {
   private freshHandler: ((req: Request) => Promise<Response>) | null;
   private rateLimiter: RateLimiter | null = null;
   private githubOAuth: GitHubOAuth | null = null;
+  private agentStore: AgentStore | null = null;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
@@ -70,6 +72,7 @@ export class Gateway {
     if (this.kv) {
       this.rateLimiter = new RateLimiter(this.kv, 100, 60_000);
       this.githubOAuth = new GitHubOAuth(this.kv, ["superWorldSavior"]);
+      this.agentStore = new AgentStore(this.kv);
     }
   }
 
@@ -236,6 +239,75 @@ export class Gateway {
 
     const authErr = await this.checkAuth(req);
     if (authErr) return authErr;
+
+    // ── Agent CRUD (KV-backed) ──
+    if (
+      this.agentStore && url.pathname === "/api/agents" && req.method === "GET"
+    ) {
+      const registry = await this.agentStore.list();
+      return Response.json(registry);
+    }
+
+    if (
+      this.agentStore && url.pathname === "/api/agents" && req.method === "POST"
+    ) {
+      try {
+        const body = await req.json() as {
+          agentId: string;
+          config: import("../shared/types.ts").AgentEntry;
+        };
+        if (!body.agentId || !body.config) {
+          return Response.json({
+            error: {
+              code: "INVALID_INPUT",
+              recovery: "Provide agentId and config",
+            },
+          }, { status: 400 });
+        }
+        await this.agentStore.set(body.agentId, body.config);
+        // Hot-add to worker pool
+        try {
+          await this.workerPool.addAgent(body.agentId, body.config);
+        } catch { /* agent may already be running */ }
+        return Response.json({ ok: true, agentId: body.agentId });
+      } catch (e) {
+        return Response.json({
+          error: {
+            code: "INVALID_JSON",
+            context: { message: (e as Error).message },
+          },
+        }, { status: 400 });
+      }
+    }
+
+    if (
+      this.agentStore && url.pathname.startsWith("/api/agents/") &&
+      req.method === "DELETE"
+    ) {
+      const agentId = url.pathname.split("/api/agents/")[1];
+      if (!agentId) {
+        return Response.json({ error: { code: "MISSING_AGENT_ID" } }, {
+          status: 400,
+        });
+      }
+      const deleted = await this.agentStore.delete(agentId);
+      if (deleted) this.workerPool.removeAgent(agentId);
+      return Response.json({ ok: deleted, agentId });
+    }
+
+    if (
+      this.agentStore && url.pathname.startsWith("/api/agents/") &&
+      req.method === "GET"
+    ) {
+      const agentId = url.pathname.split("/api/agents/")[1];
+      const config = await this.agentStore.get(agentId);
+      if (!config) {
+        return Response.json({ error: { code: "AGENT_NOT_FOUND" } }, {
+          status: 404,
+        });
+      }
+      return Response.json({ agentId, config });
+    }
 
     if (url.pathname === "/health") {
       return Response.json({

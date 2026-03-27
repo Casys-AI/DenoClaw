@@ -10,6 +10,11 @@ import { StatusDot } from "../components/StatusBadge.tsx";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { AlertStrip } from "../components/AlertStrip.tsx";
 import type { AgentStatusEntry, MetricsSummary } from "../lib/types.ts";
+import {
+  CreateAgentButton,
+  CreateAgentModal,
+} from "../components/CreateAgentModal.tsx";
+import { getBrokerUrl } from "../lib/api-client.ts";
 
 interface OverviewData {
   instances: InstanceData[];
@@ -120,7 +125,10 @@ export default function Overview({ data }: { data: OverviewData }) {
         <div class="lg:col-span-3">
           <div class="card bg-base-200">
             <div class="card-body">
-              <h2 class="card-title font-display">Agents</h2>
+              <div class="flex justify-between items-center">
+                <h2 class="card-title font-display">Agents</h2>
+                <CreateAgentButton />
+              </div>
               {agents.length === 0
                 ? (
                   <div role="alert" class="alert alert-info">
@@ -138,8 +146,7 @@ export default function Overview({ data }: { data: OverviewData }) {
                       />
                     </svg>
                     <span>
-                      No agents found. Configure agents with{" "}
-                      <code class="font-data">denoclaw agent create</code>.
+                      No agents found. Click "+ New Agent" to create one.
                     </span>
                   </div>
                 )
@@ -220,6 +227,8 @@ export default function Overview({ data }: { data: OverviewData }) {
           </span>
         </div>
       )}
+
+      <CreateAgentModal brokerUrl={getBrokerUrl()} />
     </div>
   );
 }

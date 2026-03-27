@@ -9,6 +9,11 @@ import { formatCompact, formatCost, formatLatency } from "../../lib/format.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
 import { InstanceSelector } from "../../components/InstanceSelector.tsx";
 import type { AgentMetrics, AgentStatusEntry } from "../../lib/types.ts";
+import {
+  CreateAgentButton,
+  CreateAgentModal,
+} from "../../components/CreateAgentModal.tsx";
+import { getBrokerUrl } from "../../lib/api-client.ts";
 
 export const handler = {
   async GET(ctx: FreshContext) {
@@ -50,7 +55,10 @@ export default function AgentsList(
 
   return (
     <div class="space-y-4">
-      <h1 class="text-2xl font-display font-bold">Agents</h1>
+      <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-display font-bold">Agents</h1>
+        <CreateAgentButton />
+      </div>
 
       {/* Instance selector */}
       <InstanceSelector
@@ -89,8 +97,7 @@ export default function AgentsList(
               />
             </svg>
             <span>
-              No agents found. Configure agents with{" "}
-              <code class="font-data">denoclaw agent create</code>.
+              No agents found. Click "+ New Agent" to create one.
             </span>
           </div>
         )
@@ -197,6 +204,8 @@ export default function AgentsList(
             </table>
           </div>
         )}
+
+      <CreateAgentModal brokerUrl={getBrokerUrl()} />
     </div>
   );
 }

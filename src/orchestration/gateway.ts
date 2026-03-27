@@ -99,14 +99,17 @@ export class Gateway {
       await this.session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
 
       const agent = new AgentLoop(msg.sessionId, this.config);
-      const result = await agent.processMessage(msg.content);
-
-      await this.channels.send(
-        msg.channelType,
-        msg.userId,
-        result.content,
-        msg.metadata,
-      );
+      try {
+        const result = await agent.processMessage(msg.content);
+        await this.channels.send(
+          msg.channelType,
+          msg.userId,
+          result.content,
+          msg.metadata,
+        );
+      } finally {
+        agent.close();
+      }
     } catch (e) {
       log.error("Erreur traitement message", e);
       try {
@@ -176,9 +179,12 @@ export class Gateway {
         await this.session.getOrCreate(sessionId, "api", "http");
 
         const agent = new AgentLoop(sessionId, this.config, body.model ? { model: body.model } : undefined);
-        const result = await agent.processMessage(body.message);
-
-        return Response.json({ sessionId, response: result.content });
+        try {
+          const result = await agent.processMessage(body.message);
+          return Response.json({ sessionId, response: result.content });
+        } finally {
+          agent.close();
+        }
       } catch (e) {
         log.error("Erreur API /chat", e);
         return Response.json({ error: (e as Error).message }, { status: 500 });
@@ -212,13 +218,16 @@ export class Gateway {
             await this.session.getOrCreate(sessionId, token, "websocket");
 
             const agent = new AgentLoop(sessionId, this.config);
-            const result = await agent.processMessage(data.message);
-
-            socket.send(JSON.stringify({
-              type: "response",
+            try {
+              const result = await agent.processMessage(data.message);
+              socket.send(JSON.stringify({
+                type: "response",
               sessionId,
               content: result.content,
             }));
+            } finally {
+              agent.close();
+            }
           }
         } catch (err) {
           log.error("Erreur WebSocket message", err);

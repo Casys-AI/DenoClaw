@@ -1,6 +1,13 @@
-import type { AgentConfig, AgentResponse } from "./types.ts";
-import type { Config } from "../config/types.ts";
+import type { AgentConfig, AgentDefaults, AgentResponse, ToolsConfig } from "./types.ts";
+import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
+
+/** Projection minimale de Config nécessaire à AgentLoop — pas de dépendance sur config/ */
+interface AgentLoopConfig {
+  agents: { defaults: AgentDefaults };
+  providers: ProvidersConfig;
+  tools: ToolsConfig;
+}
 import { Memory } from "./memory.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
@@ -26,7 +33,7 @@ export class AgentLoop {
   private tools: ToolRegistry;
   private maxIterations: number;
 
-  constructor(sessionId: string, config: Config, agentConfig?: Partial<AgentConfig>, maxIterations = 10, deps?: AgentLoopDeps) {
+  constructor(sessionId: string, config: AgentLoopConfig, agentConfig?: Partial<AgentConfig>, maxIterations = 10, deps?: AgentLoopDeps) {
     this.config = {
       model: config.agents?.defaults?.model || "anthropic/claude-sonnet-4-6",
       temperature: config.agents?.defaults?.temperature ?? 0.7,
@@ -45,7 +52,7 @@ export class AgentLoop {
     if (!deps?.tools) this.registerBuiltInTools(config);
   }
 
-  private registerBuiltInTools(config: Config): void {
+  private registerBuiltInTools(config: AgentLoopConfig): void {
     const t = config.tools;
     this.tools.register(new ShellTool(t?.restrictToWorkspace, t?.allowedCommands, t?.deniedCommands));
     this.tools.register(new ReadFileTool());

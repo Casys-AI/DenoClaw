@@ -20,16 +20,17 @@ Aucun code ne s'exécute directement dans le Subhosting. Tout passe par une Sand
 │                                                             │
 │  ┌─────────────────────────────────────────────────┐       │
 │  │              LLM Gateway / Proxy                 │       │
-│  │  Mode API : clés sur le broker → fetch()         │       │
-│  │  Mode CLI : route vers tunnel → Codex/Claude CLI │       │
+│  │  Mode Clé API : clés sur le broker → fetch()     │       │
+│  │  Mode OAuth : token OAuth (flow navigateur)      │       │
 │  │  Rate limiting, coûts, fallback, cache, logs     │       │
 │  └──────────────────────┬──────────────────────────┘       │
 │                         │                                   │
 │  ┌──────────────────────┴──────────────────────────┐       │
 │  │              Message Router                      │       │
-│  │  KV Queues = transport durable inter-agents      │       │
-│  │  KV Watch = observation temps réel d'état        │       │
-│  │  WebSocket hub = tunnels vers local/VPS          │       │
+│  │  HTTP POST → agents Subhosting                   │       │
+│  │  KV Queues = durabilité interne Broker           │       │
+│  │  KV Watch = observation temps réel               │       │
+│  │  WebSocket hub = mesh tunnels                    │       │
 │  └───┬──────────┬──────────┬──────────┬────────────┘       │
 │      │          │          │          │                     │
 │  ┌───┴──────┐  ┌──┴──────┐  ┌──┴──────┐  ┌──┴──────┐    │
@@ -46,9 +47,8 @@ Aucun code ne s'exécute directement dans le Subhosting. Tout passe par une Sand
                │                    │
         ┌──────┴──────┐      ┌─────┴──────┐
         │ Machine A    │      │ VPS / GPU   │
-        │ Claude CLI   │      │ Outils      │
-        │ Codex CLI    │      │ spécialisés │
-        │ FS local     │      │             │
+        │ Shell, FS    │      │ Outils      │
+        │ Auth flow    │      │ spécialisés │
         └─────────────┘      └────────────┘
 ```
 
@@ -58,15 +58,15 @@ Aucun code ne s'exécute directement dans le Subhosting. Tout passe par une Sand
 
 Le Broker est le seul composant qui tourne en dehors d'une Sandbox. C'est le plan de contrôle. Il fait :
 
-- **LLM Proxy (dual mode)** — Deux chemins pour les completions LLM :
-  - **Mode API** : le broker détient les clés (Anthropic, OpenAI, etc.), fait le fetch() directement
-  - **Mode CLI via tunnel** : route vers un tunnel WS → la machine locale exécute Codex CLI ou Claude CLI (qui gèrent leur propre auth)
+- **LLM Proxy** — Deux modes d'auth, même `fetch()` au final (ADR-002) :
+  - **Mode Clé API** : le broker détient les clés (Anthropic, OpenAI, etc.)
+  - **Mode OAuth** : token obtenu via flow navigateur (même mécanisme que Claude CLI / Codex CLI), stocké sur le Broker
   - L'agent ne sait pas quel mode est utilisé — interface uniforme `broker.complete()`
-- **Message Router** — Route les messages entre agents via KV Queues. Contrôle qui parle à qui (permissions). Même mécanisme pour LLM, outils, et inter-agents.
-- **Tunnel Hub** — Maintient les connexions WebSocket vers les machines locales / VPS. Chaque tunnel déclare ses **capabilities** (providers CLI, outils). Le broker route selon ces déclarations.
-- **Cron Scheduler** — Gère les crons de tous les agents via `Deno.cron()` (fonctionne sur Deploy). Quand un cron se déclenche, le broker envoie un HTTP POST à l'agent Subhosting concerné.
-- **Agent Lifecycle** — Crée, détruit, monitore les agents via l'API Subhosting **v2** (deployments) et les exécutions via l'API Sandbox (instances éphémères).
-- **Auth** — `@deno/oidc` pour les tunnels, credentials materialization pour les agents (ADR-003). Zéro secret statique sauf les clés API LLM.
+- **Message Router** — Route les messages vers les agents via HTTP POST. KV Queues utilisées en interne (durabilité Broker). Contrôle qui parle à qui (permissions A2A).
+- **Tunnel Hub** — Mesh réseau à la Tailscale. Maintient les connexions WebSocket vers les noeuds (machines, VPS, GPU) et les autres Brokers (fédération). Chaque tunnel déclare ses **capabilities** (outils, auth). Le broker route selon ces déclarations.
+- **Cron Dispatcher** — Un seul `Deno.cron()` statique qui lit les schedules agents depuis KV et dispatche par HTTP POST vers les agents concernés.
+- **Agent Lifecycle** — Crée, détruit, monitore les agents via l'API Subhosting **v2** (Apps/Revisions) et les exécutions via l'API Sandbox (instances éphémères).
+- **Auth** — `@deno/oidc` pour les agents Subhosting et les tunnels. Credentials materialization pour les Sandboxes (ADR-003). Zéro secret statique visé.
 
 ### 2. Agents (Deno Subhosting + Sandbox)
 
@@ -129,46 +129,39 @@ class AgentRuntime {
 
 ### 3. Tunnels (WebSocket)
 
-Le tunnel est un WebSocket bidirectionnel. Il sert à connecter **tout ce qui n'est pas dans la même instance Deploy**. Deux cas d'usage :
+Le tunnel est le **mesh réseau** de DenoClaw — il connecte tout ce qui n'est pas sur la même instance Deploy. Comme Tailscale crée un réseau privé entre machines.
 
-#### A. Instance → Local (ou VPS)
+#### Trois types de connexion
 
-Connecte une machine locale ou un VPS au broker. Sert à :
-- **Outils locaux** — exécuter shell, FS, scripts sur ta machine depuis un agent cloud
-- **Auth flow navigateur** — router l'URL OAuth/device code vers ton navigateur local (one-shot pour les CLIs)
+| Type | Relie | Usage |
+|---|---|---|
+| **Noeud → Broker** | Machine/VPS/GPU → Broker | Outils distants (shell, FS, GPU), auth OAuth navigateur |
+| **Broker → Broker** | Instance A ↔ Instance B | Fédération A2A cross-instance |
+| **Local → Broker** | Dev machine → Broker | Outils locaux, auth flow, tests |
 
-```
-Instance (Deploy)                    Machine locale / VPS
-Broker ◄──── tunnel (WS) ───────── denoclaw tunnel
-  │                                     │
-  │  tool_call → tunnel → exécute       │
-  │  auth_request → tunnel → navigateur │
-```
-
-#### B. Instance → Instance
-
-Connecte deux instances DenoClaw entre elles. Les agents restent internes (jamais exposés), seuls les brokers se parlent via tunnel.
+Les **agents** ne sont jamais directement sur le tunnel — ils passent par leur Broker via HTTP.
 
 ```
-Instance A (Deploy)                  Instance B (Deploy)
-Broker A ◄──── tunnel (WS) ────────► Broker B
-  │                                      │
-  │ KV interne                           │ KV interne
-  │                                      │
-  agents A                               agents B
-  (pas d'URL publique)                   (pas d'URL publique)
+Instance A                    Instance B                    Machine locale
+┌──────────┐                 ┌──────────┐                 ┌──────────┐
+│ Broker A │◄═══ tunnel ════►│ Broker B │                 │ denoclaw │
+│  agents  │                 │  agents  │                 │ tunnel   │
+└──────────┘                 └──────────┘                 └────┬─────┘
+                                                               │
+                              VPS (noeud)                      │
+                             ┌──────────┐                      │
+                             │ Shell/FS │◄══ tunnel ═══════════╝
+                             │ GPU      │
+                             └──────────┘
 ```
 
-Un agent sur l'instance A peut envoyer une Task A2A à un agent sur l'instance B : le broker A transmet via le tunnel au broker B, qui route en KV Queue interne vers l'agent cible.
-
-#### Commandes CLI
+#### Commandes
 
 ```bash
 # Connecter ta machine locale au broker
 denoclaw tunnel wss://mon-broker.deno.dev/tunnel
 
 # Connecter deux instances entre elles
-# Sur l'instance B, ouvrir le tunnel vers l'instance A :
 denoclaw tunnel wss://instance-a.deno.dev/tunnel
 ```
 
@@ -177,21 +170,28 @@ denoclaw tunnel wss://instance-a.deno.dev/tunnel
 Chaque tunnel déclare ce qu'il expose :
 
 ```typescript
-// Machine locale → outils + auth
+// Noeud VPS/machine avec outils
+{
+  type: "node",
+  tools: ["shell", "fs_read", "fs_write"],
+  supportsAuth: true,
+}
+
+// Broker B (inter-instance, fédération)
+{
+  type: "instance",
+  agents: ["support", "billing"],  // agents routables via ce tunnel
+}
+
+// Dev machine locale
 {
   type: "local",
   tools: ["shell", "fs_read", "fs_write"],
   supportsAuth: true,
 }
-
-// Instance B → agents accessibles via ce tunnel
-{
-  type: "instance",
-  agents: ["support", "billing"],  // agents de l'instance B routables
-}
 ```
 
-Le broker sait quoi router où grâce à ces déclarations.
+Le broker maintient un registre des tunnels actifs. Il route selon les capabilities déclarées.
 
 ## Flux complet d'un message
 
@@ -209,10 +209,9 @@ Le broker sait quoi router où grâce à ces déclarations.
            │  POST https://<broker>/llm { model: "...", messages: [...] }
            │
 6. Broker résout le provider :
-           │  ├─ model = "anthropic/..." → MODE API : fetch() avec clé (broker la détient)
-           │  ├─ model = "openai/..."    → MODE API : fetch() avec clé
-           │  ├─ model = "codex-cli"     → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
-           │  └─ model = "claude-cli"    → CLI sur le VPS de l'agent (auth via tunnel au 1er lancement)
+           │  ├─ model = "anthropic/..." → fetch() avec clé API (broker la détient)
+           │  ├─ model = "openai/..."    → fetch() avec clé API
+           │  └─ model = "claude-oauth"  → fetch() avec token OAuth (obtenu via flow navigateur one-shot)
            │
 7. Broker renvoie la réponse LLM dans la réponse HTTP
            │
@@ -251,21 +250,19 @@ Chaque tunnel déclare au broker ce qu'il expose :
 
 Le broker maintient un registre des tunnels actifs. Quand un agent demande un outil, le broker cherche un tunnel qui a la capability.
 
-## Auth flow navigateur via tunnel
+## Auth OAuth LLM via tunnel
 
-Les CLIs (Claude, Codex) tournent sur le **VPS/machine de l'agent**, pas en local. Mais l'auth OAuth/device code nécessite un navigateur.
+Quand le Broker utilise le mode OAuth (même flow que Claude CLI / Codex CLI), il a besoin d'un navigateur pour l'auth initiale. Le tunnel route l'URL vers une machine locale :
 
-Le tunnel résout ça avec un type de message `auth_request` :
-
-1. Le CLI sur le VPS démarre et a besoin d'auth
+1. Le Broker initie un flow OAuth/device code vers le provider LLM (Anthropic, etc.)
 2. Il émet `{ type: "auth_request", url: "https://auth.anthropic.com/...", code: "ABCD-1234" }`
-3. Le broker route vers le tunnel de l'utilisateur (machine locale)
+3. Le tunnel route vers une machine locale avec `supportsAuth: true`
 4. La machine locale ouvre le navigateur avec l'URL
 5. L'utilisateur se connecte
-6. Le token remonte : tunnel → broker → VPS
-7. Le CLI est authentifié et tourne en autonome
+6. Le token OAuth remonte : tunnel → Broker
+7. Le Broker stocke le token (KV ou Secret Manager)
 
-**C'est un one-shot** — après l'auth initiale, le CLI stocke son token localement sur le VPS et n'a plus besoin du tunnel pour les requêtes LLM.
+**C'est un one-shot** — après l'auth initiale, le Broker utilise le token OAuth directement dans ses `fetch()` vers l'API LLM. Pas de CLI exécuté, juste le même flow d'auth.
 
 ## Communication inter-agents
 
@@ -311,11 +308,11 @@ Principe : **zéro secret statique.** Partout.
 | Frontière | Mécanisme | Secret statique ? |
 |---|---|---|
 | Sandbox isolation | MicroVM Linux, network allowlist | N/A |
+| Agent (Subhosting) → Broker | `@deno/oidc` (préféré), fallback Layers/invite | Non |
 | Sandbox → Broker | Credentials materialization (token invisible au code) | Non |
-| Broker → Sandbox API | `@deno/oidc` (token éphémère) | Non |
+| Broker → Subhosting + Sandbox API | `@deno/oidc` (token éphémère) | Non |
 | Tunnel → Broker | OIDC éphémère / token d'invitation à usage unique | Non |
-| Broker → LLM API | GCP Secret Manager via OIDC (ADR-004) | **Non** |
-| VPS CLI auth | Token CLI local, auth initiale via tunnel (one-shot) | Non |
+| Broker → LLM API | Clé API ou token OAuth (flow navigateur one-shot) | Non (GCP Secret Manager, ADR-004) |
 | Inter-agents | Le broker valide chaque message (allowedPeers) | N/A |
 | Transport | TLS (wss://) pour tous les WebSocket | N/A |
 
@@ -369,11 +366,18 @@ await cron.heartbeat(async () => {
 }, 5);
 ```
 
-**Mode Deploy** — le **Broker** détient le cron et appelle l'agent par HTTP :
+**Mode Deploy** — un seul `Deno.cron()` statique dispatche pour tous les agents :
 ```typescript
-// Côté Broker (Deno Deploy) — Deno.cron() fonctionne ici
-Deno.cron("heartbeat-agent-123", "*/5 * * * *", async () => {
-  await fetch("https://agent-123.deno.dev/cron/heartbeat", { method: "POST" });
+// Côté Broker (Deno Deploy) — un seul cron, dispatche dynamiquement
+Deno.cron("agent-cron-dispatcher", "* * * * *", async () => {
+  const kv = await Deno.openKv();
+  for await (const entry of kv.list<CronSchedule>({ prefix: ["cron_schedules"] })) {
+    if (isDue(entry.value)) {
+      await fetch(`https://${entry.value.agentUrl}/cron/${entry.value.job}`, {
+        method: "POST",
+      });
+    }
+  }
 });
 
 // Côté Agent (Subhosting) — reçoit le HTTP, pas de cron local
@@ -383,20 +387,20 @@ async handleCron(req: Request): Promise<Response> {
 }
 ```
 
-L'agent **déclare** ses crons dans sa config, le Broker les **exécute**.
+L'agent **déclare** ses crons dans sa config, le Broker les **persiste en KV** et le dispatcher les **évalue chaque minute**. `Deno.cron()` est extrait statiquement par Deploy — on ne peut pas l'appeler dynamiquement en boucle, d'où le pattern dispatcher unique.
 
 ## Modules à créer
 
 | Module | Rôle |
 |---|---|
-| `src/broker/server.ts` | Broker principal — Deploy, LLM proxy, message router |
-| `src/broker/llm_proxy.ts` | LLM Gateway — clés API, rate limit, fallback, cache |
-| `src/broker/router.ts` | Message router — KV Queues, permissions inter-agents |
-| `src/broker/tunnel_hub.ts` | Hub WebSocket — gère les tunnels vers local/VPS |
-| `src/broker/agent_lifecycle.ts` | CRUD agents — Subhosting (deployments) + Sandbox (exécutions) |
-| `src/broker/auth.ts` | Auth — @deno/oidc, credentials materialization, tokens éphémères |
-| `src/subhosting/agent_runtime.ts` | Runtime agent dans le Subhosting — orchestrateur, KV, écoute messages |
-| `src/subhosting/broker_client.ts` | Client pour communiquer avec le broker depuis le Subhosting |
+| `src/broker/server.ts` | Broker principal — Deploy, LLM proxy, message router, cron dispatcher |
+| `src/broker/llm_proxy.ts` | LLM Gateway — clé API + OAuth, rate limit, fallback, cache |
+| `src/broker/router.ts` | Message router — HTTP POST vers agents, permissions A2A |
+| `src/broker/tunnel_hub.ts` | Mesh tunnel — gère les connexions WS (noeuds, brokers, machines locales) |
+| `src/broker/agent_lifecycle.ts` | CRUD agents — Subhosting API v2 (Apps/Revisions) + Sandbox (exécutions) |
+| `src/broker/auth.ts` | Auth — @deno/oidc (agents + tunnels), credentials materialization (sandbox) |
+| `src/subhosting/agent_runtime.ts` | Runtime agent — HTTP handler réactif, KV pour état, appels Broker via fetch |
+| `src/subhosting/broker_client.ts` | Client HTTP pour communiquer avec le broker (OIDC auth) |
 | `src/sandbox/executor.ts` | Exécuteur de code en Sandbox — skills, outils, code LLM |
 | `src/relay/local.ts` | Relay local — WS client vers broker, exécute les outils |
 | `src/relay/tunnel.ts` | Config tunnel — capabilities, auth, reconnect |

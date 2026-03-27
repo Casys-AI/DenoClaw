@@ -18,6 +18,7 @@ export { ReadFileTool, WriteFileTool } from "./src/agent/tools/file.ts";
 export { WebFetchTool } from "./src/agent/tools/web.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./src/agent/tools/types.ts";
 export type { AgentConfig, AgentDefaults, AgentResponse, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
+export type { AgentLoopDeps } from "./src/agent/loop.ts";
 export type { BuiltinToolName } from "./src/agent/tools/types.ts";
 
 // ── Messaging domain ────────────────────────────────────
@@ -45,6 +46,7 @@ export { AuthManager } from "./src/orchestration/auth.ts";
 export type { AuthErrorCode, AuthResult, InviteToken, SessionToken } from "./src/orchestration/auth.ts";
 export { BrokerClient } from "./src/orchestration/client.ts";
 export { BrokerServer } from "./src/orchestration/broker.ts";
+export type { BrokerServerDeps } from "./src/orchestration/broker.ts";
 export { LocalRelay } from "./src/orchestration/relay.ts";
 export { Gateway } from "./src/orchestration/gateway.ts";
 export type { GatewayDeps } from "./src/orchestration/gateway.ts";
@@ -58,7 +60,7 @@ export { ProviderManager } from "./src/llm/manager.ts";
 export type { ProviderConfig, ProvidersConfig } from "./src/llm/types.ts";
 
 // ── Config ───────────────────────────────────────────────
-export { getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/loader.ts";
+export { createDefaultConfig, getConfig, getConfigOrDefault, loadConfig, saveConfig } from "./src/config/loader.ts";
 export type { Config } from "./src/config/types.ts";
 
 // ── Telemetry ────────────────────────────────────────────

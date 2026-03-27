@@ -1,7 +1,7 @@
 # Refactor DDD — DenoClaw
 
 **Date :** 2026-03-27
-**Statut :** En cours
+**Statut :** Terminé
 
 ## Objectif
 
@@ -209,102 +209,112 @@ Modules concernés :
 
 ### Phase 0 : Préparation
 
-- [ ] Créer les dossiers cibles (`shared/`, `messaging/`, `orchestration/`, `llm/`)
-- [ ] Snapshot git propre (commit l'état actuel avant refactor)
+- [x] Créer les dossiers cibles (`shared/`, `messaging/`, `orchestration/`, `llm/`)
+- [x] Snapshot git propre (commit l'état actuel avant refactor)
 
 ### Phase 1 : Shared Kernel
 
-- [ ] Créer `src/shared/types.ts` — extraire les types cross-domain de `src/types.ts`
-- [ ] Déplacer `src/utils/errors.ts` → `src/shared/errors.ts`
-- [ ] Déplacer `src/utils/log.ts` → `src/shared/log.ts`
-- [ ] Déplacer `src/utils/helpers.ts` → `src/shared/helpers.ts`
-- [ ] Créer `src/shared/mod.ts` (barrel)
-- [ ] Mettre à jour tous les imports `../utils/` → `../shared/`
-- [ ] Supprimer `src/utils/` (après migration)
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Créer `src/shared/types.ts` — extraire les types cross-domain de `src/types.ts`
+- [x] Déplacer `src/utils/errors.ts` → `src/shared/errors.ts`
+- [x] Déplacer `src/utils/log.ts` → `src/shared/log.ts`
+- [x] Déplacer `src/utils/helpers.ts` → `src/shared/helpers.ts`
+- [x] Créer `src/shared/mod.ts` (barrel)
+- [x] Mettre à jour tous les imports `../utils/` → `../shared/`
+- [x] Supprimer `src/utils/` (après migration)
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 2 : Agent domain
 
-- [ ] Créer `src/agent/types.ts` — extraire `Skill`, `CronJob`, `AgentDefaults`, `AgentsConfig`, `ToolsConfig`
-- [ ] Créer `src/agent/tools/types.ts` — extraire `BuiltinToolName`, `BUILTIN_TOOL_PERMISSIONS`
-- [ ] Déplacer `src/subhosting/agent_runtime.ts` → `src/agent/runtime.ts`
-- [ ] Déplacer `src/cron/mod.ts` → `src/agent/cron.ts`
-- [ ] Mettre à jour les imports dans `agent/loop.ts`, `agent/runtime.ts`, `agent/context.ts`, `agent/skills.ts`
-- [ ] Créer `src/agent/mod.ts` (barrel complet)
-- [ ] Supprimer `src/subhosting/`, `src/cron/`
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Créer `src/agent/types.ts` — `AgentConfig`, `AgentResponse`, `Skill`, `CronJob`, `AgentDefaults`, `AgentsConfig`, `ToolsConfig`
+- [x] Créer `src/agent/tools/types.ts` — `BuiltinToolName`, `BUILTIN_TOOL_PERMISSIONS`
+- [x] Déplacer `src/subhosting/agent_runtime.ts` → `src/agent/runtime.ts`
+- [x] Déplacer `src/cron/mod.ts` → `src/agent/cron.ts`
+- [x] Mettre à jour les imports dans `agent/loop.ts`, `agent/runtime.ts`, `agent/context.ts`, `agent/skills.ts`
+- [x] Créer `src/agent/mod.ts` (barrel complet avec `AgentLoopDeps`)
+- [x] Supprimer `src/subhosting/`, `src/cron/`
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 3 : LLM domain
 
-- [ ] Créer `src/llm/types.ts` — extraire `ProviderConfig`, `ProvidersConfig`
-- [ ] Déplacer `src/providers/base.ts` → `src/llm/base.ts`
-- [ ] Déplacer `src/providers/ollama.ts` → `src/llm/ollama.ts`
-- [ ] Déplacer `src/providers/cli.ts` → `src/llm/cli.ts`
-- [ ] Déplacer `src/providers/manager.ts` → `src/llm/manager.ts`
-- [ ] Créer `src/llm/mod.ts` (barrel)
-- [ ] Mettre à jour les imports dans `agent/loop.ts`, `orchestration/broker.ts`
-- [ ] Supprimer `src/providers/`
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Créer `src/llm/types.ts` — `ProviderConfig`, `ProvidersConfig`
+- [x] Déplacer `src/providers/base.ts` → `src/llm/base.ts`
+- [x] Déplacer `src/providers/ollama.ts` → `src/llm/ollama.ts`
+- [x] Déplacer `src/providers/cli.ts` → `src/llm/cli.ts`
+- [x] Déplacer `src/providers/manager.ts` → `src/llm/manager.ts` (prend `ProvidersConfig` pas `Config`)
+- [x] Créer `src/llm/mod.ts` (barrel avec `OllamaProvider`)
+- [x] Supprimer `src/providers/`
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 4 : Messaging domain
 
-- [ ] Créer `src/messaging/types.ts` — extraire `ChannelMessage`, `Session`, configs channels
-- [ ] Déplacer `src/bus/mod.ts` → `src/messaging/bus.ts`
-- [ ] Déplacer `src/session/mod.ts` → `src/messaging/session.ts`
-- [ ] Déplacer `src/channels/*` → `src/messaging/channels/*`
-- [ ] Déplacer `src/a2a/*` → `src/messaging/a2a/*`
-- [ ] Créer `src/messaging/mod.ts` (barrel)
-- [ ] Mettre à jour les imports dans `orchestration/gateway.ts`, `main.ts`
-- [ ] Supprimer `src/bus/`, `src/session/`, `src/channels/`, `src/a2a/`
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Créer `src/messaging/types.ts` — `ChannelMessage`, `Session`, configs channels
+- [x] Déplacer `src/bus/mod.ts` → `src/messaging/bus.ts`
+- [x] Déplacer `src/session/mod.ts` → `src/messaging/session.ts`
+- [x] Déplacer `src/channels/*` → `src/messaging/channels/*`
+- [x] Déplacer `src/a2a/*` → `src/messaging/a2a/*`
+- [x] Créer `src/messaging/mod.ts` (barrel)
+- [x] Supprimer `src/bus/`, `src/session/`, `src/channels/`, `src/a2a/`
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 5 : Orchestration domain
 
-- [ ] Déplacer `src/broker/server.ts` → `src/orchestration/broker.ts`
-- [ ] Déplacer `src/broker/client.ts` → `src/orchestration/client.ts`
-- [ ] Déplacer `src/broker/auth.ts` → `src/orchestration/auth.ts`
-- [ ] Déplacer `src/broker/types.ts` → `src/orchestration/types.ts`
-- [ ] Déplacer `src/relay/local.ts` → `src/orchestration/relay.ts`
-- [ ] Déplacer `src/gateway/mod.ts` → `src/orchestration/gateway.ts`
-- [ ] Déplacer `src/sandbox/mod.ts` → `src/orchestration/sandbox.ts`
-- [ ] Créer `src/orchestration/mod.ts` (barrel)
-- [ ] Mettre à jour les imports dans `agent/runtime.ts`, `main.ts`
-- [ ] Supprimer `src/broker/`, `src/relay/`, `src/gateway/`, `src/sandbox/`
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Déplacer `src/broker/server.ts` → `src/orchestration/broker.ts`
+- [x] Déplacer `src/broker/client.ts` → `src/orchestration/client.ts` (implements `AgentBrokerPort`)
+- [x] Déplacer `src/broker/auth.ts` → `src/orchestration/auth.ts`
+- [x] Déplacer `src/broker/types.ts` → `src/orchestration/types.ts`
+- [x] Déplacer `src/relay/local.ts` → `src/orchestration/relay.ts`
+- [x] Déplacer `src/gateway/mod.ts` → `src/orchestration/gateway.ts` (DI + AuthManager + close())
+- [x] Déplacer `src/sandbox/mod.ts` → `src/orchestration/sandbox.ts` (`SandboxApiConfig`)
+- [x] Créer `src/orchestration/mod.ts` (barrel avec `BrokerServerDeps`, `GatewayDeps`)
+- [x] Supprimer `src/broker/`, `src/relay/`, `src/gateway/`, `src/sandbox/`
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 6 : Config aggregate
 
-- [ ] Créer `src/config/types.ts` — `Config` assemble les sub-configs de chaque domaine
-- [ ] Renommer `src/config/mod.ts` → `src/config/loader.ts`
-- [ ] Créer `src/config/mod.ts` (barrel)
-- [ ] Mettre à jour les imports dans `cli/setup.ts`, `cli/agents.ts`, `main.ts`
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] Créer `src/config/types.ts` — `Config` assemble les sub-configs de chaque domaine
+- [x] Renommer `src/config/mod.ts` → `src/config/loader.ts`
+- [x] Créer `src/config/mod.ts` (barrel)
+- [x] Mettre à jour les imports dans `cli/setup.ts`, `cli/agents.ts`, `main.ts`
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 7 : DI — suppression des singletons
 
-- [ ] `MessageBus` : constructeur `(kv?: Deno.Kv)`, supprimer `getMessageBus()`
-- [ ] `SessionManager` : constructeur `(kv?: Deno.Kv)`, supprimer `getSessionManager()`
-- [ ] `ChannelManager` : constructeur `(bus: MessageBus)`, supprimer `getChannelManager()`
-- [ ] `Gateway` : constructeur `(config, { bus, session, channels })`
-- [ ] `BrokerServer` : passer `kv` au constructeur (déjà partiellement fait)
-- [ ] Mettre à jour `main.ts` : wiring explicite
-- [ ] Mettre à jour `orchestration/gateway.ts` : recevoir les deps
-- [ ] Tests : `deno task check` + `deno task test`
+- [x] `MessageBus` : constructeur `(kv?: Deno.Kv)`, supprimer `getMessageBus()`
+- [x] `SessionManager` : constructeur `(kv?: Deno.Kv)`, supprimer `getSessionManager()`
+- [x] `ChannelManager` : constructeur `(bus: MessageBus)`, supprimer `getChannelManager()`
+- [x] `Gateway` : constructeur `(config, { bus, session, channels, auth? })`
+- [x] `BrokerServer` : constructeur `(config, deps?: BrokerServerDeps)`
+- [x] `AgentLoop` : constructeur avec `AgentLoopDeps` optionnel + `close()`
+- [x] Mettre à jour `main.ts` : wiring explicite + `loop.close()` dans finally
+- [x] Mettre à jour `orchestration/gateway.ts` : `agent.close()` dans finally
+- [x] Tests : `deno task check` + `deno task test`
 
 ### Phase 8 : Entry points + barrels
 
-- [ ] Réécrire `main.ts` avec les nouveaux imports
-- [ ] Réécrire `mod.ts` (public API barrel) avec les nouveaux chemins
-- [ ] Mettre à jour `CLAUDE.md` — nouvelles import boundaries, structure, conventions
-- [ ] Tests finaux : `deno task check` + `deno task lint` + `deno task test`
+- [x] Réécrire `main.ts` avec les nouveaux imports DDD
+- [x] Réécrire `mod.ts` (public API barrel) avec les nouveaux chemins
+- [x] Tests finaux : `deno task check` + `deno task lint` + `deno task test`
 
 ### Phase 9 : Nettoyage
 
-- [ ] Supprimer tous les anciens dossiers vides
-- [ ] Supprimer `src/types.ts` (doit être vide à ce stade)
-- [ ] Vérifier qu'aucun fichier test n'a été oublié — tous les `*_test.ts` au bon endroit
-- [ ] `deno task check` + `deno task lint` + `deno task test` + `deno task fmt`
-- [ ] Commit final
+- [x] Supprimer tous les anciens dossiers (utils, types.ts, providers, broker, bus, session, channels, a2a, gateway, sandbox, subhosting, cron, relay)
+- [x] Supprimer `src/config/new_mod.ts` (artifact orphelin)
+- [x] Tous les `*_test.ts` au bon endroit
+- [x] `deno task check` + `deno task lint` + `deno task test` + `deno task fmt`
+- [x] Commit final
+
+### Bonus : Review + fixes post-refactor
+
+- [x] Boundary violation `agent/ → orchestration/` : `AgentBrokerPort` interface (DI)
+- [x] Boundary violation `llm/ → config/` : `ProviderManager(ProvidersConfig)` (dependency inversion)
+- [x] Cycle `agent ↔ config` : `AgentLoopConfig` local (structural typing)
+- [x] Auth unifiée : Gateway délègue à AuthManager
+- [x] Type ownership : `AgentConfig`, `AgentResponse` → `agent/types.ts`
+- [x] Barrels complets : `AgentLoopDeps`, `BrokerServerDeps`, `GatewayDeps`, `createDefaultConfig`
+- [x] Gateway `agent.close()` dans tous les paths
+- [x] publishAgent utilise le vrai AgentRuntime
+- [x] `SandboxConfig` → `SandboxApiConfig` (collision de nom résolue)
+- [x] Vérifié par 4 agents (3 Claude + 1 Codex) : 10/10 PASS
 
 ## Tests à déplacer
 

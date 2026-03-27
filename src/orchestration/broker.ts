@@ -7,7 +7,7 @@ import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { SandboxManager } from "./sandbox.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
-import { ConfigError } from "../shared/errors.ts";
+import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
 
@@ -165,23 +165,32 @@ export class BrokerServer {
 
   // ── Tool routing (ADR-005: permissions par intersection) ─
 
-  private async handleToolRequest(msg: BrokerMessage): Promise<void> {
-    const req = msg.payload as ToolRequest;
+  /** AX-8: permission check extracted as composable primitive */
+  private async checkToolPermissions(
+    agentId: string,
+    tool: string,
+  ): Promise<{ granted: SandboxPermission[]; denied: SandboxPermission[]; agentConfig: Deno.KvEntryMaybe<AgentEntry> }> {
     const kv = await this.getKv();
-
-    // 1. Résoudre les permissions de l'outil (built-in > tunnel pour outils customs)
-    const toolPerms = this.resolveToolPermissions(req.tool);
-
-    // 2. Check permissions (intersection tool × agent) — deny by default (ADR-005)
-    const agentConfig = await kv.get<AgentEntry>(
-      ["agents", msg.from, "config"],
-    );
+    const toolPerms = this.resolveToolPermissions(tool);
+    const agentConfig = await kv.get<AgentEntry>(["agents", agentId, "config"]);
     const agentAllowed = agentConfig.value?.sandbox?.allowedPermissions || [];
 
-    const granted = toolPerms.filter((p) => agentAllowed.includes(p));
-    const denied = toolPerms.filter((p) => !agentAllowed.includes(p));
+    return {
+      granted: toolPerms.filter((p) => agentAllowed.includes(p)),
+      denied: toolPerms.filter((p) => !agentAllowed.includes(p)),
+      agentConfig,
+    };
+  }
+
+  private async handleToolRequest(msg: BrokerMessage): Promise<void> {
+    const req = msg.payload as ToolRequest;
+
+    // 1. Check permissions (intersection tool × agent) — deny by default (ADR-005)
+    const { granted, denied, agentConfig } = await this.checkToolPermissions(msg.from, req.tool);
 
     if (denied.length > 0) {
+      const toolPerms = this.resolveToolPermissions(req.tool);
+      const agentAllowed = agentConfig.value?.sandbox?.allowedPermissions || [];
       await this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_PERMISSION_DENIED",
         context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
@@ -236,6 +245,7 @@ export class BrokerServer {
         timestamp: new Date().toISOString(),
       };
 
+      const kv = await this.getKv();
       await kv.enqueue(reply);
     } catch (e) {
       await this.sendStructuredError(msg.from, msg.id, {
@@ -386,7 +396,7 @@ console.log(await r.text());`;
 
   private routeToTunnel(ws: WebSocket, msg: BrokerMessage): void {
     if (ws.readyState !== WebSocket.OPEN) {
-      throw new Error(`Tunnel not open (readyState: ${ws.readyState})`);
+      throw new DenoClawError("TUNNEL_NOT_OPEN", { readyState: ws.readyState, msgId: msg.id }, "Tunnel disconnected. Reconnect and retry.");
     }
     ws.send(JSON.stringify(msg));
   }

@@ -29,16 +29,14 @@ export async function setupProvider(): Promise<void> {
       const binary = providerName.replace("-cli", "");
 
       // Vérifier si le CLI est installé
-      try {
-        const check = new Deno.Command("which", { args: [binary], stdout: "piped", stderr: "piped" });
-        const { success: found } = await check.output();
-        if (!found) throw new Error("not found");
-        success(`${binary} CLI détecté`);
-      } catch {
+      const check = new Deno.Command("which", { args: [binary], stdout: "piped", stderr: "piped" });
+      const { success: found } = await check.output();
+      if (!found) {
         error(`${binary} CLI non trouvé.`);
         print(`  Installez-le : https://${binary === "claude" ? "claude.ai/download" : "openai.com/codex"}`);
         return;
       }
+      success(`${binary} CLI détecté`);
 
       // Vérifier si déjà authentifié
       print(`\nVérification de l'auth ${binary}...`);
@@ -343,11 +341,9 @@ ac.signal.addEventListener("abort", async () => {
 export async function publishGateway(): Promise<void> {
   print("\n=== Déployer le gateway sur Deno Deploy ===\n");
 
-  try {
-    const cmd = new Deno.Command("deployctl", { args: ["--version"], stdout: "piped", stderr: "piped" });
-    const { success: ok } = await cmd.output();
-    if (!ok) throw new Error("not found");
-  } catch {
+  const cmd = new Deno.Command("deployctl", { args: ["--version"], stdout: "piped", stderr: "piped" });
+  const { success: deployctlOk } = await cmd.output();
+  if (!deployctlOk) {
     error("deployctl non installé.");
     print("  deno install -Arf jsr:@deno/deployctl");
     return;

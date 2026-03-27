@@ -89,23 +89,21 @@ deno task fmt       # Format
 
 ```
 src/
-├── agent/          # Boucle ReAct, mémoire (KV), skills, context
+├── agent/          # Boucle ReAct, runtime, cron, mémoire (KV), skills, context
 │   └── tools/      # Shell, file, web, registry
-├── providers/      # Anthropic, OpenAI-compat, manager
-├── bus/            # MessageBus (KV Queues — Broker/local only)
-├── session/        # Sessions (KV)
-├── channels/       # Console, webhook, manager
-├── gateway/        # HTTP + WebSocket (Deno.serve)
-├── cron/           # Deno.cron + heartbeat
-├── sandbox/        # API Deno Sandbox
-├── telemetry/      # OpenTelemetry
+├── llm/            # Providers LLM : Anthropic, OpenAI, Ollama, CLI/OAuth
+├── messaging/      # Communication
+│   ├── a2a/        # Protocole A2A (JSON-RPC, SSE, AgentCards, Tasks)
+│   └── channels/   # Console, webhook, Telegram
+├── orchestration/  # Broker, gateway, auth, relay, sandbox, client
+├── cli/            # Commandes CLI (setup, agents, publish)
 ├── config/         # Chargement, validation, env vars
-└── utils/          # Logger, helpers, erreurs structurées
+├── shared/         # Logger, helpers, erreurs structurées
+└── telemetry/      # OpenTelemetry
 docs/
 ├── architecture-distributed.md
-├── adr-001-all-agents-in-sandbox.md
-├── adr-002-llm-proxy-on-broker.md
-└── adr-003-auth-oidc-and-credentials-materialization.md
+├── adr-001 → adr-008
+└── refactor-ddd.md
 ```
 
 ## Licence

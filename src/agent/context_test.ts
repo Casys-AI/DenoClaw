@@ -63,3 +63,12 @@ Deno.test("buildContextMessages prepends system message", () => {
   assertEquals(result[0].role, "system");
   assertEquals(result[1].role, "user");
 });
+
+Deno.test("buildSystemPrompt uses injected timestamp (AX-6)", () => {
+  // A fixed Date must appear verbatim in the prompt — no non-deterministic Date.now()
+  const fixedDate = new Date("2025-01-15T10:30:00.000Z");
+  const prompt = builder.buildSystemPrompt([], [], fixedDate);
+  // The formatted date string must be present somewhere in the output
+  assertStringIncludes(prompt, "2025");
+  assertStringIncludes(prompt, "Current time:");
+});

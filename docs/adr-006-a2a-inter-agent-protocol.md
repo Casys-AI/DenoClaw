@@ -173,12 +173,12 @@ const result = await fetch(card.url, {
 
 | Module | Rôle | Statut |
 |---|---|---|
-| `src/a2a/types.ts` | Types A2A v1.0 complets (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE) | **fait** |
-| `src/a2a/server.ts` | Serveur A2A : JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming | **fait** |
-| `src/a2a/client.ts` | Client A2A : discover, send, stream (async generator SSE), getTask, cancelTask | **fait** |
-| `src/a2a/card.ts` | Génération d'AgentCard depuis le registry config (permissions → skills) | **fait** |
-| `src/a2a/tasks.ts` | Task store KV (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal state protection) | **fait** |
-| `src/broker/server.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) dans le routage inter-agents | **fait** |
+| `src/messaging/a2a/types.ts` | Types A2A v1.0 complets (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE) | **fait** |
+| `src/messaging/a2a/server.ts` | Serveur A2A : JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming | **fait** |
+| `src/messaging/a2a/client.ts` | Client A2A : discover, send, stream (async generator SSE), getTask, cancelTask | **fait** |
+| `src/messaging/a2a/card.ts` | Génération d'AgentCard depuis le registry config (permissions → skills) | **fait** |
+| `src/messaging/a2a/tasks.ts` | Task store KV (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal state protection) | **fait** |
+| `src/orchestration/broker.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) dans le routage inter-agents | **fait** |
 
 ## Conséquences
 

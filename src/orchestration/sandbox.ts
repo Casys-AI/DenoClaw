@@ -43,9 +43,12 @@ export class SandboxManager {
     networkAllow: string[];
   };
 
+  /**
+   * @param config.apiToken — explicit token, or falls back to DENO_SANDBOX_API_TOKEN env var (AX-7 documented)
+   */
   constructor(config?: Partial<SandboxApiConfig>) {
     this.apiToken = config?.apiToken || Deno.env.get("DENO_SANDBOX_API_TOKEN") || "";
-    this.apiBase = config?.apiBase || "https://api.deno.com/v1/sandbox";
+    this.apiBase = config?.apiBase || "https://api.deno.com/v2/sandbox";
     this.defaults = {
       region: config?.region || "amsterdam",
       memoryMb: config?.memoryMb || 768,

@@ -393,24 +393,26 @@ L'agent **déclare** ses crons dans sa config, le Broker les **persiste en KV** 
 
 | Module | Rôle |
 |---|---|
-| `src/broker/server.ts` | Broker principal — Deploy, LLM proxy, message router, cron dispatcher |
-| `src/broker/llm_proxy.ts` | LLM Gateway — clé API + OAuth, rate limit, fallback, cache |
-| `src/broker/router.ts` | Message router — HTTP POST vers agents, permissions A2A |
-| `src/broker/tunnel_hub.ts` | Mesh tunnel — gère les connexions WS (noeuds, brokers, machines locales) |
-| `src/broker/agent_lifecycle.ts` | CRUD agents — Subhosting API v2 (Apps/Revisions) + Sandbox (exécutions) |
-| `src/broker/auth.ts` | Auth — @deno/oidc (agents + tunnels), credentials materialization (sandbox) |
-| `src/subhosting/agent_runtime.ts` | Runtime agent — HTTP handler réactif, KV pour état, appels Broker via fetch |
-| `src/subhosting/broker_client.ts` | Client HTTP pour communiquer avec le broker (OIDC auth) |
-| `src/sandbox/executor.ts` | Exécuteur de code en Sandbox — skills, outils, code LLM |
-| `src/relay/local.ts` | Relay local — WS client vers broker, exécute les outils |
-| `src/relay/tunnel.ts` | Config tunnel — capabilities, auth, reconnect |
+| `src/orchestration/broker.ts` | Broker principal — Deploy, LLM proxy, message router, cron dispatcher |
+| `src/orchestration/gateway.ts` | Gateway HTTP + WebSocket — channels, sessions |
+| `src/orchestration/auth.ts` | Auth — @deno/oidc (agents + tunnels), credentials materialization (sandbox) |
+| `src/orchestration/client.ts` | Client HTTP pour communiquer avec le broker (OIDC auth) |
+| `src/orchestration/relay.ts` | Mesh tunnel — WS client, capabilities, reconnect |
+| `src/orchestration/sandbox.ts` | Exécuteur de code en Sandbox — API v2 |
+| `src/agent/runtime.ts` | Runtime agent — HTTP handler réactif, KV pour état, appels Broker via fetch |
+| `src/agent/cron.ts` | CronManager — Deno.cron() (Broker/local), déclaration config (agents) |
+| `src/llm/manager.ts` | LLM provider manager — clé API + OAuth, fallback, routing |
+| `src/messaging/a2a/` | Protocole A2A — types, server, client, cards, tasks |
+| `src/messaging/bus.ts` | MessageBus — KV Queues (Broker/local only) |
 
 ## Ordre d'implémentation
 
-1. **Broker minimal** — LLM proxy + message router sur Deploy
-2. **Agent runtime Subhosting** — BrokerClient + boucle agent + KV
-3. **Sandbox executor** — exécution de code hardened
-4. **Relay local** — tunnel WS + exécution d'outils
-5. **Inter-agents** — routage de messages entre agents
-6. **Agent lifecycle** — API pour créer/détruire des agents
-7. **Dashboard** — observation d'état via KV Watch
+1. **Broker minimal** — LLM proxy (clé API + OAuth) + HTTP router sur Deploy
+2. **Agent runtime** — HTTP handler réactif + BrokerClient HTTP (OIDC) + KV état
+3. **Workers local** — mode multi-agent local (Process / Worker / Subprocess)
+4. **Sandbox executor** — exécution de code hardened
+5. **Mesh tunnel** — noeuds, fédération brokers, machines locales
+6. **Cron dispatcher** — scheduler KV-based + dispatch HTTP
+7. **Inter-agents A2A** — routage HTTP + SSE streaming (tâches longues)
+8. **Agent lifecycle** — Subhosting API v2 (Apps/Revisions)
+9. **Dashboard** — observation d'état via KV Watch (Broker KV)

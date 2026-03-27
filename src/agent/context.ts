@@ -9,11 +9,14 @@ export class ContextBuilder {
     this.config = config;
   }
 
-  buildSystemPrompt(skills: Skill[], tools: ToolDefinition[]): string {
+  /**
+   * @param now — explicit timestamp for AX-6 determinism. Defaults to current time.
+   */
+  buildSystemPrompt(skills: Skill[], tools: ToolDefinition[], now: Date = new Date()): string {
     const parts: string[] = [];
 
     parts.push(this.config.systemPrompt || this.defaultPrompt());
-    parts.push(`\nCurrent time: ${formatDate(new Date())}`);
+    parts.push(`\nCurrent time: ${formatDate(now)}`);
 
     if (skills.length > 0) {
       parts.push("\n## Available Skills\n");

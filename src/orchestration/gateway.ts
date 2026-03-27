@@ -175,6 +175,14 @@ export class Gateway {
           model?: string;
         };
 
+        // AX-5: validate at the boundary
+        if (!body.message || typeof body.message !== "string") {
+          return Response.json(
+            { error: { code: "INVALID_INPUT", context: { field: "message" }, recovery: "Provide a non-empty 'message' string in the JSON body" } },
+            { status: 400 },
+          );
+        }
+
         const sessionId = body.sessionId || crypto.randomUUID();
         await this.session.getOrCreate(sessionId, "api", "http");
 
@@ -187,7 +195,12 @@ export class Gateway {
         }
       } catch (e) {
         log.error("Erreur API /chat", e);
-        return Response.json({ error: (e as Error).message }, { status: 500 });
+        // AX-3: structured error output
+        const msg = e instanceof Error ? e.message : String(e);
+        return Response.json(
+          { error: { code: "CHAT_FAILED", context: { message: msg }, recovery: "Check message format and provider configuration" } },
+          { status: 500 },
+        );
       }
     }
 
@@ -231,7 +244,8 @@ export class Gateway {
           }
         } catch (err) {
           log.error("Erreur WebSocket message", err);
-          socket.send(JSON.stringify({ type: "error", error: (err as Error).message }));
+          const msg = err instanceof Error ? err.message : String(err);
+          socket.send(JSON.stringify({ type: "error", error: { code: "WS_MESSAGE_FAILED", context: { message: msg }, recovery: "Check message format" } }));
         }
       };
 

@@ -37,29 +37,25 @@ All interfaces designed for agents, not humans.
 
 Every tool, error, broker interface, and agent API must be AX-compliant. Review code through this lens.
 
-## Import Boundaries
+## Import Boundaries (DDD)
 
 ```
-src/types.ts       ← everything (shared types, no logic)
-src/utils/         ← everything (log, errors, helpers)
-src/config/        ← utils
-src/agent/tools/   ← types, utils
-src/agent/         ← tools, providers, config, utils
-src/providers/     ← types, utils, telemetry
-src/bus/           ← types, utils, telemetry
-src/channels/      ← types, utils, bus
-src/session/       ← types, utils
-src/cron/          ← types, utils
-src/gateway/       ← agent, channels, bus, session, utils
-src/broker/        ← providers, sandbox, telemetry, utils
-src/relay/         ← agent/tools, broker/types, utils
-src/telemetry/     ← utils (+ optional @opentelemetry/api)
-src/sandbox/       ← utils
-src/cli/           ← config, utils
-main.ts            ← everything (entrypoint)
+src/shared/          ← nothing (shared kernel — leaf of the dependency graph)
+src/telemetry/       ← shared/ (cross-cutting, importable by all domains)
+src/llm/             ← shared/, telemetry/
+src/agent/           ← shared/, llm/, telemetry/ (NEVER config/, NEVER orchestration/)
+src/messaging/       ← shared/, agent/ (a2a/card only), telemetry/
+src/config/          ← shared/, agent/, llm/, messaging/ (Config aggregate)
+src/orchestration/   ← shared/, agent/, llm/, messaging/, config/, telemetry/
+src/cli/             ← shared/, config/, messaging/ (dynamic import in setup.ts)
+main.ts              ← everything (entrypoint)
 ```
 
-`src/broker/` must NEVER import from `src/gateway/`. `src/agent/` must NEVER import from `src/broker/`.
+Hard rules:
+- `src/agent/` must NEVER import from `src/orchestration/` (uses `AgentBrokerPort` interface from shared/ instead)
+- `src/agent/` must NEVER import from `src/config/` (uses structural `AgentLoopConfig` instead)
+- `src/llm/` must NEVER import from `src/config/` (takes `ProvidersConfig` not `Config`)
+- `src/shared/` imports from NOTHING
 
 ## Build, Test & Development Commands
 

@@ -1,0 +1,52 @@
+/* ── DenoClaw Dashboard — Digital Monolith overrides ── */
+
+/* Fonts */
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* Typography utility classes */
+.font-display {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+}
+
+.font-data {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Deno Deploy gradient */
+.gradient-deno {
+  background: linear-gradient(135deg, #00C2FF, #0055FF);
+}
+
+.text-gradient-deno {
+  background: linear-gradient(135deg, #00C2FF, #0055FF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Live pulse indicator */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-live {
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+/* Navbar active underline */
+.nav-active {
+  position: relative;
+}
+.nav-active::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #00C2FF, #0055FF);
+}

@@ -50,6 +50,4 @@ export interface AgentsConfig {
 
 export interface ToolsConfig {
   restrictToWorkspace?: boolean;
-  allowedCommands?: string[];
-  deniedCommands?: string[];
 }

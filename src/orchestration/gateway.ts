@@ -9,8 +9,19 @@ import type { MetricsCollector } from "../telemetry/metrics.ts";
 import { TelegramChannel } from "../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../messaging/channels/webhook.ts";
 import { generateAllCards } from "../messaging/a2a/card.ts";
-import { listAgentStatuses, getAgentStatus, listCronJobs, listAgentTasks, createSSEResponse } from "./monitoring.ts";
-import { listAgentTraces, getTrace, getTraceSpans } from "../telemetry/traces.ts";
+import {
+  createSSEResponse,
+  getAgentStatus,
+  listAgentStatuses,
+  listAgentTasks,
+  listCronJobs,
+} from "./monitoring.ts";
+import {
+  getTrace,
+  getTraceSpans,
+  listAgentTraces,
+} from "../telemetry/traces.ts";
+import { RateLimiter } from "./rate_limit.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
@@ -39,6 +50,7 @@ export class Gateway {
   private metrics: MetricsCollector | null;
   private kv: Deno.Kv | null;
   private freshHandler: ((req: Request) => Promise<Response>) | null;
+  private rateLimiter: RateLimiter | null = null;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
@@ -53,6 +65,10 @@ export class Gateway {
     this.metrics = deps.metrics ?? null;
     this.kv = deps.kv ?? null;
     this.freshHandler = deps.freshHandler ?? null;
+    // Rate limiter: 100 requests/minute per IP when KV is available
+    if (this.kv) {
+      this.rateLimiter = new RateLimiter(this.kv, 100, 60_000);
+    }
   }
 
   async start(): Promise<void> {
@@ -98,7 +114,9 @@ export class Gateway {
 
     if (this.httpServer) await this.httpServer.shutdown();
     for (const ws of this.wsClients.values()) {
-      try { ws.close(); } catch { /* ignore */ }
+      try {
+        ws.close();
+      } catch { /* ignore */ }
     }
     this.wsClients.clear();
     await this.channels.stopAll();
@@ -112,14 +130,22 @@ export class Gateway {
     log.info(`Message de ${msg.channelType} (user: ${msg.userId})`);
 
     try {
-      await this.session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
+      await this.session.getOrCreate(
+        msg.sessionId,
+        msg.userId,
+        msg.channelType,
+      );
 
       const agentId = msg.metadata?.agentId as string | undefined;
       if (!agentId) {
         log.error("Message sans agentId — ignoré");
         return;
       }
-      const result = await this.workerPool.send(agentId, msg.sessionId, msg.content);
+      const result = await this.workerPool.send(
+        agentId,
+        msg.sessionId,
+        msg.content,
+      );
       await this.channels.send(
         msg.channelType,
         msg.userId,
@@ -150,7 +176,12 @@ export class Gateway {
       const queryToken = new URL(req.url).searchParams.get("token");
       if (auth === `Bearer ${token}` || queryToken === token) return null;
       return Response.json(
-        { error: { code: "UNAUTHORIZED", recovery: "Add Authorization: Bearer <token> header" } },
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            recovery: "Add Authorization: Bearer <token> header",
+          },
+        },
         { status: 401 },
       );
     }
@@ -169,12 +200,23 @@ export class Gateway {
     const url = new URL(req.url);
 
     // Dashboard Fresh handler — avant auth (gère sa propre auth si besoin)
-    if (this.freshHandler && (url.pathname.startsWith("/ui") || url.pathname === "/favicon.ico")) {
+    if (
+      this.freshHandler &&
+      (url.pathname.startsWith("/ui") || url.pathname === "/favicon.ico")
+    ) {
       return await this.freshHandler(req);
     }
 
     if (url.pathname === "/") {
       return new Response("DenoClaw Gateway");
+    }
+
+    // Rate limiting — before auth to block floods early
+    if (this.rateLimiter) {
+      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        "unknown";
+      const rl = await this.rateLimiter.check(ip);
+      if (!rl.allowed) return this.rateLimiter.denyResponse(rl);
     }
 
     const authErr = await this.checkAuth(req);
@@ -200,13 +242,26 @@ export class Gateway {
         // AX-5: validate at the boundary
         if (!body.message || typeof body.message !== "string") {
           return Response.json(
-            { error: { code: "INVALID_INPUT", context: { field: "message" }, recovery: "Provide a non-empty 'message' string in the JSON body" } },
+            {
+              error: {
+                code: "INVALID_INPUT",
+                context: { field: "message" },
+                recovery:
+                  "Provide a non-empty 'message' string in the JSON body",
+              },
+            },
             { status: 400 },
           );
         }
         if (!body.agentId || typeof body.agentId !== "string") {
           return Response.json(
-            { error: { code: "INVALID_INPUT", context: { field: "agentId" }, recovery: "Provide 'agentId' in the JSON body" } },
+            {
+              error: {
+                code: "INVALID_INPUT",
+                context: { field: "agentId" },
+                recovery: "Provide 'agentId' in the JSON body",
+              },
+            },
             { status: 400 },
           );
         }
@@ -214,16 +269,27 @@ export class Gateway {
         const sessionId = body.sessionId || crypto.randomUUID();
         await this.session.getOrCreate(sessionId, "api", "http");
 
-        const result = await this.workerPool.send(body.agentId, sessionId, body.message, {
-          model: body.model,
-        });
+        const result = await this.workerPool.send(
+          body.agentId,
+          sessionId,
+          body.message,
+          {
+            model: body.model,
+          },
+        );
         return Response.json({ sessionId, response: result.content });
       } catch (e) {
         log.error("Erreur API /chat", e);
         // AX-3: structured error output
         const msg = e instanceof Error ? e.message : String(e);
         return Response.json(
-          { error: { code: "CHAT_FAILED", context: { message: msg }, recovery: "Check message format and provider configuration" } },
+          {
+            error: {
+              code: "CHAT_FAILED",
+              context: { message: msg },
+              recovery: "Check message format and provider configuration",
+            },
+          },
           { status: 500 },
         );
       }
@@ -254,13 +320,26 @@ export class Gateway {
 
           if (data.type === "chat" && data.message) {
             if (!data.agentId) {
-              socket.send(JSON.stringify({ type: "error", error: { code: "INVALID_INPUT", context: { field: "agentId" }, recovery: "Provide 'agentId' in the message" } }));
+              socket.send(
+                JSON.stringify({
+                  type: "error",
+                  error: {
+                    code: "INVALID_INPUT",
+                    context: { field: "agentId" },
+                    recovery: "Provide 'agentId' in the message",
+                  },
+                }),
+              );
               return;
             }
             const sessionId = data.sessionId || `ws-${token}`;
             await this.session.getOrCreate(sessionId, token, "websocket");
 
-            const result = await this.workerPool.send(data.agentId, sessionId, data.message);
+            const result = await this.workerPool.send(
+              data.agentId,
+              sessionId,
+              data.message,
+            );
             socket.send(JSON.stringify({
               type: "response",
               sessionId,
@@ -270,7 +349,16 @@ export class Gateway {
         } catch (err) {
           log.error("Erreur WebSocket message", err);
           const msg = err instanceof Error ? err.message : String(err);
-          socket.send(JSON.stringify({ type: "error", error: { code: "WS_MESSAGE_FAILED", context: { message: msg }, recovery: "Check message format" } }));
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              error: {
+                code: "WS_MESSAGE_FAILED",
+                context: { message: msg },
+                recovery: "Check message format",
+              },
+            }),
+          );
         }
       };
 
@@ -302,7 +390,12 @@ export class Gateway {
     if (url.pathname === "/stats/agents") {
       if (!this.metrics) {
         return Response.json(
-          { error: { code: "NO_METRICS", recovery: "Pass MetricsCollector to GatewayDeps" } },
+          {
+            error: {
+              code: "NO_METRICS",
+              recovery: "Pass MetricsCollector to GatewayDeps",
+            },
+          },
           { status: 503 },
         );
       }
@@ -316,32 +409,59 @@ export class Gateway {
       return Response.json(await listAgentTasks(this.kv));
     }
 
-    if (url.pathname.match(/^\/agents\/[^/]+\/task$/) && req.method === "POST") {
+    if (
+      url.pathname.match(/^\/agents\/[^/]+\/task$/) && req.method === "POST"
+    ) {
       const agentName = url.pathname.split("/")[2];
       if (!agentName) return new Response("Not Found", { status: 404 });
 
       if (!this.workerPool.isReady(agentName)) {
         return Response.json(
-          { error: { code: "AGENT_NOT_FOUND", context: { agentId: agentName }, recovery: "Check agent name" } },
+          {
+            error: {
+              code: "AGENT_NOT_FOUND",
+              context: { agentId: agentName },
+              recovery: "Check agent name",
+            },
+          },
           { status: 404 },
         );
       }
 
       try {
-        const body = await req.json() as { message: string; sessionId?: string };
+        const body = await req.json() as {
+          message: string;
+          sessionId?: string;
+        };
         if (!body.message) {
           return Response.json(
-            { error: { code: "INVALID_INPUT", context: { field: "message" }, recovery: "Provide a message" } },
+            {
+              error: {
+                code: "INVALID_INPUT",
+                context: { field: "message" },
+                recovery: "Provide a message",
+              },
+            },
             { status: 400 },
           );
         }
         const sessionId = body.sessionId || `agent-task-${crypto.randomUUID()}`;
-        const result = await this.workerPool.send(agentName, sessionId, body.message);
+        const result = await this.workerPool.send(
+          agentName,
+          sessionId,
+          body.message,
+        );
         return Response.json({ agentId: agentName, response: result.content });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return Response.json(
-          { error: { code: "AGENT_TASK_FAILED", context: { message: msg }, recovery: "Check agent and message" } },
+          {
+            error: {
+              code: "AGENT_TASK_FAILED",
+              context: { message: msg },
+              recovery: "Check agent and message",
+            },
+          },
           { status: 500 },
         );
       }
@@ -350,10 +470,12 @@ export class Gateway {
     if (url.pathname === "/agents") {
       if (!this.kv) {
         // Fallback: return agent IDs from WorkerPool without status
-        return Response.json(this.workerPool.getAgentIds().map((id) => ({
-          agentId: id,
-          status: this.workerPool.isReady(id) ? "running" : "stopped",
-        })));
+        return Response.json(
+          this.workerPool.getAgentIds().map((id) => ({
+            agentId: id,
+            status: this.workerPool.isReady(id) ? "running" : "stopped",
+          })),
+        );
       }
       return Response.json(await listAgentStatuses(this.kv));
     }
@@ -367,11 +489,18 @@ export class Gateway {
         return Response.json(await getTraceSpans(this.kv, traceId));
       }
       const trace = await getTrace(this.kv, traceId);
-      if (!trace) return Response.json({ error: { code: "TRACE_NOT_FOUND" } }, { status: 404 });
+      if (!trace) {
+        return Response.json({ error: { code: "TRACE_NOT_FOUND" } }, {
+          status: 404,
+        });
+      }
       return Response.json(trace);
     }
 
-    if (url.pathname.startsWith("/agents/") && url.pathname.endsWith("/traces") && this.kv) {
+    if (
+      url.pathname.startsWith("/agents/") && url.pathname.endsWith("/traces") &&
+      this.kv
+    ) {
       const agentId = url.pathname.split("/")[2];
       const limit = parseInt(url.searchParams.get("limit") ?? "20");
       return Response.json(await listAgentTraces(this.kv, agentId, limit));
@@ -382,11 +511,19 @@ export class Gateway {
       if (!agentId) return new Response("Not Found", { status: 404 });
 
       const status = this.kv ? await getAgentStatus(this.kv, agentId) : null;
-      const metrics = this.metrics ? await this.metrics.getAgentMetrics(agentId) : null;
+      const metrics = this.metrics
+        ? await this.metrics.getAgentMetrics(agentId)
+        : null;
 
       if (!status && !metrics) {
         return Response.json(
-          { error: { code: "AGENT_NOT_FOUND", context: { agentId }, recovery: "Check agent ID" } },
+          {
+            error: {
+              code: "AGENT_NOT_FOUND",
+              context: { agentId },
+              recovery: "Check agent ID",
+            },
+          },
           { status: 404 },
         );
       }
@@ -397,19 +534,26 @@ export class Gateway {
     // Hourly metrics history
     if (url.pathname === "/stats/history" && this.metrics) {
       const agentId = url.searchParams.get("agent") || "";
-      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const from = url.searchParams.get("from") ||
+        new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
       const to = url.searchParams.get("to") || new Date().toISOString();
       if (!agentId) {
-        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+        return Response.json({
+          error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" },
+        }, { status: 400 });
       }
-      return Response.json(await this.metrics.getHourlyMetrics(agentId, from, to));
+      return Response.json(
+        await this.metrics.getHourlyMetrics(agentId, from, to),
+      );
     }
 
     // Per-tool breakdown
     if (url.pathname === "/stats/tools" && this.metrics) {
       const agentId = url.searchParams.get("agent") || "";
       if (!agentId) {
-        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+        return Response.json({
+          error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" },
+        }, { status: 400 });
       }
       return Response.json(await this.metrics.getToolBreakdown(agentId));
     }
@@ -417,17 +561,21 @@ export class Gateway {
     // Hourly A2A history
     if (url.pathname === "/stats/a2a" && this.metrics) {
       const agentId = url.searchParams.get("agent") || "";
-      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const from = url.searchParams.get("from") ||
+        new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
       const to = url.searchParams.get("to") || new Date().toISOString();
       if (!agentId) {
-        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+        return Response.json({
+          error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" },
+        }, { status: 400 });
       }
       return Response.json(await this.metrics.getHourlyA2A(agentId, from, to));
     }
 
     // A2A frequency matrix
     if (url.pathname === "/stats/a2a/matrix" && this.metrics) {
-      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const from = url.searchParams.get("from") ||
+        new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
       const to = url.searchParams.get("to") || new Date().toISOString();
       return Response.json(await this.metrics.getA2AFrequencyMatrix(from, to));
     }
@@ -442,7 +590,9 @@ export class Gateway {
     if (url.pathname === "/events") {
       if (!this.kv) {
         return Response.json(
-          { error: { code: "NO_KV", recovery: "Pass shared KV to GatewayDeps" } },
+          {
+            error: { code: "NO_KV", recovery: "Pass shared KV to GatewayDeps" },
+          },
           { status: 503 },
         );
       }
@@ -453,7 +603,9 @@ export class Gateway {
     // ── Discovery ─────────────────────────────────────────
 
     if (url.pathname === "/.well-known/agent-card.json") {
-      if (!this.config.agents?.registry) return Response.json([], { status: 200 });
+      if (!this.config.agents?.registry) {
+        return Response.json([], { status: 200 });
+      }
       const baseUrl = `${url.protocol}//${url.host}`;
       const cards = generateAllCards(this.config.agents, baseUrl);
       return Response.json(cards);

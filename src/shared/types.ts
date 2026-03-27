@@ -93,23 +93,110 @@ export interface AgentBrokerPort {
     tools?: ToolDefinition[],
   ): Promise<LLMResponse>;
   execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult>;
-  sendToAgent(targetAgentId: string, instruction: string, data?: unknown): Promise<BrokerEnvelope>;
+  sendToAgent(
+    targetAgentId: string,
+    instruction: string,
+    data?: unknown,
+  ): Promise<BrokerEnvelope>;
   close(): void;
 }
 
 // ── Sandbox permissions (cross-domain: utilisé par agent/tools, orchestration, config) ─
 
-export type SandboxPermission = "read" | "write" | "run" | "net" | "env" | "ffi";
+export type SandboxPermission =
+  | "read"
+  | "write"
+  | "run"
+  | "net"
+  | "env"
+  | "ffi";
+
+// ── Exec Policy (ADR-010) — discriminated union on `security` ─
+
+export type ApprovalReason =
+  | "not-in-allowlist"
+  | "shell-operator"
+  | "inline-eval"
+  | "always-ask";
+
+interface ExecPolicyBase {
+  ask: "off" | "on-miss" | "always";
+  askFallback?: "deny" | "allowlist";
+}
+
+interface ExecPolicyDeny extends ExecPolicyBase {
+  security: "deny";
+}
+
+interface ExecPolicyFull extends ExecPolicyBase {
+  security: "full";
+  /** Additional env prefixes to strip (on top of LD_*, DYLD_*) */
+  envFilter?: string[];
+}
+
+interface ExecPolicyAllowlist extends ExecPolicyBase {
+  security: "allowlist";
+  allowedCommands?: string[];
+  /** Keyword blocklist — matches anywhere in command string (intentionally aggressive) */
+  deniedCommands?: string[];
+  /** Additional env prefixes to strip (on top of LD_*, DYLD_*) */
+  envFilter?: string[];
+  /** Allow -c/-e flags on interpreters (default: false = blocked) */
+  allowInlineEval?: boolean;
+}
+
+export type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
+
+export interface ApprovalRequest {
+  requestId: string;
+  command: string;
+  binary: string;
+  reason: ApprovalReason;
+}
+
+export interface ApprovalResponse {
+  approved: boolean;
+  allowAlways?: boolean;
+}
+
+// ── Sandbox Backend (ADR-010) ────────────────────────────
+
+export interface SandboxExecRequest {
+  tool: string;
+  args: Record<string, unknown>;
+  permissions: SandboxPermission[];
+  networkAllow?: string[];
+  timeoutSec?: number;
+  execPolicy: ExecPolicy;
+  toolsConfig?: { restrictToWorkspace?: boolean };
+  onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
+}
+
+export interface SandboxBackend {
+  readonly kind: "local" | "cloud";
+  readonly supportsFullShell: boolean;
+  execute(req: SandboxExecRequest): Promise<ToolResult>;
+  close(): Promise<void>;
+}
+
+// ── Sandbox Config ───────────────────────────────────────
 
 export interface SandboxConfig {
+  backend?: "local" | "cloud";
   allowedPermissions: SandboxPermission[];
   networkAllow?: string[];
   maxDurationSec?: number;
+  execPolicy?: ExecPolicy;
+  approvalTimeoutSec?: number;
 }
 
 // ── Agent registry (cross-domain: utilisé par orchestration, messaging/a2a, cli, config) ─
 
-export type ChannelRouting = "direct" | "round-robin" | "by-intent" | "broadcast";
+export type ChannelRouting =
+  | "direct"
+  | "round-robin"
+  | "by-intent"
+  | "broadcast";
 
 export interface AgentEntry {
   model?: string;
@@ -120,10 +207,10 @@ export interface AgentEntry {
   // Sandbox (ADR-005)
   sandbox?: SandboxConfig;
   // A2A peers (ADR-006) — fermé par défaut
-  peers?: string[];              // agents à qui je peux envoyer des Tasks
-  acceptFrom?: string[];         // agents dont j'accepte des Tasks ("*" = tous)
+  peers?: string[]; // agents à qui je peux envoyer des Tasks
+  acceptFrom?: string[]; // agents dont j'accepte des Tasks ("*" = tous)
   // Channels — d'où je reçois des messages utilisateur
-  channels?: string[];           // noms des channels assignés
+  channels?: string[]; // noms des channels assignés
   channelRouting?: ChannelRouting;
 }
 

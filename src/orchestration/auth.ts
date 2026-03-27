@@ -10,6 +10,7 @@
  * (mode local / dev). En production Deploy, tout passe par OIDC + invite tokens.
  */
 
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
 
@@ -78,8 +79,12 @@ export class AuthManager {
       expiresAt: new Date(now.getTime() + INVITE_TTL_MS).toISOString(),
     };
 
-    await kv.set(["auth", "invite", token], invite, { expireIn: INVITE_TTL_MS });
-    log.info(`Invite token généré${tunnelId ? ` pour tunnel ${tunnelId}` : ""}`);
+    await kv.set(["auth", "invite", token], invite, {
+      expireIn: INVITE_TTL_MS,
+    });
+    log.info(
+      `Invite token généré${tunnelId ? ` pour tunnel ${tunnelId}` : ""}`,
+    );
 
     return invite;
   }
@@ -94,13 +99,21 @@ export class AuthManager {
     const entry = await kv.get<InviteToken>(key);
 
     if (!entry.value) {
-      return { ok: false, code: "INVITE_INVALID", recovery: "Generate a new invite token via the broker CLI" };
+      return {
+        ok: false,
+        code: "INVITE_INVALID",
+        recovery: "Generate a new invite token via the broker CLI",
+      };
     }
 
     const expiry = new Date(entry.value.expiresAt);
     if (isNaN(expiry.getTime()) || expiry < new Date()) {
       await kv.delete(key);
-      return { ok: false, code: "INVITE_EXPIRED", recovery: "Generate a new invite token (TTL: 15 minutes)" };
+      return {
+        ok: false,
+        code: "INVITE_EXPIRED",
+        recovery: "Generate a new invite token (TTL: 15 minutes)",
+      };
     }
 
     // Atomic check-and-delete : échoue si l'entrée a été modifiée/supprimée entre le read et le delete
@@ -110,16 +123,30 @@ export class AuthManager {
       .commit();
 
     if (!result.ok) {
-      return { ok: false, code: "INVITE_ALREADY_USED", recovery: "Generate a new invite token" };
+      return {
+        ok: false,
+        code: "INVITE_ALREADY_USED",
+        recovery: "Generate a new invite token",
+      };
     }
 
-    log.info(`Invite token consommé${entry.value.tunnelId ? ` (tunnel: ${entry.value.tunnelId})` : ""}`);
-    return { ok: true, identity: entry.value.tunnelId || `tunnel-${token.slice(0, 8)}` };
+    log.info(
+      `Invite token consommé${
+        entry.value.tunnelId ? ` (tunnel: ${entry.value.tunnelId})` : ""
+      }`,
+    );
+    return {
+      ok: true,
+      identity: entry.value.tunnelId || `tunnel-${token.slice(0, 8)}`,
+    };
   }
 
   // ── Session tokens (éphémères, durée de vie tunnel) ──
 
-  async generateSessionToken(tunnelId: string, agentId?: string): Promise<SessionToken> {
+  async generateSessionToken(
+    tunnelId: string,
+    agentId?: string,
+  ): Promise<SessionToken> {
     const kv = this.kv;
     const token = generateId();
     const now = new Date();
@@ -132,7 +159,9 @@ export class AuthManager {
       expiresAt: new Date(now.getTime() + SESSION_TTL_MS).toISOString(),
     };
 
-    await kv.set(["auth", "session", token], session, { expireIn: SESSION_TTL_MS });
+    await kv.set(["auth", "session", token], session, {
+      expireIn: SESSION_TTL_MS,
+    });
     log.debug(`Session token généré pour tunnel ${tunnelId}`);
 
     return session;
@@ -143,14 +172,22 @@ export class AuthManager {
     const entry = await kv.get<SessionToken>(["auth", "session", token]);
 
     if (!entry.value) {
-      return { ok: false, code: "SESSION_INVALID", recovery: "Reconnect with a valid invite token" };
+      return {
+        ok: false,
+        code: "SESSION_INVALID",
+        recovery: "Reconnect with a valid invite token",
+      };
     }
 
     const expiry = new Date(entry.value.expiresAt);
     if (isNaN(expiry.getTime()) || expiry < new Date()) {
       log.warn("Session token expired", { tunnelId: entry.value.tunnelId });
       await kv.delete(["auth", "session", token]);
-      return { ok: false, code: "SESSION_EXPIRED", recovery: "Reconnect with a new invite token" };
+      return {
+        ok: false,
+        code: "SESSION_EXPIRED",
+        recovery: "Reconnect with a new invite token",
+      };
     }
 
     return { ok: true, identity: entry.value.tunnelId };
@@ -164,43 +201,62 @@ export class AuthManager {
 
   // ── OIDC (Deno Deploy → Deno Deploy) ─────────────────
 
+  private jwks = createRemoteJWKSet(
+    new URL("https://oidc.deno.com/.well-known/jwks.json"),
+  );
+  private expectedAudience?: string;
+
+  /** Set the expected OIDC audience (broker URL). Required for OIDC verification. */
+  setOIDCAudience(audience: string): void {
+    this.expectedAudience = audience;
+  }
+
   /**
-   * Vérifie un token OIDC émis par Deno Deploy.
-   * Import et vérification séparés pour distinguer "module absent" de "token invalide".
+   * Vérifie un token OIDC émis par Deno Deploy via JWKS (ADR-003).
+   * jose verifies signature, issuer, audience, and expiry.
+   * JWKS is cached and auto-refreshed on key rotation.
    */
   async verifyOIDC(token: string): Promise<AuthResult> {
-    // 1. Tenter l'import (échoue hors Deploy)
-    let oidc: { verify: (t: string) => Promise<{ sub?: unknown }> };
     try {
-      oidc = await import("@deno/oidc");
-    } catch {
-      return { ok: false, code: "OIDC_UNAVAILABLE", recovery: "OIDC requires Deno Deploy. Use invite tokens in local mode." };
-    }
-
-    // 2. Vérifier le token (erreur = token invalide, pas module absent)
-    try {
-      const payload = await oidc.verify(token);
+      const { payload } = await jwtVerify(token, this.jwks, {
+        issuer: "https://oidc.deno.com",
+        audience: this.expectedAudience,
+      });
 
       if (!payload.sub) {
-        return { ok: false, code: "OIDC_INVALID_PAYLOAD", recovery: "OIDC token has no subject" };
+        return {
+          ok: false,
+          code: "OIDC_INVALID_PAYLOAD",
+          recovery: "OIDC token has no subject",
+        };
       }
 
+      log.debug(`OIDC verified: sub=${payload.sub}`);
       return { ok: true, identity: payload.sub as string };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      log.warn("OIDC verification failed", { msg });
-      return { ok: false, code: "OIDC_VERIFICATION_FAILED", recovery: "OIDC token verification failed. Check token freshness and issuer." };
+      log.warn(`OIDC verification failed: ${msg}`);
+      return {
+        ok: false,
+        code: "OIDC_VERIFICATION_FAILED",
+        recovery:
+          "OIDC token verification failed. Check token freshness and issuer.",
+      };
     }
   }
 
   // ── Credentials materialization (Sandbox → Broker) ───
 
-  async materializeAgentToken(agentId: string): Promise<{ token: string; expiresAt: string }> {
+  async materializeAgentToken(
+    agentId: string,
+  ): Promise<{ token: string; expiresAt: string }> {
     const kv = this.kv;
     const token = generateId();
     const expiresAt = new Date(Date.now() + AGENT_TOKEN_TTL_MS).toISOString();
 
-    await kv.set(["auth", "agent", token], { agentId, expiresAt }, { expireIn: AGENT_TOKEN_TTL_MS });
+    await kv.set(["auth", "agent", token], { agentId, expiresAt }, {
+      expireIn: AGENT_TOKEN_TTL_MS,
+    });
     log.debug(`Agent token matérialisé pour ${agentId}`);
 
     return { token, expiresAt };
@@ -208,16 +264,28 @@ export class AuthManager {
 
   async verifyAgentToken(token: string): Promise<AuthResult> {
     const kv = this.kv;
-    const entry = await kv.get<{ agentId: string; expiresAt: string }>(["auth", "agent", token]);
+    const entry = await kv.get<{ agentId: string; expiresAt: string }>([
+      "auth",
+      "agent",
+      token,
+    ]);
 
     if (!entry.value) {
-      return { ok: false, code: "AGENT_TOKEN_INVALID", recovery: "Token not found or expired" };
+      return {
+        ok: false,
+        code: "AGENT_TOKEN_INVALID",
+        recovery: "Token not found or expired",
+      };
     }
 
     const expiry = new Date(entry.value.expiresAt);
     if (isNaN(expiry.getTime()) || expiry < new Date()) {
       await kv.delete(["auth", "agent", token]);
-      return { ok: false, code: "AGENT_TOKEN_EXPIRED", recovery: "Sandbox session expired (max 30 min)" };
+      return {
+        ok: false,
+        code: "AGENT_TOKEN_EXPIRED",
+        recovery: "Sandbox session expired (max 30 min)",
+      };
     }
 
     return { ok: true, identity: entry.value.agentId };
@@ -262,10 +330,19 @@ export class AuthManager {
     }
 
     if (staticToken && !token) {
-      return { ok: false, code: "UNAUTHORIZED", recovery: "Add Authorization: Bearer <token> header" };
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        recovery: "Add Authorization: Bearer <token> header",
+      };
     }
 
-    return { ok: false, code: "AUTH_FAILED", recovery: "Token invalid. Use a valid invite, session, agent, or static token." };
+    return {
+      ok: false,
+      code: "AUTH_FAILED",
+      recovery:
+        "Token invalid. Use a valid invite, session, agent, or static token.",
+    };
   }
 
   private extractBearer(req: Request): string | null {
@@ -273,5 +350,4 @@ export class AuthManager {
     if (!auth?.startsWith("Bearer ")) return null;
     return auth.slice(7);
   }
-
 }

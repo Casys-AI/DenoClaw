@@ -1,4 +1,9 @@
-import type { AgentConfig, AgentDefaults, AgentResponse, ToolsConfig } from "./types.ts";
+import type {
+  AgentConfig,
+  AgentDefaults,
+  AgentResponse,
+  ToolsConfig,
+} from "./types.ts";
 import type { SandboxConfig } from "../shared/types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
@@ -55,7 +60,13 @@ export class AgentLoop {
   private agentId: string;
   private sessionId: string;
 
-  constructor(sessionId: string, config: AgentLoopConfig, agentConfig?: Partial<AgentConfig>, maxIterations = 10, deps?: AgentLoopDeps) {
+  constructor(
+    sessionId: string,
+    config: AgentLoopConfig,
+    agentConfig?: Partial<AgentConfig>,
+    maxIterations = 10,
+    deps?: AgentLoopDeps,
+  ) {
     this.config = {
       model: config.agents?.defaults?.model || "anthropic/claude-sonnet-4-6",
       temperature: config.agents?.defaults?.temperature ?? 0.7,
@@ -76,11 +87,20 @@ export class AgentLoop {
     this.sessionId = sessionId;
 
     if (!deps?.tools) this.registerBuiltInTools(config);
-    if (deps?.sendToAgent) this.tools.register(new SendToAgentTool(deps.sendToAgent, deps.availablePeers));
+    if (deps?.sendToAgent) {
+      this.tools.register(
+        new SendToAgentTool(deps.sendToAgent, deps.availablePeers),
+      );
+    }
     this.tools.register(new MemoryTool(this.memory));
     if (deps?.sandboxConfig) {
       const backend = createSandboxBackend(deps.sandboxConfig);
-      this.tools.setBackend(backend, deps.sandboxConfig.execPolicy, config.tools);
+      this.tools.setBackend(
+        backend,
+        deps.sandboxConfig.execPolicy,
+        config.tools,
+        deps.sandboxConfig.networkAllow,
+      );
       if (deps.askApproval) this.tools.setAskApproval(deps.askApproval);
     }
   }
@@ -126,96 +146,135 @@ export class AgentLoop {
         const iterStart = performance.now();
 
         // OTEL span (parallel, independent)
-        const iterResult = await spanAgentLoop(this.sessionId, iteration, async () => {
-          log.debug(`Boucle agent itération ${iteration}/${this.maxIterations}`);
-
-          const skillsList = this.skills.getSkills();
-          const toolDefs = this.tools.getDefinitions();
-          const raw = this.context.buildContextMessages(this.memory.getMessages(), skillsList, toolDefs, this.memoryTopics);
-
-          const CHARS_PER_TOKEN = 4;
-          const CONTEXT_RATIO = 4;
-          const maxChars = (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
-          const contextMessages = this.context.truncateContext(raw, maxChars);
-
-          // LLM call with timing
-          const llmStart = performance.now();
-          const response = await this.providers.complete(
-            contextMessages,
-            this.config.model,
-            this.config.temperature,
-            this.config.maxTokens,
-            toolDefs,
-          );
-          const llmLatency = performance.now() - llmStart;
-
-          // KV trace: LLM span
-          if (tw && traceId && iterSpanId) {
-            const provider = this.config.model.includes("/") ? this.config.model.split("/")[0] : this.config.model;
-            await tw.writeLLMSpan(
-              traceId, this.agentId, iterSpanId,
-              this.config.model, provider,
-              { prompt: response.usage?.promptTokens ?? 0, completion: response.usage?.completionTokens ?? 0 },
-              llmLatency,
+        const iterResult = await spanAgentLoop(
+          this.sessionId,
+          iteration,
+          async () => {
+            log.debug(
+              `Boucle agent itération ${iteration}/${this.maxIterations}`,
             );
-          }
 
-          log.debug(`LLM: content=${!!response.content} tools=${response.toolCalls?.length ?? 0}`);
+            const skillsList = this.skills.getSkills();
+            const toolDefs = this.tools.getDefinitions();
+            const raw = this.context.buildContextMessages(
+              this.memory.getMessages(),
+              skillsList,
+              toolDefs,
+              this.memoryTopics,
+            );
 
-          if (response.toolCalls?.length) {
-            await this.memory.addMessage({
-              role: "assistant",
-              content: response.content || "",
-              tool_calls: response.toolCalls,
-            });
+            const CHARS_PER_TOKEN = 4;
+            const CONTEXT_RATIO = 4;
+            const maxChars = (this.config.maxTokens || 4096) * CHARS_PER_TOKEN *
+              CONTEXT_RATIO;
+            const contextMessages = this.context.truncateContext(raw, maxChars);
 
-            for (const tc of response.toolCalls) {
-              let args: Record<string, unknown>;
-              try {
-                args = JSON.parse(tc.function.arguments);
-              } catch {
-                log.warn(`JSON invalide pour outil ${tc.function.name}`);
+            // LLM call with timing
+            const llmStart = performance.now();
+            const response = await this.providers.complete(
+              contextMessages,
+              this.config.model,
+              this.config.temperature,
+              this.config.maxTokens,
+              toolDefs,
+            );
+            const llmLatency = performance.now() - llmStart;
+
+            // KV trace: LLM span
+            if (tw && traceId && iterSpanId) {
+              const provider = this.config.model.includes("/")
+                ? this.config.model.split("/")[0]
+                : this.config.model;
+              await tw.writeLLMSpan(
+                traceId,
+                this.agentId,
+                iterSpanId,
+                this.config.model,
+                provider,
+                {
+                  prompt: response.usage?.promptTokens ?? 0,
+                  completion: response.usage?.completionTokens ?? 0,
+                },
+                llmLatency,
+              );
+            }
+
+            log.debug(
+              `LLM: content=${!!response.content} tools=${
+                response.toolCalls?.length ?? 0
+              }`,
+            );
+
+            if (response.toolCalls?.length) {
+              await this.memory.addMessage({
+                role: "assistant",
+                content: response.content || "",
+                tool_calls: response.toolCalls,
+              });
+
+              for (const tc of response.toolCalls) {
+                let args: Record<string, unknown>;
+                try {
+                  args = JSON.parse(tc.function.arguments);
+                } catch {
+                  log.warn(`JSON invalide pour outil ${tc.function.name}`);
+                  await this.memory.addMessage({
+                    role: "tool",
+                    content:
+                      `Error: Invalid JSON arguments for ${tc.function.name}`,
+                    name: tc.function.name,
+                    tool_call_id: tc.id,
+                  });
+                  continue;
+                }
+
+                log.info(`Outil: ${tc.function.name}`);
+                const toolStart = performance.now();
+                const result = await spanToolCall(
+                  tc.function.name,
+                  () => this.tools.execute(tc.function.name, args),
+                );
+                const toolLatency = performance.now() - toolStart;
+
+                // KV trace: tool span
+                if (tw && traceId && iterSpanId) {
+                  await tw.writeToolSpan(
+                    traceId,
+                    this.agentId,
+                    iterSpanId,
+                    tc.function.name,
+                    result.success,
+                    toolLatency,
+                    args,
+                  );
+                }
+
                 await this.memory.addMessage({
                   role: "tool",
-                  content: `Error: Invalid JSON arguments for ${tc.function.name}`,
+                  content: result.success
+                    ? result.output
+                    : `Error [${result.error?.code}]: ${
+                      JSON.stringify(result.error?.context)
+                    }\nRecovery: ${result.error?.recovery ?? "none"}`,
                   name: tc.function.name,
                   tool_call_id: tc.id,
                 });
-                continue;
               }
 
-              log.info(`Outil: ${tc.function.name}`);
-              const toolStart = performance.now();
-              const result = await spanToolCall(tc.function.name, () =>
-                this.tools.execute(tc.function.name, args)
-              );
-              const toolLatency = performance.now() - toolStart;
-
-              // KV trace: tool span
-              if (tw && traceId && iterSpanId) {
-                await tw.writeToolSpan(
-                  traceId, this.agentId, iterSpanId,
-                  tc.function.name, result.success, toolLatency, args,
-                );
-              }
-
-              await this.memory.addMessage({
-                role: "tool",
-                content: result.success
-                  ? result.output
-                  : `Error [${result.error?.code}]: ${JSON.stringify(result.error?.context)}\nRecovery: ${result.error?.recovery ?? "none"}`,
-                name: tc.function.name,
-                tool_call_id: tc.id,
-              });
+              return null; // continue loop
             }
 
-            return null; // continue loop
-          }
-
-          // Final text response
-          await this.memory.addMessage({ role: "assistant", content: response.content });
-          return { content: response.content, finishReason: response.finishReason } as AgentResponse;
-        });
+            // Final text response
+            await this.memory.addMessage({
+              role: "assistant",
+              content: response.content,
+            });
+            return {
+              content: response.content,
+              finishReason: response.finishReason,
+            } as AgentResponse;
+          },
+        );
 
         // KV trace: end iteration span
         if (tw && traceId && iterSpanId) {
@@ -227,9 +286,12 @@ export class AgentLoop {
 
       log.warn(`Max itérations atteint (${this.maxIterations})`);
       finalStatus = "completed";
-      const last = this.memory.getMessages().findLast((m) => m.role === "assistant");
+      const last = this.memory.getMessages().findLast((m) =>
+        m.role === "assistant"
+      );
       return {
-        content: last?.content || "Max iterations reached without a final response.",
+        content: last?.content ||
+          "Max iterations reached without a final response.",
         finishReason: "max_iterations",
       };
     } catch (e) {

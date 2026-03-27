@@ -320,15 +320,16 @@ Deno.test({
 // ── OIDC ─────────────────────────────────────────────────
 
 Deno.test({
-  name: "AuthManager OIDC — unavailable in local mode",
+  name: "AuthManager OIDC — invalid token rejected",
   async fn() {
     const kv = await Deno.openKv();
     const auth = new AuthManager(kv);
 
-    const result = await auth.verifyOIDC("some-token");
+    const result = await auth.verifyOIDC("not-a-valid-jwt");
     assertEquals(result.ok, false);
     if (!result.ok) {
-      assertEquals(result.code, "OIDC_UNAVAILABLE");
+      // jose is available but token verification fails
+      assertEquals(result.code, "OIDC_VERIFICATION_FAILED");
     }
 
     kv.close();

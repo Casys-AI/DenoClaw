@@ -1,5 +1,12 @@
 // Shared Kernel — barrel
-export { AgentError, DenoClawError, ConfigError, ProviderError, ToolError, ChannelError } from "./errors.ts";
+export {
+  AgentError,
+  ChannelError,
+  ConfigError,
+  DenoClawError,
+  ProviderError,
+  ToolError,
+} from "./errors.ts";
 export { log } from "./log.ts";
 export {
   ensureDir,
@@ -20,12 +27,18 @@ export type {
   AgentStatusEntry,
   AgentStatusValue,
   AgentTaskEntry,
+  ApprovalReason,
+  ApprovalRequest,
+  ApprovalResponse,
   BrokerEnvelope,
   ChannelRouting,
+  ExecPolicy,
   LLMResponse,
   Message,
   MessageRole,
+  SandboxBackend,
   SandboxConfig,
+  SandboxExecRequest,
   SandboxPermission,
   StructuredError,
   ToolCall,

@@ -16,7 +16,8 @@ import { log } from "../shared/log.ts";
 
 // Use the OTEL API which Deno wires to its built-in implementation
 let trace: typeof import("@opentelemetry/api").trace | null = null;
-let SpanStatusCode: typeof import("@opentelemetry/api").SpanStatusCode | null = null;
+let SpanStatusCode: typeof import("@opentelemetry/api").SpanStatusCode | null =
+  null;
 
 async function loadOtel(): Promise<boolean> {
   try {
@@ -26,7 +27,9 @@ async function loadOtel(): Promise<boolean> {
     log.info("OTEL: instrumentation activée");
     return true;
   } catch {
-    log.debug("OTEL: @opentelemetry/api non disponible, instrumentation désactivée");
+    log.debug(
+      "OTEL: @opentelemetry/api non disponible, instrumentation désactivée",
+    );
     return false;
   }
 }
@@ -38,7 +41,9 @@ export async function initTelemetry(): Promise<void> {
   initialized = true;
 
   // Only load if OTEL is enabled
-  if (Deno.env.get("OTEL_DENO") || Deno.env.get("OTEL_EXPORTER_OTLP_ENDPOINT")) {
+  if (
+    Deno.env.get("OTEL_DENO") || Deno.env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+  ) {
     await loadOtel();
   } else {
     log.debug("OTEL: désactivé (set OTEL_DENO=1 pour activer)");
@@ -70,7 +75,10 @@ export async function withSpan<T>(
       span.setStatus({ code: SpanStatusCode!.OK });
       return result;
     } catch (e) {
-      span.setStatus({ code: SpanStatusCode!.ERROR, message: (e as Error).message });
+      span.setStatus({
+        code: SpanStatusCode!.ERROR,
+        message: (e as Error).message,
+      });
       span.recordException(e as Error);
       throw e;
     } finally {
@@ -81,27 +89,42 @@ export async function withSpan<T>(
 
 // Pre-built span wrappers for common operations
 
-export function spanAgentLoop<T>(sessionId: string, iteration: number, fn: () => Promise<T>): Promise<T> {
+export function spanAgentLoop<T>(
+  sessionId: string,
+  iteration: number,
+  fn: () => Promise<T>,
+): Promise<T> {
   return withSpan("agent.loop.iteration", {
     "agent.session_id": sessionId,
     "agent.iteration": iteration,
   }, fn);
 }
 
-export function spanToolCall<T>(toolName: string, fn: () => Promise<T>): Promise<T> {
+export function spanToolCall<T>(
+  toolName: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   return withSpan("agent.tool.execute", {
     "tool.name": toolName,
   }, fn);
 }
 
-export function spanLLMCall<T>(model: string, provider: string, fn: () => Promise<T>): Promise<T> {
+export function spanLLMCall<T>(
+  model: string,
+  provider: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   return withSpan("llm.complete", {
     "llm.model": model,
     "llm.provider": provider,
   }, fn);
 }
 
-export function spanBusPublish<T>(channelType: string, messageId: string, fn: () => Promise<T>): Promise<T> {
+export function spanBusPublish<T>(
+  channelType: string,
+  messageId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   return withSpan("bus.publish", {
     "bus.channel_type": channelType,
     "bus.message_id": messageId,
@@ -113,5 +136,10 @@ export { MetricsCollector } from "./metrics.ts";
 export type { AgentMetrics } from "./metrics.ts";
 
 // Re-export traces
-export { TraceWriter, getTrace, getTraceSpans, listAgentTraces } from "./traces.ts";
-export type { TraceRoot, Span, SpanType, SpanData } from "./traces.ts";
+export {
+  getTrace,
+  getTraceSpans,
+  listAgentTraces,
+  TraceWriter,
+} from "./traces.ts";
+export type { Span, SpanData, SpanType, TraceRoot } from "./traces.ts";

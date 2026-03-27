@@ -106,7 +106,10 @@ export class MessageBus {
     await Promise.all(promises);
   }
 
-  private async safeCall(handler: MessageHandler, message: ChannelMessage): Promise<void> {
+  private async safeCall(
+    handler: MessageHandler,
+    message: ChannelMessage,
+  ): Promise<void> {
     try {
       await handler(message);
     } catch (e) {

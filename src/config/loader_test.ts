@@ -1,5 +1,10 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import { createDefaultConfig, getConfigOrDefault, loadConfig, saveConfig } from "./loader.ts";
+import {
+  createDefaultConfig,
+  getConfigOrDefault,
+  loadConfig,
+  saveConfig,
+} from "./loader.ts";
 import { ConfigError } from "../shared/errors.ts";
 
 Deno.test("createDefaultConfig returns valid config", () => {

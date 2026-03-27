@@ -20,12 +20,19 @@ export class SessionManager {
     return ["sessions", id];
   }
 
-  async getOrCreate(sessionId: string, userId: string, channelType = "cli"): Promise<Session> {
+  async getOrCreate(
+    sessionId: string,
+    userId: string,
+    channelType = "cli",
+  ): Promise<Session> {
     const kv = await this.getKv();
     const entry = await kv.get<Session>(this.key(sessionId));
 
     if (entry.value) {
-      const session = { ...entry.value, lastActivity: new Date().toISOString() };
+      const session = {
+        ...entry.value,
+        lastActivity: new Date().toISOString(),
+      };
       await kv.set(this.key(sessionId), session);
       return session;
     }
@@ -72,7 +79,8 @@ export class SessionManager {
   }
 
   async cleanup(days = 30): Promise<number> {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      .toISOString();
     const all = await this.listAll();
     let count = 0;
     for (const s of all) {

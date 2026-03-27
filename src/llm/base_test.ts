@@ -11,17 +11,22 @@ Deno.test("OpenAICompatProvider strips provider prefix from model name", async (
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
     capturedBody = JSON.parse(init?.body as string);
-    return Promise.resolve(new Response(JSON.stringify({
-      choices: [{
-        message: { content: "ok", tool_calls: null },
-        finish_reason: "stop",
-      }],
-      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-    })));
+    return Promise.resolve(
+      new Response(JSON.stringify({
+        choices: [{
+          message: { content: "ok", tool_calls: null },
+          finish_reason: "stop",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      })),
+    );
   }) as typeof fetch;
 
   try {
-    const provider = new OpenAICompatProvider("fake-key", "https://fake.api/v1");
+    const provider = new OpenAICompatProvider(
+      "fake-key",
+      "https://fake.api/v1",
+    );
     const result = await provider.complete(
       [{ role: "user", content: "test" }],
       "openai/gpt-4o",
@@ -39,11 +44,16 @@ Deno.test("OpenAICompatProvider strips provider prefix from model name", async (
 Deno.test("Provider throws ProviderError on HTTP failure", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (() => {
-    return Promise.resolve(new Response("Internal Server Error", { status: 500 }));
+    return Promise.resolve(
+      new Response("Internal Server Error", { status: 500 }),
+    );
   }) as typeof fetch;
 
   try {
-    const provider = new OpenAICompatProvider("fake-key", "https://fake.api/v1");
+    const provider = new OpenAICompatProvider(
+      "fake-key",
+      "https://fake.api/v1",
+    );
     await assertRejects(
       () => provider.complete([{ role: "user", content: "test" }], "gpt-4o"),
       ProviderError,

@@ -47,7 +47,8 @@ export class SandboxManager {
    * @param config.apiToken — explicit token, or falls back to DENO_SANDBOX_API_TOKEN env var (AX-7 documented)
    */
   constructor(config?: Partial<SandboxApiConfig>) {
-    this.apiToken = config?.apiToken || Deno.env.get("DENO_SANDBOX_API_TOKEN") || "";
+    this.apiToken = config?.apiToken ||
+      Deno.env.get("DENO_SANDBOX_API_TOKEN") || "";
     this.apiBase = config?.apiBase || "https://api.deno.com/v2/sandbox";
     this.defaults = {
       region: config?.region || "amsterdam",
@@ -57,9 +58,17 @@ export class SandboxManager {
     };
   }
 
-  private async request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+  private async request<T>(
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<T> {
     if (!this.apiToken) {
-      throw new DenoClawError("SANDBOX_NO_TOKEN", {}, "Set DENO_SANDBOX_API_TOKEN env var or pass apiToken in config");
+      throw new DenoClawError(
+        "SANDBOX_NO_TOKEN",
+        {},
+        "Set DENO_SANDBOX_API_TOKEN env var or pass apiToken in config",
+      );
     }
 
     const res = await fetch(`${this.apiBase}${path}`, {
@@ -74,7 +83,10 @@ export class SandboxManager {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new DenoClawError("SANDBOX_API_ERROR", { status: res.status, body: text.slice(0, 500) }, "Check Sandbox API token and endpoint");
+      throw new DenoClawError("SANDBOX_API_ERROR", {
+        status: res.status,
+        body: text.slice(0, 500),
+      }, "Check Sandbox API token and endpoint");
     }
 
     return await res.json() as T;
@@ -118,7 +130,9 @@ export class SandboxManager {
       },
     );
 
-    log.debug(`Sandbox exec: exit=${result.exitCode} stdout=${result.stdout.length}B`);
+    log.debug(
+      `Sandbox exec: exit=${result.exitCode} stdout=${result.stdout.length}B`,
+    );
     return result;
   }
 

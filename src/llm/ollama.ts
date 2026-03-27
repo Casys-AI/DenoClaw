@@ -1,4 +1,9 @@
-import type { LLMResponse, Message, ToolCall, ToolDefinition } from "../shared/types.ts";
+import type {
+  LLMResponse,
+  Message,
+  ToolCall,
+  ToolDefinition,
+} from "../shared/types.ts";
 import { BaseProvider } from "./base.ts";
 import { ProviderError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
@@ -45,8 +50,14 @@ export class OllamaProvider extends BaseProvider {
     const cleanModel = model.startsWith("ollama/") ? model.slice(7) : model;
     const url = `${this.apiBase}/api/chat`;
 
-    log.debug(`Ollama: POST ${url} model=${cleanModel} tools=${tools?.length ?? 0}`);
-    if (tools?.length) log.debug(`Ollama tools: ${JSON.stringify(tools.map(t => t.function.name))}`);
+    log.debug(
+      `Ollama: POST ${url} model=${cleanModel} tools=${tools?.length ?? 0}`,
+    );
+    if (tools?.length) {
+      log.debug(
+        `Ollama tools: ${JSON.stringify(tools.map((t) => t.function.name))}`,
+      );
+    }
 
     try {
       // Build request body
@@ -54,7 +65,11 @@ export class OllamaProvider extends BaseProvider {
         model: cleanModel,
         messages: messages.map((m) => {
           if (m.role === "tool") {
-            return { role: "tool", content: m.content, tool_name: m.name ?? "" };
+            return {
+              role: "tool",
+              content: m.content,
+              tool_name: m.name ?? "",
+            };
           }
           if (m.role === "assistant" && m.tool_calls?.length) {
             return {
@@ -62,8 +77,12 @@ export class OllamaProvider extends BaseProvider {
               content: m.content || "",
               tool_calls: m.tool_calls.map((tc) => {
                 let args: Record<string, unknown> = {};
-                try { args = JSON.parse(tc.function.arguments); } catch { /* keep empty */ }
-                return { function: { name: tc.function.name, arguments: args } };
+                try {
+                  args = JSON.parse(tc.function.arguments);
+                } catch { /* keep empty */ }
+                return {
+                  function: { name: tc.function.name, arguments: args },
+                };
               }),
             };
           }

@@ -14,7 +14,11 @@ export class TaskStore {
     return this.kv;
   }
 
-  async create(taskId: string, message: A2AMessage, contextId?: string): Promise<Task> {
+  async create(
+    taskId: string,
+    message: A2AMessage,
+    contextId?: string,
+  ): Promise<Task> {
     const kv = await this.getKv();
 
     const task: Task = {
@@ -36,7 +40,11 @@ export class TaskStore {
     return entry.value;
   }
 
-  async updateStatus(taskId: string, state: TaskState, message?: A2AMessage): Promise<Task | null> {
+  async updateStatus(
+    taskId: string,
+    state: TaskState,
+    message?: A2AMessage,
+  ): Promise<Task | null> {
     const kv = await this.getKv();
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
     if (!entry.value) return null;
@@ -45,7 +53,9 @@ export class TaskStore {
 
     // Can't change terminal states
     if (TERMINAL_STATES.includes(task.status.state)) {
-      log.warn(`A2A Task ${taskId} is in terminal state ${task.status.state}, cannot change to ${state}`);
+      log.warn(
+        `A2A Task ${taskId} is in terminal state ${task.status.state}, cannot change to ${state}`,
+      );
       return task;
     }
 
@@ -100,6 +110,9 @@ export class TaskStore {
   }
 
   close(): void {
-    if (this.kv) { this.kv.close(); this.kv = null; }
+    if (this.kv) {
+      this.kv.close();
+      this.kv = null;
+    }
   }
 }

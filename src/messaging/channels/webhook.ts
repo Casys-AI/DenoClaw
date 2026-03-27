@@ -77,7 +77,11 @@ export class WebhookChannel extends BaseChannel {
     }
   }
 
-  async send(_userId: string, content: string, metadata?: Record<string, unknown>): Promise<void> {
+  async send(
+    _userId: string,
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
     const callbackUrl = metadata?.callbackUrl as string;
     if (!callbackUrl) {
       log.warn("Pas de callbackUrl pour webhook send");

@@ -5,7 +5,14 @@ import type {
   ToolRequest,
   ToolResponsePayload,
 } from "./types.ts";
-import type { AgentBrokerPort, LLMResponse, Message, StructuredError, ToolDefinition, ToolResult } from "../shared/types.ts";
+import type {
+  AgentBrokerPort,
+  LLMResponse,
+  Message,
+  StructuredError,
+  ToolDefinition,
+  ToolResult,
+} from "../shared/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
@@ -63,7 +70,12 @@ export class BrokerClient implements AgentBrokerPort {
   /**
    * Send a message to the broker and wait for a response.
    */
-  private async request(to: string, type: BrokerMessage["type"], payload: unknown, timeoutMs = 120_000): Promise<BrokerMessage> {
+  private async request(
+    to: string,
+    type: BrokerMessage["type"],
+    payload: unknown,
+    timeoutMs = 120_000,
+  ): Promise<BrokerMessage> {
     const kv = await this.getKv();
     const id = generateId();
 
@@ -83,11 +95,13 @@ export class BrokerClient implements AgentBrokerPort {
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
-          reject(new DenoClawError(
-            "BROKER_TIMEOUT",
-            { type, to, timeoutMs },
-            "Broker did not respond in time. Check broker is running.",
-          ));
+          reject(
+            new DenoClawError(
+              "BROKER_TIMEOUT",
+              { type, to, timeoutMs },
+              "Broker did not respond in time. Check broker is running.",
+            ),
+          );
         }
       }, timeoutMs);
     });
@@ -111,7 +125,13 @@ export class BrokerClient implements AgentBrokerPort {
     maxTokens?: number,
     tools?: ToolDefinition[],
   ): Promise<LLMResponse> {
-    const payload: LLMRequest = { messages, model, temperature, maxTokens, tools };
+    const payload: LLMRequest = {
+      messages,
+      model,
+      temperature,
+      maxTokens,
+      tools,
+    };
     const response = await this.request("broker", "llm_request", payload);
 
     if (response.type === "error") {
@@ -128,13 +148,20 @@ export class BrokerClient implements AgentBrokerPort {
    * Request tool execution via the broker.
    * The broker routes to the appropriate tunnel.
    */
-  async execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
+  async execTool(
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult> {
     const payload: ToolRequest = { tool, args };
     const response = await this.request("broker", "tool_request", payload);
 
     if (response.type === "error") {
       const err = response.payload as StructuredError;
-      return { success: false, output: "", error: { code: err.code, context: err.context, recovery: err.recovery } };
+      return {
+        success: false,
+        output: "",
+        error: { code: err.code, context: err.context, recovery: err.recovery },
+      };
     }
 
     return response.payload as ToolResponsePayload;
@@ -145,7 +172,11 @@ export class BrokerClient implements AgentBrokerPort {
   /**
    * Send a message to another agent via the broker.
    */
-  async sendToAgent(targetAgentId: string, instruction: string, data?: unknown): Promise<BrokerMessage> {
+  async sendToAgent(
+    targetAgentId: string,
+    instruction: string,
+    data?: unknown,
+  ): Promise<BrokerMessage> {
     const payload: AgentMessagePayload = { instruction, data };
     return await this.request("broker", "agent_message", {
       targetAgent: targetAgentId,
@@ -157,7 +188,13 @@ export class BrokerClient implements AgentBrokerPort {
 
   close(): void {
     for (const [id, pending] of this.pendingRequests) {
-      pending.reject(new DenoClawError("BROKER_CLOSED", { requestId: id }, "BrokerClient was closed"));
+      pending.reject(
+        new DenoClawError(
+          "BROKER_CLOSED",
+          { requestId: id },
+          "BrokerClient was closed",
+        ),
+      );
     }
     this.pendingRequests.clear();
     if (this.kv) {

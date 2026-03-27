@@ -37,16 +37,21 @@ export class LocalRelay {
     if (config.capabilities.tools.includes("shell")) {
       this.tools.register(new ShellTool());
     }
-    if (config.capabilities.tools.includes("read_file") || config.capabilities.tools.includes("fs_read")) {
+    if (
+      config.capabilities.tools.includes("read_file") ||
+      config.capabilities.tools.includes("fs_read")
+    ) {
       this.tools.register(new ReadFileTool());
     }
-    if (config.capabilities.tools.includes("write_file") || config.capabilities.tools.includes("fs_write")) {
+    if (
+      config.capabilities.tools.includes("write_file") ||
+      config.capabilities.tools.includes("fs_write")
+    ) {
       this.tools.register(new WriteFileTool());
     }
     if (config.capabilities.tools.includes("web_fetch")) {
       this.tools.register(new WebFetchTool());
     }
-
   }
 
   async connect(): Promise<void> {
@@ -99,8 +104,14 @@ export class LocalRelay {
 
     // Wait for connection
     await new Promise<void>((resolve, reject) => {
-      const onOpen = () => { cleanup(); resolve(); };
-      const onError = (e: Event) => { cleanup(); reject(e); };
+      const onOpen = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (e: Event) => {
+        cleanup();
+        reject(e);
+      };
       const cleanup = () => {
         this.ws?.removeEventListener("open", onOpen);
         this.ws?.removeEventListener("error", onError);
@@ -117,7 +128,10 @@ export class LocalRelay {
 
     switch (msg.type) {
       case "tool_request": {
-        const req = msg.payload as { tool: string; args: Record<string, unknown> };
+        const req = msg.payload as {
+          tool: string;
+          args: Record<string, unknown>;
+        };
         const result = await this.executeTool(req.tool, req.args);
         response = {
           id: msg.id,
@@ -138,7 +152,10 @@ export class LocalRelay {
     this.ws?.send(JSON.stringify(response));
   }
 
-  private async executeTool(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
+  private async executeTool(
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult> {
     if (this.config.autoApprove) {
       log.info(`Relay: exécution locale (auto-approve) — ${tool}`);
     } else {
@@ -157,7 +174,9 @@ export class LocalRelay {
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30_000);
-    log.info(`Relay: reconnexion dans ${delay}ms (tentative ${this.reconnectAttempts})`);
+    log.info(
+      `Relay: reconnexion dans ${delay}ms (tentative ${this.reconnectAttempts})`,
+    );
 
     setTimeout(() => {
       this.connect().catch((e) => log.error("Relay: échec reconnexion", e));

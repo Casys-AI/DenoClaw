@@ -1,6 +1,10 @@
 import type { ProvidersConfig } from "./types.ts";
 import type { LLMResponse, Message, ToolDefinition } from "../shared/types.ts";
-import { AnthropicProvider, type BaseProvider, OpenAICompatProvider } from "./base.ts";
+import {
+  AnthropicProvider,
+  type BaseProvider,
+  OpenAICompatProvider,
+} from "./base.ts";
 import { CLIProvider } from "./cli.ts";
 import { OllamaProvider } from "./ollama.ts";
 import { ProviderError } from "../shared/errors.ts";
@@ -25,35 +29,53 @@ const PROVIDERS: ProviderEntry[] = [
     name: "openai",
     prefixes: ["openai/", "gpt-", "o1-", "o3-"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://api.openai.com/v1"),
+    factory: (k, b) =>
+      new OpenAICompatProvider(k, b, "https://api.openai.com/v1"),
   },
   {
     name: "openrouter",
     prefixes: ["openrouter/"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://openrouter.ai/api/v1"),
+    factory: (k, b) =>
+      new OpenAICompatProvider(k, b, "https://openrouter.ai/api/v1"),
   },
   {
     name: "deepseek",
     prefixes: ["deepseek/", "deepseek-"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://api.deepseek.com/v1"),
+    factory: (k, b) =>
+      new OpenAICompatProvider(k, b, "https://api.deepseek.com/v1"),
   },
   {
     name: "groq",
     prefixes: ["groq/"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://api.groq.com/openai/v1"),
+    factory: (k, b) =>
+      new OpenAICompatProvider(k, b, "https://api.groq.com/openai/v1"),
   },
   {
     name: "gemini",
     prefixes: ["gemini/", "gemini-"],
     requiresKey: true,
-    factory: (k, b) => new OpenAICompatProvider(k, b, "https://generativelanguage.googleapis.com/v1beta/openai"),
+    factory: (k, b) =>
+      new OpenAICompatProvider(
+        k,
+        b,
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+      ),
   },
   {
     name: "ollama",
-    prefixes: ["ollama/", "nemotron", "llama", "mistral", "phi", "qwen2", "codellama", "gemma"],
+    prefixes: [
+      "ollama/",
+      "nemotron",
+      "llama",
+      "mistral",
+      "phi",
+      "qwen2",
+      "codellama",
+      "gemma",
+    ],
     requiresKey: true,
     factory: (k, b) => new OllamaProvider(k, b),
   },
@@ -133,8 +155,10 @@ export class ProviderManager {
   ): Promise<LLMResponse> {
     const provider = this.resolveProvider(model);
     const providerName = this.getProviderName(model);
-    return await spanLLMCall(model, providerName, () =>
-      provider.complete(messages, model, temperature, maxTokens, tools)
+    return await spanLLMCall(
+      model,
+      providerName,
+      () => provider.complete(messages, model, temperature, maxTokens, tools),
     );
   }
 

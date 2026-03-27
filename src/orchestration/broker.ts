@@ -1,4 +1,9 @@
-import type { BrokerMessage, LLMRequest, ToolRequest, TunnelCapabilities } from "./types.ts";
+import type {
+  BrokerMessage,
+  LLMRequest,
+  ToolRequest,
+  TunnelCapabilities,
+} from "./types.ts";
 import type { AgentEntry, SandboxPermission } from "../shared/types.ts";
 import type { Config } from "../config/types.ts";
 import type { BuiltinToolName } from "../agent/tools/types.ts";
@@ -34,7 +39,10 @@ export class BrokerServer {
   private sandbox: SandboxManager;
   private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
-  private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }>();
+  private tunnels = new Map<
+    string,
+    { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }
+  >();
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
@@ -62,7 +70,9 @@ export class BrokerServer {
   async start(port = 3000): Promise<void> {
     // Warning si pas de token configuré (ADR-003)
     if (!Deno.env.get("DENOCLAW_API_TOKEN")) {
-      log.warn("DENOCLAW_API_TOKEN not set — broker running in unauthenticated mode. Do not use in production.");
+      log.warn(
+        "DENOCLAW_API_TOKEN not set — broker running in unauthenticated mode. Do not use in production.",
+      );
     }
 
     const kv = await this.getKv();
@@ -106,11 +116,18 @@ export class BrokerServer {
       try {
         await this.sendStructuredError(msg.from, msg.id, {
           code: "BROKER_ERROR",
-          context: { messageType: msg.type, from: msg.from, cause: err.message },
+          context: {
+            messageType: msg.type,
+            from: msg.from,
+            cause: err.message,
+          },
           recovery: "Check broker logs for details",
         });
       } catch (sendErr) {
-        log.error("Failed to send error reply to agent (KV unavailable?)", sendErr);
+        log.error(
+          "Failed to send error reply to agent (KV unavailable?)",
+          sendErr,
+        );
       }
     }
   }
@@ -170,7 +187,13 @@ export class BrokerServer {
   private async checkToolPermissions(
     agentId: string,
     tool: string,
-  ): Promise<{ granted: SandboxPermission[]; denied: SandboxPermission[]; agentConfig: Deno.KvEntryMaybe<AgentEntry> }> {
+  ): Promise<
+    {
+      granted: SandboxPermission[];
+      denied: SandboxPermission[];
+      agentConfig: Deno.KvEntryMaybe<AgentEntry>;
+    }
+  > {
     const kv = await this.getKv();
     const toolPerms = this.resolveToolPermissions(tool);
     const agentConfig = await kv.get<AgentEntry>(["agents", agentId, "config"]);
@@ -187,7 +210,10 @@ export class BrokerServer {
     const req = msg.payload as ToolRequest;
 
     // 1. Check permissions (intersection tool × agent) — deny by default (ADR-005)
-    const { granted, denied, agentConfig } = await this.checkToolPermissions(msg.from, req.tool);
+    const { granted, denied, agentConfig } = await this.checkToolPermissions(
+      msg.from,
+      req.tool,
+    );
 
     if (denied.length > 0) {
       const toolPerms = this.resolveToolPermissions(req.tool);
@@ -195,7 +221,9 @@ export class BrokerServer {
       await this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_PERMISSION_DENIED",
         context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
-        recovery: `Add ${JSON.stringify(denied)} to agent sandbox.allowedPermissions`,
+        recovery: `Add ${
+          JSON.stringify(denied)
+        } to agent sandbox.allowedPermissions`,
       });
       return;
     }
@@ -205,7 +233,12 @@ export class BrokerServer {
     const tunnel = this.findTunnelForTool(req.tool);
     if (tunnel) {
       await this.routeToTunnel(tunnel, msg);
-      await this.metrics.recordToolCall(msg.from, req.tool, true, performance.now() - toolStart);
+      await this.metrics.recordToolCall(
+        msg.from,
+        req.tool,
+        true,
+        performance.now() - toolStart,
+      );
       return;
     }
 
@@ -215,12 +248,18 @@ export class BrokerServer {
 
       // networkAllow : agent-specific > defaults > [] (ADR-005)
       const agentNetwork = agentConfig.value?.sandbox?.networkAllow;
-      const defaultNetwork = this.config.agents?.defaults?.sandbox?.networkAllow;
+      const defaultNetwork = this.config.agents?.defaults?.sandbox
+        ?.networkAllow;
       const networkAllow = agentNetwork || defaultNetwork || [];
 
-      const maxDuration = agentConfig.value?.sandbox?.maxDurationSec || this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
+      const maxDuration = agentConfig.value?.sandbox?.maxDurationSec ||
+        this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
 
-      log.info(`Sandbox: ${req.tool} avec permissions ${JSON.stringify(granted)}, network: ${JSON.stringify(networkAllow)}`);
+      log.info(
+        `Sandbox: ${req.tool} avec permissions ${
+          JSON.stringify(granted)
+        }, network: ${JSON.stringify(networkAllow)}`,
+      );
 
       const result = await this.sandbox.run(code, {
         memoryMb: 256,
@@ -229,7 +268,12 @@ export class BrokerServer {
       });
 
       const toolSuccess = result.exitCode === 0;
-      await this.metrics.recordToolCall(msg.from, req.tool, toolSuccess, performance.now() - toolStart);
+      await this.metrics.recordToolCall(
+        msg.from,
+        req.tool,
+        toolSuccess,
+        performance.now() - toolStart,
+      );
 
       const reply: BrokerMessage = {
         id: msg.id,
@@ -240,7 +284,11 @@ export class BrokerServer {
           success: toolSuccess,
           output: result.stdout,
           error: !toolSuccess
-            ? { code: "SANDBOX_EXEC_FAILED", context: { stderr: result.stderr, exitCode: result.exitCode }, recovery: "Check tool arguments" }
+            ? {
+              code: "SANDBOX_EXEC_FAILED",
+              context: { stderr: result.stderr, exitCode: result.exitCode },
+              recovery: "Check tool arguments",
+            }
             : undefined,
         },
         timestamp: new Date().toISOString(),
@@ -284,7 +332,10 @@ export class BrokerServer {
   /**
    * Build Deno code to execute a tool inside a Sandbox.
    */
-  private buildSandboxCode(tool: string, args: Record<string, unknown>): string {
+  private buildSandboxCode(
+    tool: string,
+    args: Record<string, unknown>,
+  ): string {
     switch (tool) {
       case "shell":
         return `
@@ -297,34 +348,56 @@ console.log(new TextDecoder().decode(stdout));
 if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
 `;
       case "read_file":
-        return `console.log(await Deno.readTextFile(${JSON.stringify(args.path || "")}));`;
+        return `console.log(await Deno.readTextFile(${
+          JSON.stringify(args.path || "")
+        }));`;
       case "write_file":
-        return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${JSON.stringify(args.content || "")});
+        return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${
+          JSON.stringify(args.content || "")
+        });
 console.log("Written: " + ${JSON.stringify(String(args.path || ""))});`;
       case "web_fetch": {
         const method = (args.method as string) || "GET";
-        return `const r = await fetch(${JSON.stringify(args.url || "")}, { method: ${JSON.stringify(method)} });
+        return `const r = await fetch(${
+          JSON.stringify(args.url || "")
+        }, { method: ${JSON.stringify(method)} });
 console.log("HTTP " + r.status);
 console.log(await r.text());`;
       }
       default:
-        return `console.error("Unknown tool: " + ${JSON.stringify(tool)}); Deno.exit(1);`;
+        return `console.error("Unknown tool: " + ${
+          JSON.stringify(tool)
+        }); Deno.exit(1);`;
     }
   }
 
   // ── Inter-agent routing (ADR-006: A2A + peers check) ─
 
   private async handleAgentMessage(msg: BrokerMessage): Promise<void> {
-    const payload = msg.payload as { targetAgent: string; instruction: string; data?: unknown };
+    const payload = msg.payload as {
+      targetAgent: string;
+      instruction: string;
+      data?: unknown;
+    };
     const kv = await this.getKv();
 
     // Vérifier les peers (fermé par défaut)
-    const senderConfig = await kv.get<AgentEntry>(["agents", msg.from, "config"]);
-    const targetConfig = await kv.get<AgentEntry>(["agents", payload.targetAgent, "config"]);
+    const senderConfig = await kv.get<AgentEntry>([
+      "agents",
+      msg.from,
+      "config",
+    ]);
+    const targetConfig = await kv.get<AgentEntry>([
+      "agents",
+      payload.targetAgent,
+      "config",
+    ]);
 
     // Sender doit avoir target dans ses peers
     const senderPeers = senderConfig.value?.peers || [];
-    if (!senderPeers.includes(payload.targetAgent) && !senderPeers.includes("*")) {
+    if (
+      !senderPeers.includes(payload.targetAgent) && !senderPeers.includes("*")
+    ) {
       await this.sendStructuredError(msg.from, msg.id, {
         code: "PEER_NOT_ALLOWED",
         context: { from: msg.from, to: payload.targetAgent, senderPeers },
@@ -338,7 +411,11 @@ console.log(await r.text());`;
     if (!targetAccept.includes(msg.from) && !targetAccept.includes("*")) {
       await this.sendStructuredError(msg.from, msg.id, {
         code: "PEER_REJECTED",
-        context: { from: msg.from, to: payload.targetAgent, targetAcceptFrom: targetAccept },
+        context: {
+          from: msg.from,
+          to: payload.targetAgent,
+          targetAcceptFrom: targetAccept,
+        },
         recovery: `Add "${msg.from}" to ${payload.targetAgent}.acceptFrom`,
       });
       return;
@@ -360,7 +437,9 @@ console.log(await r.text());`;
     const remoteTunnel = this.findTunnelForAgent(payload.targetAgent);
     if (remoteTunnel) {
       remoteTunnel.send(JSON.stringify(forwarded));
-      log.info(`A2A routé via tunnel instance : ${msg.from} → ${payload.targetAgent}`);
+      log.info(
+        `A2A routé via tunnel instance : ${msg.from} → ${payload.targetAgent}`,
+      );
       return;
     }
 
@@ -388,7 +467,10 @@ console.log(await r.text());`;
 
   private findTunnelForAgent(agentId: string): WebSocket | null {
     for (const [_, t] of this.tunnels) {
-      if (t.capabilities.type === "instance" && t.capabilities.agents?.includes(agentId)) {
+      if (
+        t.capabilities.type === "instance" &&
+        t.capabilities.agents?.includes(agentId)
+      ) {
         return t.ws;
       }
     }
@@ -397,17 +479,25 @@ console.log(await r.text());`;
 
   private routeToTunnel(ws: WebSocket, msg: BrokerMessage): void {
     if (ws.readyState !== WebSocket.OPEN) {
-      throw new DenoClawError("TUNNEL_NOT_OPEN", { readyState: ws.readyState, msgId: msg.id }, "Tunnel disconnected. Reconnect and retry.");
+      throw new DenoClawError("TUNNEL_NOT_OPEN", {
+        readyState: ws.readyState,
+        msgId: msg.id,
+      }, "Tunnel disconnected. Reconnect and retry.");
     }
     ws.send(JSON.stringify(msg));
   }
 
-  private async handleTunnelMessage(tunnelId: string, data: string): Promise<void> {
+  private async handleTunnelMessage(
+    tunnelId: string,
+    data: string,
+  ): Promise<void> {
     let msg: BrokerMessage;
     try {
       msg = JSON.parse(data) as BrokerMessage;
     } catch {
-      log.error(`Malformed JSON from tunnel ${tunnelId}, message dropped`, { preview: data.slice(0, 200) });
+      log.error(`Malformed JSON from tunnel ${tunnelId}, message dropped`, {
+        preview: data.slice(0, 200),
+      });
       return;
     }
     try {
@@ -458,11 +548,16 @@ console.log(await r.text());`;
     if (req.method === "POST" && url.pathname === "/auth/invite") {
       const authResult = await this.auth.checkRequest(req);
       if (!authResult.ok) {
-        return Response.json({ error: { code: authResult.code, recovery: authResult.recovery } }, { status: 401 });
+        return Response.json({
+          error: { code: authResult.code, recovery: authResult.recovery },
+        }, { status: 401 });
       }
       const body = await req.json().catch(() => ({})) as { tunnelId?: string };
       const invite = await this.auth.generateInviteToken(body.tunnelId);
-      return Response.json({ token: invite.token, expiresAt: invite.expiresAt });
+      return Response.json({
+        token: invite.token,
+        expiresAt: invite.expiresAt,
+      });
     }
 
     // Tous les autres endpoints nécessitent auth (ADR-003)
@@ -514,7 +609,9 @@ console.log(await r.text());`;
       const inviteResult = await this.auth.verifyInviteToken(inviteTokenParam);
       if (!inviteResult.ok) {
         return Response.json(
-          { error: { code: inviteResult.code, recovery: inviteResult.recovery } },
+          {
+            error: { code: inviteResult.code, recovery: inviteResult.recovery },
+          },
           { status: 401 },
         );
       }
@@ -551,10 +648,22 @@ console.log(await r.text());`;
         if (entry) {
           this.tunnels.set(tunnelId, { ...entry, sessionToken: session.token });
         }
-        socket.send(JSON.stringify({ type: "session_token", token: session.token, expiresAt: session.expiresAt }));
+        socket.send(
+          JSON.stringify({
+            type: "session_token",
+            token: session.token,
+            expiresAt: session.expiresAt,
+          }),
+        );
       } catch (e) {
         log.error(`Failed to generate session token for tunnel ${tunnelId}`, e);
-        socket.send(JSON.stringify({ type: "error", code: "SESSION_TOKEN_FAILED", recovery: "Reconnect" }));
+        socket.send(
+          JSON.stringify({
+            type: "error",
+            code: "SESSION_TOKEN_FAILED",
+            recovery: "Reconnect",
+          }),
+        );
         socket.close(1011, "Session token generation failed");
       }
     };
@@ -575,8 +684,16 @@ console.log(await r.text());`;
             allowedAgents: data.allowedAgents || [],
           };
           const existing = this.tunnels.get(tunnelId);
-          this.tunnels.set(tunnelId, { ws: socket, capabilities: caps, sessionToken: existing?.sessionToken });
-          log.info(`Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${caps.agents || []})`);
+          this.tunnels.set(tunnelId, {
+            ws: socket,
+            capabilities: caps,
+            sessionToken: existing?.sessionToken,
+          });
+          log.info(
+            `Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${
+              caps.agents || []
+            })`,
+          );
           socket.send(JSON.stringify({ type: "registered", tunnelId }));
           return;
         }
@@ -606,7 +723,11 @@ console.log(await r.text());`;
   private async sendStructuredError(
     to: string,
     requestId: string,
-    error: { code: string; context?: Record<string, unknown>; recovery?: string },
+    error: {
+      code: string;
+      context?: Record<string, unknown>;
+      recovery?: string;
+    },
   ): Promise<void> {
     const kv = await this.getKv();
     const reply: BrokerMessage = {
@@ -630,7 +751,10 @@ console.log(await r.text());`;
       }
     }
     this.tunnels.clear();
-    if (this.kv) { this.kv.close(); this.kv = null; }
+    if (this.kv) {
+      this.kv.close();
+      this.kv = null;
+    }
     log.info("Broker arrêté");
   }
 }

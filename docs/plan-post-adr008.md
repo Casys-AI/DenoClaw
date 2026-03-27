@@ -19,15 +19,21 @@
 ## Phase 1.5 — A2A routing + KV partagé + observabilité ✅ DONE
 
 - [x] SendToAgentTool — tool A2A avec callback injecté (transport-agnostic)
-- [x] Protocol Worker étendu (agent_send, agent_deliver, agent_result, agent_response, task_started, task_completed, agent_task)
+- [x] Protocol Worker étendu (agent_send, agent_deliver, agent_result,
+      agent_response, task_started, task_completed, agent_task)
 - [x] WorkerPool routing A2A avec peer check (peers/acceptFrom fermé par défaut)
-- [x] Worker n'écrit plus dans le shared KV — émet des messages, main process écrit (deploy-compatible)
-- [x] Types observabilité déplacés dans shared/ (AgentTaskEntry, AgentStatusEntry, etc.)
-- [x] Gateway routes : /agents/tasks, /agents/:name/task, /.well-known/agent-card.json
+- [x] Worker n'écrit plus dans le shared KV — émet des messages, main process
+      écrit (deploy-compatible)
+- [x] Types observabilité déplacés dans shared/ (AgentTaskEntry,
+      AgentStatusEntry, etc.)
+- [x] Gateway routes : /agents/tasks, /agents/:name/task,
+      /.well-known/agent-card.json
 - [x] KV watch SSE étendu avec agent_task events
-- [x] Naming harmonisé : agent_tasks KV, agent_task_update sentinel, AGENT_TASK_FAILED
+- [x] Naming harmonisé : agent_tasks KV, agent_task_update sentinel,
+      AGENT_TASK_FAILED
 - [x] AgentCard URL alignée avec les vrais endpoints
-- [x] SendToAgentTool préserve les erreurs structurées (DenoClawError passthrough)
+- [x] SendToAgentTool préserve les erreurs structurées (DenoClawError
+      passthrough)
 - [x] SSE controller.close() + deno.json --unstable-cron
 - [x] 83 tests, check, lint OK
 
@@ -68,25 +74,25 @@
 
 ## Design debt identifié (reviews)
 
-| Issue | Priorité | Ref |
-|---|---|---|
-| WorkerPool fait trop — extraire PeerPolicy et PendingMap | Medium | Arch review |
-| Gateway.handleHttp = 230 lignes non structurées — extraire routeur | Medium | Arch review |
-| Agent message naming — consider outbound/inbound pattern | Low | Arch + Codex |
-| Endpoints pas très RESTful | Low | Codex naming |
-| Telemetry KV keys still use `a2a` prefix (protocol dimension — acceptable) | Low | Codex |
-| Dashboard islands ne passent pas le auth token | Medium | Codex arch |
+| Issue                                                                      | Priorité | Ref          |
+| -------------------------------------------------------------------------- | -------- | ------------ |
+| WorkerPool fait trop — extraire PeerPolicy et PendingMap                   | Medium   | Arch review  |
+| Gateway.handleHttp = 230 lignes non structurées — extraire routeur         | Medium   | Arch review  |
+| Agent message naming — consider outbound/inbound pattern                   | Low      | Arch + Codex |
+| Endpoints pas très RESTful                                                 | Low      | Codex naming |
+| Telemetry KV keys still use `a2a` prefix (protocol dimension — acceptable) | Low      | Codex        |
+| Dashboard islands ne passent pas le auth token                             | Medium   | Codex arch   |
 
 ## Décisions prises
 
-| Sujet | Décision |
-|---|---|
-| **KV Queues en local** | On les garde. HTTP seulement pour Subhosting. |
-| **Communication 3 couches** | HTTP (wake) + WS (perf) + BC (infra only). |
-| **Routing = Broker** | Toute comm agent↔agent via Broker (1:1 et multicast fan-out). |
-| **Agent ne fait jamais kv.watch()** | Seul le Broker watch. Agent fait read/write. |
-| **Worker n'écrit pas dans shared KV** | Émet des messages, main process écrit. Deploy-compatible. |
-| **OAuth LLM** | Basse priorité. API cloud Ollama par défaut. |
-| **Auth OIDC préféré** | OIDC partout sauf Sandbox et local. |
-| **Multi-agent = défaut** | Toujours multi-agent. `--agent` requis. |
-| **API Subhosting v2** | Obligatoire. Deadline 20 juillet 2026. |
+| Sujet                                 | Décision                                                      |
+| ------------------------------------- | ------------------------------------------------------------- |
+| **KV Queues en local**                | On les garde. HTTP seulement pour Subhosting.                 |
+| **Communication 3 couches**           | HTTP (wake) + WS (perf) + BC (infra only).                    |
+| **Routing = Broker**                  | Toute comm agent↔agent via Broker (1:1 et multicast fan-out). |
+| **Agent ne fait jamais kv.watch()**   | Seul le Broker watch. Agent fait read/write.                  |
+| **Worker n'écrit pas dans shared KV** | Émet des messages, main process écrit. Deploy-compatible.     |
+| **OAuth LLM**                         | Basse priorité. API cloud Ollama par défaut.                  |
+| **Auth OIDC préféré**                 | OIDC partout sauf Sandbox et local.                           |
+| **Multi-agent = défaut**              | Toujours multi-agent. `--agent` requis.                       |
+| **API Subhosting v2**                 | Obligatoire. Deadline 20 juillet 2026.                        |

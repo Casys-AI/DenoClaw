@@ -40,7 +40,9 @@ class FailTool extends BaseTool {
   }
 
   execute(_args: Record<string, unknown>): Promise<ToolResult> {
-    return Promise.resolve(this.fail("INTENTIONAL_FAILURE", { reason: "test" }, "This is expected"));
+    return Promise.resolve(
+      this.fail("INTENTIONAL_FAILURE", { reason: "test" }, "This is expected"),
+    );
   }
 }
 

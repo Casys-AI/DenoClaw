@@ -179,7 +179,7 @@ Deno.test("LocalProcessBackend ask=on-miss with callback — approved proceeds t
   const backend = new LocalProcessBackend(baseSandbox);
   const result = await backend.execute({
     ...shellReq("echo approved", policy),
-    onAskApproval: async () => ({ approved: true }),
+    onAskApproval: () => Promise.resolve({ approved: true }),
   });
   assertEquals(result.success, true);
   assertEquals(result.output.includes("approved"), true);

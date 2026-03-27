@@ -26,7 +26,9 @@ export class ChannelManager {
       .map(async ([type, ch]) => {
         try {
           await ch.start((msg) => {
-            this.bus.publish(msg).catch((e: unknown) => log.error(`Bus publish error (${type})`, e));
+            this.bus.publish(msg).catch((e: unknown) =>
+              log.error(`Bus publish error (${type})`, e)
+            );
           });
         } catch (e) {
           log.error(`Échec démarrage ${type}`, e);

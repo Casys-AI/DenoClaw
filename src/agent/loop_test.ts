@@ -1,7 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { AgentLoop } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
-import type { SandboxPermission, ToolDefinition, ToolResult } from "../shared/types.ts";
+import type {
+  SandboxPermission,
+  ToolDefinition,
+  ToolResult,
+} from "../shared/types.ts";
 import { BaseTool } from "./tools/registry.ts";
 
 // Minimal AgentLoopConfig with no providers configured — enough to construct a loop
@@ -39,12 +43,15 @@ class StubTool extends BaseTool {
 }
 
 Deno.test({
-  name: "AgentLoop accepts custom tools via AgentLoopDeps — auto-registration skipped",
-  async fn() {
+  name:
+    "AgentLoop accepts custom tools via AgentLoopDeps — auto-registration skipped",
+  fn() {
     const registry = new ToolRegistry();
     registry.register(new StubTool());
 
-    const loop = new AgentLoop("test-session", minimalConfig, {}, 10, { tools: registry });
+    const loop = new AgentLoop("test-session", minimalConfig, {}, 10, {
+      tools: registry,
+    });
 
     const tools = loop.getTools();
     // Our injected stub + memory tool (always registered)
@@ -70,7 +77,13 @@ Deno.test({
     assertEquals(tools.size, 5);
 
     const names = tools.getDefinitions().map((d) => d.function.name).sort();
-    assertEquals(names, ["memory", "read_file", "shell", "web_fetch", "write_file"]);
+    assertEquals(names, [
+      "memory",
+      "read_file",
+      "shell",
+      "web_fetch",
+      "write_file",
+    ]);
 
     loop.close();
   },

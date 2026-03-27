@@ -1,4 +1,10 @@
-import type { A2AMessage, AgentCard, JsonRpcRequest, JsonRpcResponse, Task } from "./types.ts";
+import type {
+  A2AMessage,
+  AgentCard,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  Task,
+} from "./types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 
@@ -16,7 +22,8 @@ export class A2AClient {
     const cached = this.cardCache.get(agentUrl);
     if (cached) return cached;
 
-    const cardUrl = new URL("/.well-known/agent-card.json", agentUrl).toString();
+    const cardUrl = new URL("/.well-known/agent-card.json", agentUrl)
+      .toString();
     log.debug(`A2A discover: ${cardUrl}`);
 
     const res = await fetch(cardUrl, { signal: AbortSignal.timeout(10_000) });
@@ -54,7 +61,9 @@ export class A2AClient {
       },
     };
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
     log.debug(`A2A send: ${card.url}`);
@@ -109,7 +118,9 @@ export class A2AClient {
       },
     };
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
     const res = await fetch(card.url, {
@@ -153,7 +164,11 @@ export class A2AClient {
   /**
    * Get task status.
    */
-  async getTask(agentUrl: string, taskId: string, authToken?: string): Promise<Task> {
+  async getTask(
+    agentUrl: string,
+    taskId: string,
+    authToken?: string,
+  ): Promise<Task> {
     const card = await this.discover(agentUrl);
 
     const rpc: JsonRpcRequest = {
@@ -163,7 +178,9 @@ export class A2AClient {
       params: { taskId },
     };
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
     const res = await fetch(card.url, {
@@ -174,7 +191,11 @@ export class A2AClient {
 
     const response = await res.json() as JsonRpcResponse;
     if (response.error) {
-      throw new DenoClawError("A2A_RPC_ERROR", { code: response.error.code }, response.error.message);
+      throw new DenoClawError(
+        "A2A_RPC_ERROR",
+        { code: response.error.code },
+        response.error.message,
+      );
     }
     return response.result as Task;
   }
@@ -182,7 +203,11 @@ export class A2AClient {
   /**
    * Cancel a running task.
    */
-  async cancelTask(agentUrl: string, taskId: string, authToken?: string): Promise<Task> {
+  async cancelTask(
+    agentUrl: string,
+    taskId: string,
+    authToken?: string,
+  ): Promise<Task> {
     const card = await this.discover(agentUrl);
 
     const rpc: JsonRpcRequest = {
@@ -192,7 +217,9 @@ export class A2AClient {
       params: { taskId },
     };
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
     const res = await fetch(card.url, {
@@ -203,7 +230,11 @@ export class A2AClient {
 
     const response = await res.json() as JsonRpcResponse;
     if (response.error) {
-      throw new DenoClawError("A2A_RPC_ERROR", { code: response.error.code }, response.error.message);
+      throw new DenoClawError(
+        "A2A_RPC_ERROR",
+        { code: response.error.code },
+        response.error.message,
+      );
     }
     return response.result as Task;
   }

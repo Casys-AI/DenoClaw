@@ -20,7 +20,11 @@ export abstract class BaseChannel {
   abstract initialize(): Promise<void>;
   abstract start(onMessage: OnMessage): Promise<void> | void;
   abstract stop(): Promise<void>;
-  abstract send(userId: string, content: string, metadata?: Record<string, unknown>): Promise<void>;
+  abstract send(
+    userId: string,
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
   abstract isConnected(): boolean;
 
   getStatus(): { type: string; enabled: boolean; connected: boolean } {
@@ -34,7 +38,9 @@ export abstract class BaseChannel {
   protected isAuthorized(userId: string, allowFrom?: string[]): boolean {
     if (!allowFrom?.length) return true;
     const ok = allowFrom.includes(userId);
-    if (!ok) log.warn(`Utilisateur non autorisé : ${userId} sur ${this.channelType}`);
+    if (!ok) {
+      log.warn(`Utilisateur non autorisé : ${userId} sur ${this.channelType}`);
+    }
     return ok;
   }
 }

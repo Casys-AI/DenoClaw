@@ -1,4 +1,9 @@
-import type { LLMResponse, Message, ToolCall, ToolDefinition } from "../shared/types.ts";
+import type {
+  LLMResponse,
+  Message,
+  ToolCall,
+  ToolDefinition,
+} from "../shared/types.ts";
 import { ProviderError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 
@@ -10,10 +15,20 @@ interface OpenAIChoice {
 }
 interface OpenAIResponse {
   choices: OpenAIChoice[];
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
-interface AnthropicContent { type: string; text?: string; id?: string; name?: string; input?: unknown }
+interface AnthropicContent {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
 interface AnthropicResponse {
   content: AnthropicContent[];
   stop_reason: string;
@@ -41,7 +56,11 @@ export abstract class BaseProvider {
     tools?: ToolDefinition[],
   ): Promise<LLMResponse>;
 
-  protected async post<T>(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  protected async post<T>(
+    path: string,
+    body: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const url = `${this.apiBase}${path}`;
     log.debug(`POST ${url}`);
 
@@ -58,7 +77,11 @@ export abstract class BaseProvider {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ProviderError("LLM_HTTP_ERROR", { status: res.status, body: text.slice(0, 500), url }, "Check API key and model name");
+      throw new ProviderError("LLM_HTTP_ERROR", {
+        status: res.status,
+        body: text.slice(0, 500),
+        url,
+      }, "Check API key and model name");
     }
 
     return await res.json() as T;
@@ -70,7 +93,11 @@ export abstract class BaseProvider {
 export class OpenAICompatProvider extends BaseProvider {
   private defaultBase: string;
 
-  constructor(apiKey: string, apiBase?: string, defaultBase = "https://api.openai.com/v1") {
+  constructor(
+    apiKey: string,
+    apiBase?: string,
+    defaultBase = "https://api.openai.com/v1",
+  ) {
     super(apiKey, apiBase || defaultBase);
     this.defaultBase = defaultBase;
   }
@@ -134,7 +161,8 @@ export class AnthropicProvider extends BaseProvider {
     maxTokens = 4096,
     tools?: ToolDefinition[],
   ): Promise<LLMResponse> {
-    const systemContent = messages.find((m) => m.role === "system")?.content || "";
+    const systemContent = messages.find((m) => m.role === "system")?.content ||
+      "";
     const nonSystem = messages.filter((m) => m.role !== "system");
 
     const body: Record<string, unknown> = {
@@ -142,7 +170,11 @@ export class AnthropicProvider extends BaseProvider {
       messages: nonSystem.map((m) => ({
         role: m.role === "tool" ? "user" : m.role,
         content: m.role === "tool"
-          ? [{ type: "tool_result", tool_use_id: m.tool_call_id, content: m.content }]
+          ? [{
+            type: "tool_result",
+            tool_use_id: m.tool_call_id,
+            content: m.content,
+          }]
           : m.content,
       })),
       temperature,

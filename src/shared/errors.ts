@@ -9,7 +9,11 @@ export class DenoClawError extends Error {
   readonly context?: Record<string, unknown>;
   readonly recovery?: string;
 
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     const msg = recovery ? `[${code}] ${recovery}` : `[${code}]`;
     super(msg);
     this.name = "DenoClawError";
@@ -24,35 +28,55 @@ export class DenoClawError extends Error {
 }
 
 export class ConfigError extends DenoClawError {
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     super(code, context, recovery);
     this.name = "ConfigError";
   }
 }
 
 export class ProviderError extends DenoClawError {
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     super(code, context, recovery);
     this.name = "ProviderError";
   }
 }
 
 export class ToolError extends DenoClawError {
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     super(code, context, recovery);
     this.name = "ToolError";
   }
 }
 
 export class ChannelError extends DenoClawError {
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     super(code, context, recovery);
     this.name = "ChannelError";
   }
 }
 
 export class AgentError extends DenoClawError {
-  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
     super(code, context, recovery);
     this.name = "AgentError";
   }

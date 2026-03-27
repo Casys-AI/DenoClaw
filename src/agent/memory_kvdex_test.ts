@@ -64,7 +64,11 @@ Deno.test({
 Deno.test({
   name: "KvdexMemory clear empties all messages",
   async fn() {
-    const mem = new KvdexMemory("test", `sess-clear-${crypto.randomUUID()}`, 10);
+    const mem = new KvdexMemory(
+      "test",
+      `sess-clear-${crypto.randomUUID()}`,
+      10,
+    );
     await mem.load();
 
     await mem.addMessage({ role: "user", content: "hello" });
@@ -82,11 +86,24 @@ Deno.test({
   name: "KvdexMemory remember and recall long-term facts",
   async fn() {
     const dir = await Deno.makeTempDir();
-    const mem = new KvdexMemory("test", `sess-lt-${crypto.randomUUID()}`, 10, `${dir}/test.db`);
+    const mem = new KvdexMemory(
+      "test",
+      `sess-lt-${crypto.randomUUID()}`,
+      10,
+      `${dir}/test.db`,
+    );
     await mem.load();
 
-    await mem.remember({ topic: "color", content: "the sky is blue", source: "user" });
-    await mem.remember({ topic: "color", content: "grass is green", source: "agent" });
+    await mem.remember({
+      topic: "color",
+      content: "the sky is blue",
+      source: "user",
+    });
+    await mem.remember({
+      topic: "color",
+      content: "grass is green",
+      source: "agent",
+    });
     await mem.remember({ topic: "math", content: "2+2=4" });
 
     const colors = await mem.recall("color");
@@ -106,7 +123,12 @@ Deno.test({
   name: "KvdexMemory forgetTopic removes facts",
   async fn() {
     const dir = await Deno.makeTempDir();
-    const mem = new KvdexMemory("test", `sess-forget-${crypto.randomUUID()}`, 10, `${dir}/test.db`);
+    const mem = new KvdexMemory(
+      "test",
+      `sess-forget-${crypto.randomUUID()}`,
+      10,
+      `${dir}/test.db`,
+    );
     await mem.load();
 
     await mem.remember({ topic: "temp", content: "ephemeral fact" });

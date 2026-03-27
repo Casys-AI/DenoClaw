@@ -69,8 +69,13 @@ Deno.test({
     const id1 = `test-ws-list-a-${crypto.randomUUID().slice(0, 8)}`;
     const id2 = `test-ws-list-b-${crypto.randomUUID().slice(0, 8)}`;
     try {
-      await WorkspaceLoader.create(id1, { sandbox: { allowedPermissions: ["read"] } });
-      await WorkspaceLoader.create(id2, { description: "second" , sandbox: { allowedPermissions: [] } });
+      await WorkspaceLoader.create(id1, {
+        sandbox: { allowedPermissions: ["read"] },
+      });
+      await WorkspaceLoader.create(id2, {
+        description: "second",
+        sandbox: { allowedPermissions: [] },
+      });
 
       const all = await WorkspaceLoader.listAll();
       assertEquals(all.includes(id1), true);

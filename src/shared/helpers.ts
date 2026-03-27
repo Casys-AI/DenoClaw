@@ -27,7 +27,9 @@ export function getAgentsDir(): string {
 
 export function validateAgentId(agentId: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(agentId)) {
-    throw new Error(`Invalid agent ID "${agentId}" — must be alphanumeric with hyphens/underscores/dots`);
+    throw new Error(
+      `Invalid agent ID "${agentId}" — must be alphanumeric with hyphens/underscores/dots`,
+    );
   }
 }
 

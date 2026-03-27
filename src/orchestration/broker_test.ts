@@ -27,13 +27,16 @@ Deno.test("BUILTIN_TOOL_PERMISSIONS web_fetch → net", () => {
 // ── resolveToolPermissions via BrokerServer (integration — uses KV) ──────────
 
 Deno.test({
-  name: "BrokerServer resolveToolPermissions — built-in tool returns correct perms",
+  name:
+    "BrokerServer resolveToolPermissions — built-in tool returns correct perms",
   async fn() {
     const { BrokerServer } = await import("./broker.ts");
     const { type: _type, ...partialConfig } = {
       type: "ignored",
       providers: {},
-      agents: { defaults: { model: "test/model", temperature: 0.5, maxTokens: 512 } },
+      agents: {
+        defaults: { model: "test/model", temperature: 0.5, maxTokens: 512 },
+      },
       tools: {},
       channels: {},
     };
@@ -55,8 +58,9 @@ Deno.test({
 });
 
 Deno.test({
-  name: "BrokerServer resolveToolPermissions — unknown tool returns empty array",
-  async fn() {
+  name:
+    "BrokerServer resolveToolPermissions — unknown tool returns empty array",
+  fn() {
     // Unknown tools must yield [] (deny-by-default, ADR-005).
     // We verify the BUILTIN_TOOL_PERMISSIONS map does NOT include unknown names.
     const unknownTool = "totally_unknown_tool";

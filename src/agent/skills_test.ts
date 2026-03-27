@@ -5,7 +5,10 @@ Deno.test({
   name: "SkillsLoader loads .md files from directory",
   async fn() {
     const tmpDir = await Deno.makeTempDir();
-    await Deno.writeTextFile(`${tmpDir}/test-skill.md`, "# Test Skill\nThis is a test skill.\n\nContent here.");
+    await Deno.writeTextFile(
+      `${tmpDir}/test-skill.md`,
+      "# Test Skill\nThis is a test skill.\n\nContent here.",
+    );
 
     const loader = new SkillsLoader(tmpDir);
     await loader.loadSkills();
@@ -51,7 +54,10 @@ Deno.test({
   name: "SkillsLoader uses filename when no heading",
   async fn() {
     const tmpDir = await Deno.makeTempDir();
-    await Deno.writeTextFile(`${tmpDir}/no-heading.md`, "Just some content without heading.");
+    await Deno.writeTextFile(
+      `${tmpDir}/no-heading.md`,
+      "Just some content without heading.",
+    );
 
     const loader = new SkillsLoader(tmpDir);
     await loader.loadSkills();

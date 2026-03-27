@@ -31,7 +31,12 @@ export class AgentRuntime {
   private maxIterations: number;
   private memories: Map<string, MemoryPort> = new Map();
 
-  constructor(agentId: string, config: AgentConfig, broker: AgentBrokerPort, maxIterations = 10) {
+  constructor(
+    agentId: string,
+    config: AgentConfig,
+    broker: AgentBrokerPort,
+    maxIterations = 10,
+  ) {
     this.agentId = agentId;
     this.config = config;
     this.broker = broker;
@@ -94,7 +99,9 @@ export class AgentRuntime {
 
   private async handleUserMessage(msg: BrokerEnvelope): Promise<void> {
     const payload = msg.payload as { instruction: string; data?: unknown };
-    log.info(`Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`);
+    log.info(
+      `Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`,
+    );
 
     const sessionId = `agent:${msg.from}:${this.agentId}`;
     const memory = await this.getMemory(sessionId);
@@ -106,7 +113,11 @@ export class AgentRuntime {
       iteration++;
 
       const skillsList = this.skills.getSkills();
-      const contextMessages = this.context.buildContextMessages(memory.getMessages(), skillsList, []);
+      const contextMessages = this.context.buildContextMessages(
+        memory.getMessages(),
+        skillsList,
+        [],
+      );
 
       const response = await this.broker.complete(
         contextMessages,
@@ -129,7 +140,8 @@ export class AgentRuntime {
           } catch {
             await memory.addMessage({
               role: "tool",
-              content: `Error [INVALID_JSON]: bad arguments for ${tc.function.name}`,
+              content:
+                `Error [INVALID_JSON]: bad arguments for ${tc.function.name}`,
               name: tc.function.name,
               tool_call_id: tc.id,
             });
@@ -142,7 +154,9 @@ export class AgentRuntime {
             role: "tool",
             content: result.success
               ? result.output
-              : `Error [${result.error?.code}]: ${JSON.stringify(result.error?.context)}\nRecovery: ${result.error?.recovery ?? "none"}`,
+              : `Error [${result.error?.code}]: ${
+                JSON.stringify(result.error?.context)
+              }\nRecovery: ${result.error?.recovery ?? "none"}`,
             name: tc.function.name,
             tool_call_id: tc.id,
           });

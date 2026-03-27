@@ -1,22 +1,24 @@
 # DenoClaw
 
-Agent AI Deno-natif. Zéro dépendance Node.js. Inspiré de [nano-claw](https://github.com/hustcc/nano-claw) et [PicoClaw](https://github.com/sipeed/picoclaw).
+Agent AI Deno-natif. Zéro dépendance Node.js. Inspiré de
+[nano-claw](https://github.com/hustcc/nano-claw) et
+[PicoClaw](https://github.com/sipeed/picoclaw).
 
 ## Stack
 
 Tout est natif Deno 2.7+ :
 
-| Besoin | API Deno |
-|---|---|
-| Persistence | `Deno.openKv()` |
-| Cron / Heartbeat | `Deno.cron()` (Broker/local only) |
-| File d'attente | `kv.enqueue()` / `kv.listenQueue()` (Broker/local only) |
-| HTTP server | `Deno.serve()` |
-| WebSocket | `Deno.upgradeWebSocket()` |
-| Shell | `Deno.Command` |
-| HTTP client | `fetch()` |
-| Tests | `Deno.test()` |
-| Observabilité | OpenTelemetry intégré |
+| Besoin           | API Deno                                                |
+| ---------------- | ------------------------------------------------------- |
+| Persistence      | `Deno.openKv()`                                         |
+| Cron / Heartbeat | `Deno.cron()` (Broker/local only)                       |
+| File d'attente   | `kv.enqueue()` / `kv.listenQueue()` (Broker/local only) |
+| HTTP server      | `Deno.serve()`                                          |
+| WebSocket        | `Deno.upgradeWebSocket()`                               |
+| Shell            | `Deno.Command`                                          |
+| HTTP client      | `fetch()`                                               |
+| Tests            | `Deno.test()`                                           |
+| Observabilité    | OpenTelemetry intégré                                   |
 
 ## Quickstart
 
@@ -56,11 +58,15 @@ Local  : Main process (broker) → Workers (agents) → Deno.Command (exécution
 Deploy : Broker (Deno Deploy)  → Subhosting (agents) → Sandbox (exécution)
 ```
 
-- **Broker** = orchestrateur central (LLM proxy, cron, tunnels, inter-agents). Seul composant long-running.
-- **Subhosting** = héberge l'agent (warm-cached, KV pour état). Réactif — se réveille sur HTTP du Broker.
+- **Broker** = orchestrateur central (LLM proxy, cron, tunnels, inter-agents).
+  Seul composant long-running.
+- **Subhosting** = héberge l'agent (warm-cached, KV pour état). Réactif — se
+  réveille sur HTTP du Broker.
 - **Sandbox** = exécute le code (éphémère, permissions hardened)
-- **Local** : Workers (= Subhosting) + `Deno.Command` (= Sandbox), même code, `postMessage` au lieu de HTTP
-- **Tunnels** = mesh réseau (noeuds VPS/GPU, inter-brokers, machines locales) — à la Tailscale
+- **Local** : Workers (= Subhosting) + `Deno.Command` (= Sandbox), même code,
+  `postMessage` au lieu de HTTP
+- **Tunnels** = mesh réseau (noeuds VPS/GPU, inter-brokers, machines locales) —
+  à la Tailscale
 
 Voir `docs/architecture-distributed.md` et les ADRs dans `docs/`.
 

@@ -72,7 +72,9 @@ export class CLIProvider extends BaseProvider {
         throw new ProviderError(
           "CLI_NOT_FOUND",
           { binary: this.binary },
-          `Install ${this.binary}: see https://${this.binary === "claude" ? "claude.ai/cli" : "openai.com/codex"}`,
+          `Install ${this.binary}: see https://${
+            this.binary === "claude" ? "claude.ai/cli" : "openai.com/codex"
+          }`,
         );
       }
 
@@ -98,7 +100,8 @@ export class CLIProvider extends BaseProvider {
         // codex --quiet "prompt"
         return [
           "--quiet",
-          "--prompt", prompt,
+          "--prompt",
+          prompt,
         ];
 
       default:

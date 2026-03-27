@@ -1,4 +1,8 @@
-import type { AgentEntry, ChannelRouting, SandboxPermission } from "../shared/types.ts";
+import type {
+  AgentEntry,
+  ChannelRouting,
+  SandboxPermission,
+} from "../shared/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
@@ -25,7 +29,11 @@ export async function listAgents(): Promise<void> {
     const accept = agent.acceptFrom?.join(",") || "aucun";
     const channels = agent.channels?.join(",") || "aucun";
 
-    print(`  ${name}${agent.description ? ` — ${agent.description}` : ""}${isWorkspace ? " [workspace]" : " [legacy]"}`);
+    print(
+      `  ${name}${agent.description ? ` — ${agent.description}` : ""}${
+        isWorkspace ? " [workspace]" : " [legacy]"
+      }`,
+    );
     print(`    Modèle   : ${model}`);
     print(`    Sandbox  : [${perms}]`);
     print(`    Peers    : [${peers}]     (peut envoyer à)`);
@@ -40,17 +48,20 @@ export interface CreateAgentOptions {
   description?: string;
   model?: string;
   systemPrompt?: string;
-  permissions?: string;  // comma-separated: "read,write,run"
-  peers?: string;        // comma-separated: "bob,charlie"
-  acceptFrom?: string;   // comma-separated or "*"
-  force?: boolean;       // overwrite if exists
+  permissions?: string; // comma-separated: "read,write,run"
+  peers?: string; // comma-separated: "bob,charlie"
+  acceptFrom?: string; // comma-separated or "*"
+  force?: boolean; // overwrite if exists
 }
 
-export async function createAgent(name?: string, opts?: CreateAgentOptions): Promise<void> {
+export async function createAgent(
+  name?: string,
+  opts?: CreateAgentOptions,
+): Promise<void> {
   const config = await getConfigOrDefault();
   const interactive = !opts ||
     (!opts.description && !opts.model && !opts.systemPrompt &&
-     !opts.permissions && !opts.peers && !opts.acceptFrom && !opts.force);
+      !opts.permissions && !opts.peers && !opts.acceptFrom && !opts.force);
 
   const agentName = name || (interactive ? await ask("Nom de l'agent") : "");
   if (!agentName) {
@@ -61,7 +72,9 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
   if (await WorkspaceLoader.exists(agentName)) {
     if (opts?.force) { /* overwrite */ }
     else if (interactive) {
-      if (!await confirm(`L'agent "${agentName}" existe déjà. Écraser ?`, false)) return;
+      if (
+        !await confirm(`L'agent "${agentName}" existe déjà. Écraser ?`, false)
+      ) return;
     } else {
       error(`Agent "${agentName}" existe déjà. Utilisez --force pour écraser.`);
       return;
@@ -92,11 +105,20 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
     ]);
     const permKey = permChoice.split("—")[0].trim().split(/\s+/)[0];
     switch (permKey) {
-      case "read-only": permissions = ["read"]; break;
-      case "standard": permissions = ["read", "write", "run"]; break;
-      case "full": permissions = ["read", "write", "run", "net"]; break;
+      case "read-only":
+        permissions = ["read"];
+        break;
+      case "standard":
+        permissions = ["read", "write", "run"];
+        break;
+      case "full":
+        permissions = ["read", "write", "run", "net"];
+        break;
       default: {
-        const raw = await ask("Permissions (read,write,run,net,env,ffi)", "read,write,run");
+        const raw = await ask(
+          "Permissions (read,write,run,net,env,ffi)",
+          "read,write,run",
+        );
         permissions = raw.split(",").map((s) => s.trim());
         break;
       }
@@ -107,12 +129,20 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
     const otherAgents = existingAgents.filter((n) => n !== agentName);
     if (otherAgents.length > 0) {
       print(`  Agents existants : ${otherAgents.join(", ")}`);
-      const peersInput = await ask("Peut envoyer des Tasks à (noms séparés par virgule, vide = aucun)");
+      const peersInput = await ask(
+        "Peut envoyer des Tasks à (noms séparés par virgule, vide = aucun)",
+      );
       peers = peersInput ? peersInput.split(",").map((s) => s.trim()) : [];
-      const acceptInput = await ask("Accepte des Tasks de (* = tous, vide = aucun)");
-      acceptFrom = acceptInput ? acceptInput.split(",").map((s) => s.trim()) : [];
+      const acceptInput = await ask(
+        "Accepte des Tasks de (* = tous, vide = aucun)",
+      );
+      acceptFrom = acceptInput
+        ? acceptInput.split(",").map((s) => s.trim())
+        : [];
     } else {
-      print("  Aucun autre agent. Vous pourrez configurer les peers plus tard.");
+      print(
+        "  Aucun autre agent. Vous pourrez configurer les peers plus tard.",
+      );
     }
 
     print("\n── Channels ──\n");
@@ -121,7 +151,9 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
       .map(([n]) => n);
     if (enabledChannels.length > 0) {
       print(`  Channels actifs : ${enabledChannels.join(", ")}`);
-      const chInput = await ask("Assigner à quels channels (virgule, vide = aucun)");
+      const chInput = await ask(
+        "Assigner à quels channels (virgule, vide = aucun)",
+      );
       channels = chInput ? chInput.split(",").map((s) => s.trim()) : [];
       if (channels.length > 0) {
         const routeChoice = await choose("Mode de routing", [
@@ -130,18 +162,26 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
           "round-robin — alternance avec d'autres agents sur le même channel",
           "broadcast  — reçoit une copie de tous les messages",
         ]);
-        channelRouting = routeChoice.split("—")[0].trim().split(/\s+/)[0] as ChannelRouting;
+        channelRouting = routeChoice.split("—")[0].trim().split(
+          /\s+/,
+        )[0] as ChannelRouting;
       }
     } else {
-      print("  Aucun channel configuré. Lancez 'denoclaw setup channel' d'abord.");
+      print(
+        "  Aucun channel configuré. Lancez 'denoclaw setup channel' d'abord.",
+      );
     }
   } else {
     description = opts?.description;
     model = opts?.model;
     systemPrompt = opts?.systemPrompt;
-    permissions = opts?.permissions ? opts.permissions.split(",").map((s) => s.trim()) : ["read", "write", "run"];
+    permissions = opts?.permissions
+      ? opts.permissions.split(",").map((s) => s.trim())
+      : ["read", "write", "run"];
     peers = opts?.peers ? opts.peers.split(",").map((s) => s.trim()) : [];
-    acceptFrom = opts?.acceptFrom ? opts.acceptFrom.split(",").map((s) => s.trim()) : [];
+    acceptFrom = opts?.acceptFrom
+      ? opts.acceptFrom.split(",").map((s) => s.trim())
+      : [];
   }
 
   const entry: AgentEntry = {
@@ -160,7 +200,9 @@ export async function createAgent(name?: string, opts?: CreateAgentOptions): Pro
   // Also keep in config.json registry for backward compat
   if (!config.agents.registry) config.agents.registry = {};
   config.agents.registry[agentName] = entry;
-  if (systemPrompt) config.agents.registry[agentName].systemPrompt = systemPrompt;
+  if (systemPrompt) {
+    config.agents.registry[agentName].systemPrompt = systemPrompt;
+  }
   await saveConfig(config);
 
   success(`Agent "${agentName}" créé (workspace + config).`);
@@ -193,7 +235,9 @@ export async function deleteAgent(name?: string): Promise<void> {
   if (config.agents.registry) {
     for (const agent of Object.values(config.agents.registry)) {
       if (agent.peers) agent.peers = agent.peers.filter((p) => p !== agentName);
-      if (agent.acceptFrom) agent.acceptFrom = agent.acceptFrom.filter((p) => p !== agentName);
+      if (agent.acceptFrom) {
+        agent.acceptFrom = agent.acceptFrom.filter((p) => p !== agentName);
+      }
     }
   }
 
@@ -217,5 +261,7 @@ export async function deleteAgent(name?: string): Promise<void> {
   }
 
   await saveConfig(config);
-  success(`Agent "${agentName}" supprimé (workspace + config, retiré des peers).`);
+  success(
+    `Agent "${agentName}" supprimé (workspace + config, retiré des peers).`,
+  );
 }

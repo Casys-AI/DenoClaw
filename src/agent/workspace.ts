@@ -4,10 +4,10 @@ import {
   fileExists,
   getAgentConfigPath,
   getAgentDir,
-  getAgentSkillsDir,
-  getAgentSoulPath,
   getAgentMemoryPath,
   getAgentsDir,
+  getAgentSkillsDir,
+  getAgentSoulPath,
 } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
 
@@ -54,11 +54,18 @@ export class WorkspaceLoader {
     return await fileExists(getAgentConfigPath(agentId));
   }
 
-  static async create(agentId: string, entry: AgentEntry, systemPrompt?: string): Promise<void> {
+  static async create(
+    agentId: string,
+    entry: AgentEntry,
+    systemPrompt?: string,
+  ): Promise<void> {
     const dir = getAgentDir(agentId);
     await ensureDir(dir);
 
-    await Deno.writeTextFile(getAgentConfigPath(agentId), JSON.stringify(entry, null, 2));
+    await Deno.writeTextFile(
+      getAgentConfigPath(agentId),
+      JSON.stringify(entry, null, 2),
+    );
 
     if (systemPrompt) {
       await Deno.writeTextFile(getAgentSoulPath(agentId), systemPrompt);

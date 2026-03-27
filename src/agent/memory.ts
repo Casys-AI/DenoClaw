@@ -37,7 +37,9 @@ export class Memory implements MemoryPort {
       const entry = await kv.get<Message[]>(this.kvKey());
       if (entry.value) {
         this.messages = entry.value;
-        log.debug(`Mémoire chargée : ${this.messages.length} messages (${this.sessionId})`);
+        log.debug(
+          `Mémoire chargée : ${this.messages.length} messages (${this.sessionId})`,
+        );
       }
     } catch (e) {
       log.error(`Échec chargement mémoire (${this.sessionId})`, e);
@@ -59,7 +61,9 @@ export class Memory implements MemoryPort {
 
     if (this.messages.length > this.maxMessages) {
       const system = this.messages.filter((m) => m.role === "system");
-      const rest = this.messages.filter((m) => m.role !== "system").slice(-this.maxMessages);
+      const rest = this.messages.filter((m) => m.role !== "system").slice(
+        -this.maxMessages,
+      );
       this.messages = [...system, ...rest];
     }
 
@@ -91,8 +95,16 @@ export class Memory implements MemoryPort {
   }
 
   // Long-term memory — no-op dans cette implem (pas d'indexation raw KV)
-  remember(_fact: Omit<LongTermFact, "timestamp">): Promise<void> { return Promise.resolve(); }
-  recall(_topic: string, _limit?: number): Promise<LongTermFact[]> { return Promise.resolve([]); }
-  listTopics(): Promise<string[]> { return Promise.resolve([]); }
-  forgetTopic(_topic: string): Promise<void> { return Promise.resolve(); }
+  remember(_fact: Omit<LongTermFact, "timestamp">): Promise<void> {
+    return Promise.resolve();
+  }
+  recall(_topic: string, _limit?: number): Promise<LongTermFact[]> {
+    return Promise.resolve([]);
+  }
+  listTopics(): Promise<string[]> {
+    return Promise.resolve([]);
+  }
+  forgetTopic(_topic: string): Promise<void> {
+    return Promise.resolve();
+  }
 }

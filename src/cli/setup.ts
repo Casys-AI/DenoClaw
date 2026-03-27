@@ -29,11 +29,19 @@ export async function setupProvider(): Promise<void> {
       const binary = providerName.replace("-cli", "");
 
       // Vérifier si le CLI est installé
-      const check = new Deno.Command("which", { args: [binary], stdout: "piped", stderr: "piped" });
+      const check = new Deno.Command("which", {
+        args: [binary],
+        stdout: "piped",
+        stderr: "piped",
+      });
       const { success: found } = await check.output();
       if (!found) {
         error(`${binary} CLI non trouvé.`);
-        print(`  Installez-le : https://${binary === "claude" ? "claude.ai/download" : "openai.com/codex"}`);
+        print(
+          `  Installez-le : https://${
+            binary === "claude" ? "claude.ai/download" : "openai.com/codex"
+          }`,
+        );
         return;
       }
       success(`${binary} CLI détecté`);
@@ -51,7 +59,9 @@ export async function setupProvider(): Promise<void> {
         success(`${binary} CLI déjà authentifié`);
       } else {
         // Lancer le flux OAuth navigateur
-        print(`\nLancement de l'authentification ${binary} (ouverture du navigateur)...\n`);
+        print(
+          `\nLancement de l'authentification ${binary} (ouverture du navigateur)...\n`,
+        );
         const authCmd = new Deno.Command(binary, {
           args: ["auth", "login"],
           stdout: "inherit",
@@ -63,14 +73,15 @@ export async function setupProvider(): Promise<void> {
         if (loginOk) {
           success(`${binary} CLI authentifié`);
         } else {
-          error(`Échec de l'auth ${binary}. Réessayez manuellement : ${binary} auth login`);
+          error(
+            `Échec de l'auth ${binary}. Réessayez manuellement : ${binary} auth login`,
+          );
           return;
         }
       }
 
       config.providers[providerName] = { enabled: true };
       print(`\n  denoclaw agent --model ${providerName}`);
-
     } else {
       config.providers[providerName] = { enabled: true };
       print(`  denoclaw agent --model ${providerName}`);
@@ -128,11 +139,15 @@ export async function setupChannel(): Promise<void> {
         return;
       }
 
-      const allowFrom = await ask("User IDs autorisés (virgule séparés, vide = tous)");
+      const allowFrom = await ask(
+        "User IDs autorisés (virgule séparés, vide = tous)",
+      );
       config.channels.telegram = {
         enabled: true,
         token,
-        allowFrom: allowFrom ? allowFrom.split(",").map((s) => s.trim()) : undefined,
+        allowFrom: allowFrom
+          ? allowFrom.split(",").map((s) => s.trim())
+          : undefined,
       };
 
       success("Telegram configuré. Lancez le gateway :");
@@ -142,7 +157,9 @@ export async function setupChannel(): Promise<void> {
 
     case "webhook": {
       const port = parseInt(await ask("Port", "8787"));
-      const secret = await ask("Secret (header Authorization, vide = pas de secret)");
+      const secret = await ask(
+        "Secret (header Authorization, vide = pas de secret)",
+      );
       config.channels.webhook = {
         enabled: true,
         port: port || 8787,
@@ -168,10 +185,14 @@ export async function setupAgent(): Promise<void> {
   const model = await ask("Modèle LLM", config.agents.defaults.model);
   config.agents.defaults.model = model;
 
-  const temp = parseFloat(await ask("Température", String(config.agents.defaults.temperature)));
+  const temp = parseFloat(
+    await ask("Température", String(config.agents.defaults.temperature)),
+  );
   if (!isNaN(temp)) config.agents.defaults.temperature = temp;
 
-  const tokens = parseInt(await ask("Max tokens", String(config.agents.defaults.maxTokens)));
+  const tokens = parseInt(
+    await ask("Max tokens", String(config.agents.defaults.maxTokens)),
+  );
   if (!isNaN(tokens)) config.agents.defaults.maxTokens = tokens;
 
   const customPrompt = await ask("System prompt custom (vide = défaut)");
@@ -205,7 +226,8 @@ export async function publishAgent(): Promise<void> {
   // Lire config locale pour le modèle et les permissions sandbox
   const config = await getConfigOrDefault();
   const model = config.agents.defaults.model;
-  const sandboxPerms = config.agents.defaults.sandbox?.allowedPermissions || ["read", "write", "run", "net"];
+  const sandboxPerms = config.agents.defaults.sandbox?.allowedPermissions ||
+    ["read", "write", "run", "net"];
 
   print(`  Agent: ${agentName}`);
   print(`  Modèle: ${model}`);
@@ -237,7 +259,9 @@ export async function publishAgent(): Promise<void> {
     }
 
     // 2. Lister les projets pour trouver l'ID
-    const listRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, { headers });
+    const listRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, {
+      headers,
+    });
     const projects = await listRes.json() as { id: string; name: string }[];
     const project = projects.find((p) => p.name === agentName);
     if (!project) {
@@ -250,20 +274,23 @@ export async function publishAgent(): Promise<void> {
 
     const entrypoint = generateAgentEntrypoint(agentName, model, sandboxPerms);
 
-    const deployRes = await fetch(`${apiBase}/projects/${project.id}/deployments`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        entryPointUrl: "main.ts",
-        assets: {
-          "main.ts": { kind: "file", content: entrypoint, encoding: "utf-8" },
-        },
-        envVars: {
-          DENOCLAW_AGENT_ID: agentName,
-          DENOCLAW_MODEL: model,
-        },
-      }),
-    });
+    const deployRes = await fetch(
+      `${apiBase}/projects/${project.id}/deployments`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          entryPointUrl: "main.ts",
+          assets: {
+            "main.ts": { kind: "file", content: entrypoint, encoding: "utf-8" },
+          },
+          envVars: {
+            DENOCLAW_AGENT_ID: agentName,
+            DENOCLAW_MODEL: model,
+          },
+        }),
+      },
+    );
 
     if (!deployRes.ok) {
       const body = await deployRes.text();
@@ -271,7 +298,10 @@ export async function publishAgent(): Promise<void> {
       return;
     }
 
-    const deployment = await deployRes.json() as { id: string; domainMappings?: { domain: string }[] };
+    const deployment = await deployRes.json() as {
+      id: string;
+      domainMappings?: { domain: string }[];
+    };
     const domain = deployment.domainMappings?.[0]?.domain;
 
     success(`Agent déployé : ${deployment.id}`);
@@ -296,7 +326,11 @@ export async function publishAgent(): Promise<void> {
  * Génère le code entrypoint pour un agent Subhosting.
  * Utilise le vrai AgentRuntime + BrokerClient du SDK DenoClaw.
  */
-function generateAgentEntrypoint(agentId: string, model: string, permissions: string[]): string {
+function generateAgentEntrypoint(
+  agentId: string,
+  model: string,
+  permissions: string[],
+): string {
   return `// Auto-generated DenoClaw Agent Runtime
 // Agent: ${agentId} | Model: ${model}
 
@@ -341,7 +375,11 @@ ac.signal.addEventListener("abort", async () => {
 export async function publishGateway(): Promise<void> {
   print("\n=== Déployer le gateway sur Deno Deploy ===\n");
 
-  const cmd = new Deno.Command("deployctl", { args: ["--version"], stdout: "piped", stderr: "piped" });
+  const cmd = new Deno.Command("deployctl", {
+    args: ["--version"],
+    stdout: "piped",
+    stderr: "piped",
+  });
   const { success: deployctlOk } = await cmd.output();
   if (!deployctlOk) {
     error("deployctl non installé.");
@@ -363,7 +401,11 @@ export async function publishGateway(): Promise<void> {
   const envArgs = [`--env=DENOCLAW_API_TOKEN=${apiToken}`];
 
   if (Object.keys(localKeys).length > 0) {
-    print(`\nClés API trouvées dans la config locale : ${Object.keys(localKeys).join(", ")}`);
+    print(
+      `\nClés API trouvées dans la config locale : ${
+        Object.keys(localKeys).join(", ")
+      }`,
+    );
     if (await confirm("Utiliser ces clés pour le déploiement ?")) {
       const envMap: Record<string, string> = {
         anthropic: "ANTHROPIC_API_KEY",
@@ -392,10 +434,15 @@ export async function publishGateway(): Promise<void> {
   envArgs.push(`--env=DENOCLAW_DEFAULT_MODEL=${config.agents.defaults.model}`);
 
   if (await confirm("\nDéployer ?")) {
-
     print("\nDéploiement en cours...");
     const cmd = new Deno.Command("deployctl", {
-      args: ["deploy", `--project=${projectName}`, "--prod", ...envArgs, "main.ts"],
+      args: [
+        "deploy",
+        `--project=${projectName}`,
+        "--prod",
+        ...envArgs,
+        "main.ts",
+      ],
       stdout: "inherit",
       stderr: "inherit",
     });
@@ -406,7 +453,9 @@ export async function publishGateway(): Promise<void> {
       print(`\n  Token API : ${apiToken}`);
       print(`  Gardez-le — c'est la clé d'accès au gateway.\n`);
       print("  Test :");
-      print(`    curl -H "Authorization: Bearer ${apiToken}" https://${projectName}.deno.dev/health`);
+      print(
+        `    curl -H "Authorization: Bearer ${apiToken}" https://${projectName}.deno.dev/health`,
+      );
       print("\n  Pour plus de sécurité (zéro secret statique) :");
       print("  → Configurer GCP OIDC + Secret Manager (voir ADR-004)");
       print(`  → deno deploy setup-gcp --org=<org> --app=${projectName}`);
@@ -438,7 +487,11 @@ export async function showStatus(config: Config): Promise<void> {
   print(`Channels     : ${channels.join(", ") || "aucun"}`);
 
   // Tools
-  print(`Workspace    : ${config.tools.restrictToWorkspace ? "restreint" : "libre"}`);
+  print(
+    `Workspace    : ${
+      config.tools.restrictToWorkspace ? "restreint" : "libre"
+    }`,
+  );
 
   // Sessions (KV)
   try {

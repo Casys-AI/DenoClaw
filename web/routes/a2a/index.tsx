@@ -67,14 +67,25 @@ export default function A2AHub({ data }: { data: A2AData }) {
           class="input input-sm bg-base-200 font-data w-64"
         />
         <div class="join">
-          <button type="button" class="join-item btn btn-sm btn-primary">All</button>
-          <button type="button" class="join-item btn btn-sm btn-ghost text-info">
+          <button type="button" class="join-item btn btn-sm btn-primary">
+            All
+          </button>
+          <button
+            type="button"
+            class="join-item btn btn-sm btn-ghost text-info"
+          >
             Running
           </button>
-          <button type="button" class="join-item btn btn-sm btn-ghost text-success">
+          <button
+            type="button"
+            class="join-item btn btn-sm btn-ghost text-success"
+          >
             Completed
           </button>
-          <button type="button" class="join-item btn btn-sm btn-ghost text-error">
+          <button
+            type="button"
+            class="join-item btn btn-sm btn-ghost text-error"
+          >
             Failed
           </button>
         </div>

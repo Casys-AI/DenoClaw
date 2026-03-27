@@ -1,8 +1,18 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
-import { ChannelError, ConfigError, DenoClawError, ProviderError, ToolError } from "./errors.ts";
+import {
+  ChannelError,
+  ConfigError,
+  DenoClawError,
+  ProviderError,
+  ToolError,
+} from "./errors.ts";
 
 Deno.test("error hierarchy with structured fields", () => {
-  const config = new ConfigError("CONFIG_NOT_FOUND", { path: "/tmp" }, "Run onboard");
+  const config = new ConfigError(
+    "CONFIG_NOT_FOUND",
+    { path: "/tmp" },
+    "Run onboard",
+  );
   assertInstanceOf(config, DenoClawError);
   assertInstanceOf(config, Error);
   assertEquals(config.name, "ConfigError");
@@ -12,7 +22,11 @@ Deno.test("error hierarchy with structured fields", () => {
 });
 
 Deno.test("toStructured returns AX-compliant object", () => {
-  const err = new ProviderError("NO_PROVIDER", { model: "test" }, "Add API key");
+  const err = new ProviderError(
+    "NO_PROVIDER",
+    { model: "test" },
+    "Add API key",
+  );
   const s = err.toStructured();
   assertEquals(s.code, "NO_PROVIDER");
   assertEquals(s.context?.model, "test");

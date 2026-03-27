@@ -20,13 +20,26 @@ import {
 import { BrokerServer } from "./src/orchestration/broker.ts";
 import { LocalRelay } from "./src/orchestration/relay.ts";
 import { MetricsCollector } from "./src/telemetry/metrics.ts";
-import { writeAgentStatus, updateAgentsList } from "./src/orchestration/monitoring.ts";
+import {
+  updateAgentsList,
+  writeAgentStatus,
+} from "./src/orchestration/monitoring.ts";
 import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
 
 const args = parseArgs(Deno.args, {
-  string: ["message", "session", "model", "agent", "description", "system-prompt", "permissions", "peers", "accept-from"],
+  string: [
+    "message",
+    "session",
+    "model",
+    "agent",
+    "description",
+    "system-prompt",
+    "permissions",
+    "peers",
+    "accept-from",
+  ],
   boolean: ["force"],
   alias: { m: "message", s: "session", a: "agent" },
   default: { session: "default" },
@@ -69,9 +82,14 @@ async function agent(config: Config): Promise<void> {
 
   if (args.message) {
     try {
-      const result = await pool.send(agentId, sessionId, args.message as string, {
-        model: args.model as string | undefined,
-      });
+      const result = await pool.send(
+        agentId,
+        sessionId,
+        args.message as string,
+        {
+          model: args.model as string | undefined,
+        },
+      );
       console.log(result.content);
     } finally {
       pool.shutdown();
@@ -95,10 +113,20 @@ async function agent(config: Config): Promise<void> {
       const result = await pool.send(agentId, msg.sessionId, msg.content, {
         model: args.model as string | undefined,
       });
-      await channels.send(msg.channelType, msg.userId, result.content, msg.metadata);
+      await channels.send(
+        msg.channelType,
+        msg.userId,
+        result.content,
+        msg.metadata,
+      );
     } catch (e) {
       log.error("Erreur traitement message", e);
-      await channels.send(msg.channelType, msg.userId, "Désolé, une erreur s'est produite.", msg.metadata);
+      await channels.send(
+        msg.channelType,
+        msg.userId,
+        "Désolé, une erreur s'est produite.",
+        msg.metadata,
+      );
     }
   });
 
@@ -118,7 +146,9 @@ async function gateway(config: Config): Promise<void> {
   // DI : wiring explicite
   const agentIds = Object.keys(config.agents?.registry ?? {});
   if (agentIds.length === 0) {
-    console.log("Aucun agent configuré. Créez-en un d'abord :\n\n  denoclaw agent create <nom>\n");
+    console.log(
+      "Aucun agent configuré. Créez-en un d'abord :\n\n  denoclaw agent create <nom>\n",
+    );
     return;
   }
 
@@ -132,14 +162,22 @@ async function gateway(config: Config): Promise<void> {
   // WorkerPool with lifecycle callbacks → writes agent status to shared KV
   const workerPool = new WorkerPool(config, {
     onWorkerReady: (id) => {
-      writeAgentStatus(kv, id, { status: "running", startedAt: new Date().toISOString() });
+      writeAgentStatus(kv, id, {
+        status: "running",
+        startedAt: new Date().toISOString(),
+      });
     },
     onWorkerStopped: (id) => {
-      writeAgentStatus(kv, id, { status: "stopped", stoppedAt: new Date().toISOString() });
+      writeAgentStatus(kv, id, {
+        status: "stopped",
+        stoppedAt: new Date().toISOString(),
+      });
     },
     onAgentMessage: (from, to, message) => {
       metrics.recordAgentMessage(from, to);
-      log.debug(`Agent message routed: ${from} → ${to} (${message.slice(0, 50)}...)`);
+      log.debug(
+        `Agent message routed: ${from} → ${to} (${message.slice(0, 50)}...)`,
+      );
     },
   });
   workerPool.setSharedKv(kv);
@@ -150,7 +188,14 @@ async function gateway(config: Config): Promise<void> {
   const bus = new MessageBus();
   const session = new SessionManager();
   const channels = new ChannelManager(bus);
-  const gw = new Gateway(config, { bus, session, channels, workerPool, metrics, kv });
+  const gw = new Gateway(config, {
+    bus,
+    session,
+    channels,
+    workerPool,
+    metrics,
+    kv,
+  });
   await gw.start();
 
   const ac = new AbortController();
@@ -180,13 +225,19 @@ async function init(): Promise<void> {
   await setupProvider();
 
   // 2. Channel (optionnel)
-  const wantChannel = await confirm("Étape 2/3 — Configurer un channel (Telegram, webhook) ?", false);
+  const wantChannel = await confirm(
+    "Étape 2/3 — Configurer un channel (Telegram, webhook) ?",
+    false,
+  );
   if (wantChannel) {
     await setupChannel();
   }
 
   // 3. Agent config
-  const wantCustom = await confirm("Étape 3/3 — Personnaliser l'agent (modèle, température) ?", false);
+  const wantCustom = await confirm(
+    "Étape 3/3 — Personnaliser l'agent (modèle, température) ?",
+    false,
+  );
   if (wantCustom) {
     await setupAgent();
   }
@@ -225,7 +276,8 @@ async function broker(config: Config): Promise<void> {
 }
 
 async function tunnel(): Promise<void> {
-  const brokerUrl = args._[1] as string || await ask("URL du broker WebSocket", "ws://localhost:3000/tunnel");
+  const brokerUrl = args._[1] as string ||
+    await ask("URL du broker WebSocket", "ws://localhost:3000/tunnel");
   const token = await ask("Token d'invitation", "dev-token");
 
   const tools: string[] = ["shell", "read_file", "write_file"];
@@ -345,7 +397,10 @@ try {
     }
 
     case "agent": {
-      if (subcommand === "list") { await listAgents(); break; }
+      if (subcommand === "list") {
+        await listAgents();
+        break;
+      }
       if (subcommand === "create") {
         await createAgent(args._[2] as string, {
           description: args.description as string | undefined,
@@ -358,10 +413,15 @@ try {
         });
         break;
       }
-      if (subcommand === "delete") { await deleteAgent(args._[2] as string); break; }
+      if (subcommand === "delete") {
+        await deleteAgent(args._[2] as string);
+        break;
+      }
 
       const config = await getConfigOrDefault();
-      const hasProvider = Object.values(config.providers).some((p) => p?.apiKey || p?.enabled);
+      const hasProvider = Object.values(config.providers).some((p) =>
+        p?.apiKey || p?.enabled
+      );
       if (!hasProvider) {
         console.log("Aucun provider configuré. Lançons la config initiale.\n");
         await init();
@@ -373,7 +433,9 @@ try {
 
     case undefined: {
       const config2 = await getConfigOrDefault();
-      const hasProvider2 = Object.values(config2.providers).some((p) => p?.apiKey || p?.enabled);
+      const hasProvider2 = Object.values(config2.providers).some((p) =>
+        p?.apiKey || p?.enabled
+      );
       if (!hasProvider2) {
         console.log("Aucun provider configuré. Lançons la config initiale.\n");
         await init();

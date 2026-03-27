@@ -29,7 +29,13 @@ export interface BrokerMessage {
 // ── LLM ──────────────────────────────────────────────────
 
 export interface LLMRequest {
-  messages: { role: string; content: string; name?: string; tool_call_id?: string; tool_calls?: unknown[] }[];
+  messages: {
+    role: string;
+    content: string;
+    name?: string;
+    tool_call_id?: string;
+    tool_calls?: unknown[];
+  }[];
   model: string;
   temperature?: number;
   maxTokens?: number;
@@ -40,7 +46,11 @@ export interface LLMResponsePayload {
   content: string;
   toolCalls?: unknown[];
   finishReason?: string;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 // ── Tool execution ───────────────────────────────────────
@@ -53,7 +63,11 @@ export interface ToolRequest {
 export interface ToolResponsePayload {
   success: boolean;
   output: string;
-  error?: { code: string; context?: Record<string, unknown>; recovery?: string };
+  error?: {
+    code: string;
+    context?: Record<string, unknown>;
+    recovery?: string;
+  };
 }
 
 // ── Inter-agent ──────────────────────────────────────────

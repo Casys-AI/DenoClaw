@@ -44,7 +44,12 @@ export type TaskState =
   | "CANCELED"
   | "REJECTED";
 
-export const TERMINAL_STATES: TaskState[] = ["COMPLETED", "FAILED", "CANCELED", "REJECTED"];
+export const TERMINAL_STATES: TaskState[] = [
+  "COMPLETED",
+  "FAILED",
+  "CANCELED",
+  "REJECTED",
+];
 
 export interface Task {
   id: string;

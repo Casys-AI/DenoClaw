@@ -52,7 +52,11 @@ export default function Login() {
           <div class="divider text-xs text-neutral-content">OR</div>
 
           {/* OAuth placeholder */}
-          <button type="button" class="btn btn-outline btn-sm w-full gap-2" disabled>
+          <button
+            type="button"
+            class="btn btn-outline btn-sm w-full gap-2"
+            disabled
+          >
             Sign in with Deno Deploy
             <span class="badge badge-xs badge-neutral">soon</span>
           </button>

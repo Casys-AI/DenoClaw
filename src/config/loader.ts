@@ -1,5 +1,12 @@
 import type { Config } from "./types.ts";
-import { ConfigError, ensureDir, fileExists, getConfigPath, getHomeDir, log } from "../shared/mod.ts";
+import {
+  ConfigError,
+  ensureDir,
+  fileExists,
+  getConfigPath,
+  getHomeDir,
+  log,
+} from "../shared/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
 
 function createDefaultConfig(): Config {
@@ -57,7 +64,11 @@ export async function loadConfig(): Promise<Config> {
     return parsed;
   } catch (e) {
     if (e instanceof SyntaxError) {
-      throw new ConfigError("CONFIG_INVALID_JSON", { message: e.message }, "Fix the JSON syntax in the config file");
+      throw new ConfigError(
+        "CONFIG_INVALID_JSON",
+        { message: e.message },
+        "Fix the JSON syntax in the config file",
+      );
     }
     throw e;
   }

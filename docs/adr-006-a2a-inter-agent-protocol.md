@@ -1,11 +1,12 @@
 # ADR-006 : A2A (Agent-to-Agent) pour la communication inter-agents
 
-**Statut :** Accepté
-**Date :** 2026-03-27
+**Statut :** Accepté **Date :** 2026-03-27
 
 ## Contexte
 
-Les agents DenoClaw doivent pouvoir se déléguer des tâches entre eux, que ce soit au sein du même déploiement ou avec des agents externes. La question : quel protocole pour cette communication ?
+Les agents DenoClaw doivent pouvoir se déléguer des tâches entre eux, que ce
+soit au sein du même déploiement ou avec des agents externes. La question : quel
+protocole pour cette communication ?
 
 ## Options considérées
 
@@ -20,7 +21,8 @@ Les agents DenoClaw doivent pouvoir se déléguer des tâches entre eux, que ce 
 - A2A = horizontal (agent ↔ agent) — délégation de tâches entre pairs
 - MCP = vertical (agent → tools) — accès aux outils et données
 
-Les deux coexistent. Un agent DenoClaw utilise MCP pour ses outils internes et A2A pour parler à d'autres agents.
+Les deux coexistent. Un agent DenoClaw utilise MCP pour ses outils internes et
+A2A pour parler à d'autres agents.
 
 ## A2A en bref
 
@@ -28,16 +30,17 @@ Les deux coexistent. Un agent DenoClaw utilise MCP pour ses outils internes et A
 
 **Objets clés :**
 
-| Objet | Rôle |
-|---|---|
+| Objet     | Rôle                                                                                |
+| --------- | ----------------------------------------------------------------------------------- |
 | AgentCard | "Carte de visite" publiée à `/.well-known/agent-card.json` — skills, endpoint, auth |
-| Task | Unité de travail, avec lifecycle : submitted → working → completed/failed |
-| Message | Communication dans une Task : role (user/agent) + Parts |
-| Part | Contenu atomique : TextPart, FilePart, DataPart, FunctionCallPart |
-| Artifact | Output produit par une Task, composé de Parts |
-| Skill | Capability déclarée sur l'AgentCard |
+| Task      | Unité de travail, avec lifecycle : submitted → working → completed/failed           |
+| Message   | Communication dans une Task : role (user/agent) + Parts                             |
+| Part      | Contenu atomique : TextPart, FilePart, DataPart, FunctionCallPart                   |
+| Artifact  | Output produit par une Task, composé de Parts                                       |
+| Skill     | Capability déclarée sur l'AgentCard                                                 |
 
 **Lifecycle d'une Task :**
+
 ```
 submitted → working → completed
                     → failed
@@ -46,6 +49,7 @@ submitted → working → completed
 ```
 
 **Méthodes RPC :**
+
 - `message/send` — envoyer un message, recevoir la réponse sync
 - `message/stream` — envoyer, recevoir en SSE (streaming)
 - `tasks/get` — poll le statut
@@ -54,14 +58,14 @@ submitted → working → completed
 
 ## Mapping sur DenoClaw
 
-| DenoClaw actuel | A2A |
-|---|---|
-| `AgentEntry` (registry) | `AgentCard` (skills, capabilities) |
-| `BrokerMessage` (custom) | JSON-RPC 2.0 `message/send` |
-| `ChannelMessage` | A2A `Message` avec `Parts` |
-| `Skill` type | A2A `AgentSkill` (+ id, tags, examples) |
-| KV Queue routing | Broker route les Tasks A2A entre agents |
-| WebSocket streaming | SSE via `Deno.serve()` + `ReadableStream` |
+| DenoClaw actuel          | A2A                                       |
+| ------------------------ | ----------------------------------------- |
+| `AgentEntry` (registry)  | `AgentCard` (skills, capabilities)        |
+| `BrokerMessage` (custom) | JSON-RPC 2.0 `message/send`               |
+| `ChannelMessage`         | A2A `Message` avec `Parts`                |
+| `Skill` type             | A2A `AgentSkill` (+ id, tags, examples)   |
+| KV Queue routing         | Broker route les Tasks A2A entre agents   |
+| WebSocket streaming      | SSE via `Deno.serve()` + `ReadableStream` |
 
 ## Architecture
 
@@ -83,7 +87,9 @@ Agent "researcher" (Subhosting)     Broker (Deploy)         Agent "coder" (Subho
 ```
 
 Chaque agent Subhosting expose un endpoint A2A HTTP. Le broker :
-1. Route les Tasks entre agents internes (HTTP POST vers chaque agent Subhosting)
+
+1. Route les Tasks entre agents internes (HTTP POST vers chaque agent
+   Subhosting)
 2. Route les Tasks cross-instance (via tunnels Broker ↔ Broker)
 3. Reçoit/envoie des Tasks d'agents externes (HTTP standard A2A)
 
@@ -122,9 +128,11 @@ Chaque agent du registry génère automatiquement son Agent Card :
 
 ## Implémentation (Deno natif, zéro dep)
 
-Pas besoin de SDK A2A — le protocole est JSON-RPC 2.0 sur HTTP, implémentable avec `Deno.serve()` et `fetch()` :
+Pas besoin de SDK A2A — le protocole est JSON-RPC 2.0 sur HTTP, implémentable
+avec `Deno.serve()` et `fetch()` :
 
 **Serveur A2A (exposer un agent) :**
+
 ```typescript
 Deno.serve((req) => {
   const url = new URL(req.url);
@@ -138,18 +146,25 @@ Deno.serve((req) => {
   if (url.pathname === "/a2a" && req.method === "POST") {
     const rpc = await req.json();
     switch (rpc.method) {
-      case "message/send": return handleSend(rpc);
-      case "message/stream": return handleStream(rpc);
-      case "tasks/get": return handleGetTask(rpc);
-      case "tasks/cancel": return handleCancel(rpc);
+      case "message/send":
+        return handleSend(rpc);
+      case "message/stream":
+        return handleStream(rpc);
+      case "tasks/get":
+        return handleGetTask(rpc);
+      case "tasks/cancel":
+        return handleCancel(rpc);
     }
   }
 });
 ```
 
 **Client A2A (appeler un agent) :**
+
 ```typescript
-const card = await fetch("https://agent.dev/.well-known/agent-card.json").then(r => r.json());
+const card = await fetch("https://agent.dev/.well-known/agent-card.json").then(
+  (r) => r.json(),
+);
 
 const result = await fetch(card.url, {
   method: "POST",
@@ -162,28 +177,30 @@ const result = await fetch(card.url, {
       message: {
         messageId: crypto.randomUUID(),
         role: "user",
-        parts: [{ kind: "text", text: "Write a test for this function" }]
-      }
-    }
-  })
-}).then(r => r.json());
+        parts: [{ kind: "text", text: "Write a test for this function" }],
+      },
+    },
+  }),
+}).then((r) => r.json());
 ```
 
 ## Modules implémentés
 
-| Module | Rôle | Statut |
-|---|---|---|
-| `src/messaging/a2a/types.ts` | Types A2A v1.0 complets (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE) | **fait** |
-| `src/messaging/a2a/server.ts` | Serveur A2A : JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming | **fait** |
-| `src/messaging/a2a/client.ts` | Client A2A : discover, send, stream (async generator SSE), getTask, cancelTask | **fait** |
-| `src/messaging/a2a/card.ts` | Génération d'AgentCard depuis le registry config (permissions → skills) | **fait** |
-| `src/messaging/a2a/tasks.ts` | Task store KV (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal state protection) | **fait** |
-| `src/orchestration/broker.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) dans le routage inter-agents | **fait** |
+| Module                        | Rôle                                                                                               | Statut   |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- | -------- |
+| `src/messaging/a2a/types.ts`  | Types A2A v1.0 complets (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE)                     | **fait** |
+| `src/messaging/a2a/server.ts` | Serveur A2A : JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming     | **fait** |
+| `src/messaging/a2a/client.ts` | Client A2A : discover, send, stream (async generator SSE), getTask, cancelTask                     | **fait** |
+| `src/messaging/a2a/card.ts`   | Génération d'AgentCard depuis le registry config (permissions → skills)                            | **fait** |
+| `src/messaging/a2a/tasks.ts`  | Task store KV (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal state protection) | **fait** |
+| `src/orchestration/broker.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) dans le routage inter-agents                   | **fait** |
 
 ## Conséquences
 
-- Chaque agent DenoClaw est interopérable avec tout agent A2A (LangChain, Bedrock, etc.)
-- Le format custom `BrokerMessage` reste pour le transport interne (HTTP) mais les payloads s'alignent sur A2A
+- Chaque agent DenoClaw est interopérable avec tout agent A2A (LangChain,
+  Bedrock, etc.)
+- Le format custom `BrokerMessage` reste pour le transport interne (HTTP) mais
+  les payloads s'alignent sur A2A
 - L'AgentCard est générée automatiquement depuis la config agent (registry)
 - Le streaming SSE est natif Deno, pas besoin de lib
 - Compatible avec le routing channel → agent(s) : le broker est un routeur A2A

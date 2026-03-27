@@ -12,11 +12,18 @@ import type {
 } from "../shared/types.ts";
 
 // Re-export for backward compat
-export type { ActiveTaskEntry, AgentStatusEntry, AgentStatusValue, AgentTaskEntry };
+export type {
+  ActiveTaskEntry,
+  AgentStatusEntry,
+  AgentStatusValue,
+  AgentTaskEntry,
+};
 
 // ── KV readers ─────────────────────────────────────────
 
-export async function listAgentStatuses(kv: Deno.Kv): Promise<AgentStatusEntry[]> {
+export async function listAgentStatuses(
+  kv: Deno.Kv,
+): Promise<AgentStatusEntry[]> {
   const entries: AgentStatusEntry[] = [];
   const activeTaskMap = new Map<string, ActiveTaskEntry>();
 
@@ -42,7 +49,10 @@ export async function listAgentStatuses(kv: Deno.Kv): Promise<AgentStatusEntry[]
   return entries;
 }
 
-export async function getAgentStatus(kv: Deno.Kv, agentId: string): Promise<AgentStatusEntry | null> {
+export async function getAgentStatus(
+  kv: Deno.Kv,
+  agentId: string,
+): Promise<AgentStatusEntry | null> {
   const [statusEntry, taskEntry] = await Promise.all([
     kv.get<AgentStatusValue>(["agents", agentId, "status"]),
     kv.get<ActiveTaskEntry>(["agents", agentId, "active_task"]),
@@ -64,12 +74,19 @@ export async function listCronJobs(kv: Deno.Kv): Promise<CronJob[]> {
 }
 
 /** Update the dashboard agents list sentinel — triggers kv.watch() refresh. */
-export async function updateAgentsList(kv: Deno.Kv, agentIds: string[]): Promise<void> {
+export async function updateAgentsList(
+  kv: Deno.Kv,
+  agentIds: string[],
+): Promise<void> {
   await kv.set(["_dashboard", "agents_list"], agentIds);
 }
 
 /** Write agent status to shared KV. */
-export async function writeAgentStatus(kv: Deno.Kv, agentId: string, value: AgentStatusValue): Promise<void> {
+export async function writeAgentStatus(
+  kv: Deno.Kv,
+  agentId: string,
+  value: AgentStatusValue,
+): Promise<void> {
   await kv.set(["agents", agentId, "status"], value);
 }
 
@@ -82,9 +99,14 @@ export type DashboardEvent =
   | { type: "agent_task"; task: AgentTaskEntry }
   | { type: "keepalive" };
 
-export async function listAgentTasks(kv: Deno.Kv, limit = 50): Promise<AgentTaskEntry[]> {
+export async function listAgentTasks(
+  kv: Deno.Kv,
+  limit = 50,
+): Promise<AgentTaskEntry[]> {
   const tasks: AgentTaskEntry[] = [];
-  for await (const entry of kv.list<AgentTaskEntry>({ prefix: ["agent_tasks"] })) {
+  for await (
+    const entry of kv.list<AgentTaskEntry>({ prefix: ["agent_tasks"] })
+  ) {
     if (entry.value) tasks.push(entry.value);
     if (tasks.length >= limit) break;
   }
@@ -101,21 +123,31 @@ export function buildWatchKeys(agentIds: string[]): Deno.KvKey[] {
 }
 
 /** Convert a KV watch entry to a dashboard event. */
-export function kvEntryToDashboardEvent(entry: Deno.KvEntryMaybe<unknown>): DashboardEvent | null {
+export function kvEntryToDashboardEvent(
+  entry: Deno.KvEntryMaybe<unknown>,
+): DashboardEvent | null {
   const key = entry.key;
 
   // ["_dashboard", "agents_list"] → agents_list_updated
   if (key[0] === "_dashboard" && key[1] === "agents_list") {
-    return { type: "agents_list_updated", agentIds: (entry.value as string[]) ?? [] };
+    return {
+      type: "agents_list_updated",
+      agentIds: (entry.value as string[]) ?? [],
+    };
   }
 
   // ["_dashboard", "agent_task_update"] → agent_task (sentinel updated by WorkerPool.writeAgentTask)
-  if (key[0] === "_dashboard" && key[1] === "agent_task_update" && entry.value) {
+  if (
+    key[0] === "_dashboard" && key[1] === "agent_task_update" && entry.value
+  ) {
     return { type: "agent_task", task: entry.value as AgentTaskEntry };
   }
 
   // ["agents", agentId, "status"] → agent_status
-  if (key[0] === "agents" && key.length === 3 && key[2] === "status" && entry.value) {
+  if (
+    key[0] === "agents" && key.length === 3 && key[2] === "status" &&
+    entry.value
+  ) {
     return {
       type: "agent_status",
       agentId: key[1] as string,
@@ -136,7 +168,10 @@ function encodeSSE(event: DashboardEvent): Uint8Array {
  * Create an SSE Response that streams KV watch events.
  * Handles agents_list changes by restarting the watch loop with new keys.
  */
-export function createSSEResponse(kv: Deno.Kv, initialAgentIds: string[]): Response {
+export function createSSEResponse(
+  kv: Deno.Kv,
+  initialAgentIds: string[],
+): Response {
   let cancelled = false;
 
   const body = new ReadableStream<Uint8Array>({
@@ -184,7 +219,9 @@ export function createSSEResponse(kv: Deno.Kv, initialAgentIds: string[]): Respo
         // stream cancelled or KV closed — exit silently
       } finally {
         clearInterval(keepalive);
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch { /* already closed */ }
       }
     },
     cancel() {

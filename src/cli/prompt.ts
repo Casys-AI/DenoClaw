@@ -6,7 +6,10 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export async function ask(question: string, defaultValue?: string): Promise<string> {
+export async function ask(
+  question: string,
+  defaultValue?: string,
+): Promise<string> {
   const suffix = defaultValue ? ` [${defaultValue}]` : "";
   await Deno.stdout.write(encoder.encode(`${question}${suffix}: `));
 
@@ -18,14 +21,20 @@ export async function ask(question: string, defaultValue?: string): Promise<stri
   return answer || defaultValue || "";
 }
 
-export async function confirm(question: string, defaultYes = true): Promise<boolean> {
+export async function confirm(
+  question: string,
+  defaultYes = true,
+): Promise<boolean> {
   const suffix = defaultYes ? "[Y/n]" : "[y/N]";
   const answer = await ask(`${question} ${suffix}`);
   if (!answer) return defaultYes;
   return answer.toLowerCase().startsWith("y");
 }
 
-export async function choose(question: string, options: string[]): Promise<string> {
+export async function choose(
+  question: string,
+  options: string[],
+): Promise<string> {
   console.log(`\n${question}`);
   for (let i = 0; i < options.length; i++) {
     console.log(`  ${i + 1}. ${options[i]}`);

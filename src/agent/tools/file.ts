@@ -26,7 +26,9 @@ export class ReadFileTool extends BaseTool {
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const path = args.path as string;
-    if (!path) return this.fail("MISSING_ARG", { arg: "path" }, "Provide a file path");
+    if (!path) {
+      return this.fail("MISSING_ARG", { arg: "path" }, "Provide a file path");
+    }
 
     try {
       const content = await Deno.readTextFile(path);
@@ -34,12 +36,24 @@ export class ReadFileTool extends BaseTool {
     } catch (e) {
       const msg = (e as Error).message;
       if (msg.includes("No such file")) {
-        return this.fail("FILE_NOT_FOUND", { path }, "Check that the file path exists");
+        return this.fail(
+          "FILE_NOT_FOUND",
+          { path },
+          "Check that the file path exists",
+        );
       }
       if (msg.includes("Permission denied")) {
-        return this.fail("PERMISSION_DENIED", { path }, "Check file permissions");
+        return this.fail(
+          "PERMISSION_DENIED",
+          { path },
+          "Check file permissions",
+        );
       }
-      return this.fail("READ_FAILED", { path, message: msg }, "Verify the path and permissions");
+      return this.fail(
+        "READ_FAILED",
+        { path, message: msg },
+        "Verify the path and permissions",
+      );
     }
   }
 }
@@ -60,7 +74,10 @@ export class WriteFileTool extends BaseTool {
           properties: {
             path: { type: "string", description: "Path to the file to write" },
             content: { type: "string", description: "Content to write" },
-            dry_run: { type: "boolean", description: "Preview without writing (default: true)" },
+            dry_run: {
+              type: "boolean",
+              description: "Preview without writing (default: true)",
+            },
           },
           required: ["path", "content"],
         },
@@ -73,11 +90,21 @@ export class WriteFileTool extends BaseTool {
     const content = args.content as string;
     const dryRun = args.dry_run !== false; // AX: safe default
 
-    if (!path) return this.fail("MISSING_ARG", { arg: "path" }, "Provide a file path");
-    if (content === undefined) return this.fail("MISSING_ARG", { arg: "content" }, "Provide content to write");
+    if (!path) {
+      return this.fail("MISSING_ARG", { arg: "path" }, "Provide a file path");
+    }
+    if (content === undefined) {
+      return this.fail(
+        "MISSING_ARG",
+        { arg: "content" },
+        "Provide content to write",
+      );
+    }
 
     if (dryRun) {
-      return this.ok(`[dry_run] Would write ${content.length} chars to ${path}\nSet dry_run=false to write.`);
+      return this.ok(
+        `[dry_run] Would write ${content.length} chars to ${path}\nSet dry_run=false to write.`,
+      );
     }
 
     try {

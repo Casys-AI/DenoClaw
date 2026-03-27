@@ -13,7 +13,12 @@ export class ContextBuilder {
    * @param now — explicit timestamp for AX-6 determinism. Defaults to current time.
    * @param memoryTopics — topics in long-term memory, injected so the agent knows what it remembers.
    */
-  buildSystemPrompt(skills: Skill[], tools: ToolDefinition[], now: Date = new Date(), memoryTopics?: string[]): string {
+  buildSystemPrompt(
+    skills: Skill[],
+    tools: ToolDefinition[],
+    now: Date = new Date(),
+    memoryTopics?: string[],
+  ): string {
     const parts: string[] = [];
 
     parts.push(this.config.systemPrompt || this.defaultPrompt());
@@ -21,8 +26,14 @@ export class ContextBuilder {
 
     if (memoryTopics && memoryTopics.length > 0) {
       parts.push("\n## Long-term Memory");
-      parts.push(`You have ${memoryTopics.length} topic(s) in memory: ${memoryTopics.join(", ")}`);
-      parts.push("Use the memory tool with action 'recall' to retrieve facts, or 'remember' to store new ones.");
+      parts.push(
+        `You have ${memoryTopics.length} topic(s) in memory: ${
+          memoryTopics.join(", ")
+        }`,
+      );
+      parts.push(
+        "Use the memory tool with action 'recall' to retrieve facts, or 'remember' to store new ones.",
+      );
     }
 
     if (skills.length > 0) {
@@ -64,7 +75,15 @@ Guidelines:
     memoryTopics?: string[],
   ): Message[] {
     return [
-      { role: "system", content: this.buildSystemPrompt(skills, tools, new Date(), memoryTopics) },
+      {
+        role: "system",
+        content: this.buildSystemPrompt(
+          skills,
+          tools,
+          new Date(),
+          memoryTopics,
+        ),
+      },
       ...conversation,
     ];
   }

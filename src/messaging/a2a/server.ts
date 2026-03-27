@@ -25,7 +25,10 @@ export class A2AServer {
   private card: AgentCard;
   private store: TaskStore;
   private handler: TaskHandler;
-  private activeStreams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+  private activeStreams = new Map<
+    string,
+    ReadableStreamDefaultController<Uint8Array>
+  >();
 
   constructor(card: AgentCard, handler: TaskHandler) {
     this.card = card;
@@ -41,7 +44,10 @@ export class A2AServer {
     const path = url.pathname;
 
     // AgentCard discovery
-    if (path === "/.well-known/agent-card.json" || path === `${basePath}/.well-known/agent-card.json`) {
+    if (
+      path === "/.well-known/agent-card.json" ||
+      path === `${basePath}/.well-known/agent-card.json`
+    ) {
       return Response.json(this.card);
     }
 
@@ -87,7 +93,13 @@ export class A2AServer {
       case "tasks/cancel":
         return await this.handleCancel(rpc);
       default:
-        return Response.json(this.rpcError(rpc.id, A2A_ERRORS.UNSUPPORTED_OPERATION, `Unknown method: ${rpc.method}`));
+        return Response.json(
+          this.rpcError(
+            rpc.id,
+            A2A_ERRORS.UNSUPPORTED_OPERATION,
+            `Unknown method: ${rpc.method}`,
+          ),
+        );
     }
   }
 
@@ -96,7 +108,9 @@ export class A2AServer {
   private async handleSend(rpc: JsonRpcRequest): Promise<Response> {
     const params = rpc.params as { message: A2AMessage; taskId?: string };
     if (!params?.message) {
-      return Response.json(this.rpcError(rpc.id, -32602, "Missing message param"));
+      return Response.json(
+        this.rpcError(rpc.id, -32602, "Missing message param"),
+      );
     }
 
     let task: Task;
@@ -105,10 +119,18 @@ export class A2AServer {
       // Continue existing task
       const existing = await this.store.get(params.taskId);
       if (!existing) {
-        return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"));
+        return Response.json(
+          this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
+        );
       }
       if (TERMINAL_STATES.includes(existing.status.state)) {
-        return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_CANCELABLE, "Task in terminal state"));
+        return Response.json(
+          this.rpcError(
+            rpc.id,
+            A2A_ERRORS.TASK_NOT_CANCELABLE,
+            "Task in terminal state",
+          ),
+        );
       }
       await this.store.addMessage(params.taskId, params.message);
       task = existing;
@@ -141,7 +163,9 @@ export class A2AServer {
   private async handleStream(rpc: JsonRpcRequest): Promise<Response> {
     const params = rpc.params as { message: A2AMessage; taskId?: string };
     if (!params?.message) {
-      return Response.json(this.rpcError(rpc.id, -32602, "Missing message param"));
+      return Response.json(
+        this.rpcError(rpc.id, -32602, "Missing message param"),
+      );
     }
 
     const taskId = params.taskId || crypto.randomUUID();
@@ -150,7 +174,9 @@ export class A2AServer {
     if (params.taskId) {
       const existing = await this.store.get(params.taskId);
       if (!existing) {
-        return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"));
+        return Response.json(
+          this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
+        );
       }
       await this.store.addMessage(params.taskId, params.message);
       task = existing;
@@ -196,16 +222,22 @@ export class A2AServer {
           this.sseEvent(controller, encoder, rpc.id, {
             kind: "taskStatusUpdate",
             taskId: task.id,
-            status: completed?.status || { state: "COMPLETED", timestamp: new Date().toISOString() },
+            status: completed?.status ||
+              { state: "COMPLETED", timestamp: new Date().toISOString() },
             final: true,
           } as TaskStatusUpdateEvent);
         } catch (e) {
-          this.sseEvent(controller, encoder, rpc.id, {
-            kind: "taskStatusUpdate",
-            taskId: task.id,
-            status: { state: "FAILED", timestamp: new Date().toISOString() },
-            final: true,
-          } as TaskStatusUpdateEvent & { error: string });
+          this.sseEvent(
+            controller,
+            encoder,
+            rpc.id,
+            {
+              kind: "taskStatusUpdate",
+              taskId: task.id,
+              status: { state: "FAILED", timestamp: new Date().toISOString() },
+              final: true,
+            } as TaskStatusUpdateEvent & { error: string },
+          );
           log.error(`A2A stream error: ${(e as Error).message}`);
         }
 
@@ -227,10 +259,16 @@ export class A2AServer {
 
   private async handleGetTask(rpc: JsonRpcRequest): Promise<Response> {
     const taskId = (rpc.params as { taskId: string })?.taskId;
-    if (!taskId) return Response.json(this.rpcError(rpc.id, -32602, "Missing taskId"));
+    if (!taskId) {
+      return Response.json(this.rpcError(rpc.id, -32602, "Missing taskId"));
+    }
 
     const task = await this.store.get(taskId);
-    if (!task) return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"));
+    if (!task) {
+      return Response.json(
+        this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
+      );
+    }
 
     return Response.json(this.rpcSuccess(rpc.id, task));
   }
@@ -239,12 +277,24 @@ export class A2AServer {
 
   private async handleCancel(rpc: JsonRpcRequest): Promise<Response> {
     const taskId = (rpc.params as { taskId: string })?.taskId;
-    if (!taskId) return Response.json(this.rpcError(rpc.id, -32602, "Missing taskId"));
+    if (!taskId) {
+      return Response.json(this.rpcError(rpc.id, -32602, "Missing taskId"));
+    }
 
     const task = await this.store.get(taskId);
-    if (!task) return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"));
+    if (!task) {
+      return Response.json(
+        this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
+      );
+    }
     if (TERMINAL_STATES.includes(task.status.state)) {
-      return Response.json(this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_CANCELABLE, "Task in terminal state"));
+      return Response.json(
+        this.rpcError(
+          rpc.id,
+          A2A_ERRORS.TASK_NOT_CANCELABLE,
+          "Task in terminal state",
+        ),
+      );
     }
 
     const canceled = await this.store.cancel(taskId);
@@ -294,7 +344,11 @@ export class A2AServer {
     return { jsonrpc: "2.0", id: id || "", result };
   }
 
-  private rpcError(id: string | null, code: number, message: string): JsonRpcResponse {
+  private rpcError(
+    id: string | null,
+    code: number,
+    message: string,
+  ): JsonRpcResponse {
     return { jsonrpc: "2.0", id: id || "", error: { code, message } };
   }
 

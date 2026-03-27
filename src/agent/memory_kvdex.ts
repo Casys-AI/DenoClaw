@@ -1,4 +1,4 @@
-import { kvdex, collection, model } from "@olli/kvdex";
+import { collection, kvdex, model } from "@olli/kvdex";
 import type { Message } from "../shared/types.ts";
 import type { LongTermFact, MemoryPort } from "./memory_port.ts";
 import { log } from "../shared/log.ts";
@@ -53,14 +53,21 @@ export class KvdexMemory implements MemoryPort {
   private cache: Message[] = [];
   private seq = 0;
 
-  constructor(agentId: string, sessionId: string, maxMessages = 100, kvPath?: string) {
+  constructor(
+    agentId: string,
+    sessionId: string,
+    maxMessages = 100,
+    kvPath?: string,
+  ) {
     this._agentId = agentId;
     this.sessionId = sessionId;
     this.maxMessages = maxMessages;
     this.kvPath = kvPath;
   }
 
-  get agentId(): string { return this._agentId; }
+  get agentId(): string {
+    return this._agentId;
+  }
 
   private async getDb(): Promise<DbType> {
     if (!this.db) {
@@ -73,14 +80,20 @@ export class KvdexMemory implements MemoryPort {
   async load(): Promise<void> {
     try {
       const db = await this.getDb();
-      const result = await db.convMessages.findBySecondaryIndex("sessionId", this.sessionId);
+      const result = await db.convMessages.findBySecondaryIndex(
+        "sessionId",
+        this.sessionId,
+      );
       const docs = result.result
         .filter((d) => d.value != null)
         .map((d) => d.value!)
         .sort((a, b) => a.seq - b.seq);
 
       this.cache = docs.map((d) => {
-        const msg: Message = { role: d.role as Message["role"], content: d.content };
+        const msg: Message = {
+          role: d.role as Message["role"],
+          content: d.content,
+        };
         if (d.name) msg.name = d.name;
         if (d.tool_call_id) msg.tool_call_id = d.tool_call_id;
         if (d.tool_calls_json) msg.tool_calls = JSON.parse(d.tool_calls_json);
@@ -91,11 +104,15 @@ export class KvdexMemory implements MemoryPort {
       // Trim on load (KV may have more than maxMessages)
       if (this.cache.length > this.maxMessages) {
         const system = this.cache.filter((m) => m.role === "system");
-        const rest = this.cache.filter((m) => m.role !== "system").slice(-this.maxMessages);
+        const rest = this.cache.filter((m) => m.role !== "system").slice(
+          -this.maxMessages,
+        );
         this.cache = [...system, ...rest];
       }
 
-      log.debug(`KvdexMemory chargée : ${this.cache.length} messages (${this.sessionId})`);
+      log.debug(
+        `KvdexMemory chargée : ${this.cache.length} messages (${this.sessionId})`,
+      );
     } catch (e) {
       log.error(`Échec chargement KvdexMemory (${this.sessionId})`, e);
       this.cache = [];
@@ -108,7 +125,9 @@ export class KvdexMemory implements MemoryPort {
 
     if (this.cache.length > this.maxMessages) {
       const system = this.cache.filter((m) => m.role === "system");
-      const rest = this.cache.filter((m) => m.role !== "system").slice(-this.maxMessages);
+      const rest = this.cache.filter((m) => m.role !== "system").slice(
+        -this.maxMessages,
+      );
       this.cache = [...system, ...rest];
     }
 
@@ -121,7 +140,9 @@ export class KvdexMemory implements MemoryPort {
         content: message.content,
         name: message.name,
         tool_call_id: message.tool_call_id,
-        tool_calls_json: message.tool_calls ? JSON.stringify(message.tool_calls) : undefined,
+        tool_calls_json: message.tool_calls
+          ? JSON.stringify(message.tool_calls)
+          : undefined,
         timestamp: new Date().toISOString(),
       };
       await db.convMessages.add(doc);
@@ -175,7 +196,11 @@ export class KvdexMemory implements MemoryPort {
   async recall(topic: string, limit = 10): Promise<LongTermFact[]> {
     try {
       const db = await this.getDb();
-      const result = await db.longTermFacts.findBySecondaryIndex("topic", topic, { limit });
+      const result = await db.longTermFacts.findBySecondaryIndex(
+        "topic",
+        topic,
+        { limit },
+      );
       return result.result
         .filter((d) => d.value != null)
         .map((d) => ({

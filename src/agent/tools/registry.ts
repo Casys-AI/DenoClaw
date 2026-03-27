@@ -1,5 +1,5 @@
-import type { SandboxPermission, ToolDefinition, ToolResult } from "../../types.ts";
-import { log } from "../../utils/log.ts";
+import type { SandboxPermission, ToolDefinition, ToolResult } from "../../shared/types.ts";
+import { log } from "../../shared/log.ts";
 
 export abstract class BaseTool {
   abstract name: string;

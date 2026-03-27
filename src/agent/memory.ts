@@ -1,5 +1,5 @@
-import type { Message } from "../types.ts";
-import { log } from "../utils/log.ts";
+import type { Message } from "../shared/types.ts";
+import { log } from "../shared/log.ts";
 
 /**
  * KV-backed conversation memory.

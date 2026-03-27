@@ -1,6 +1,7 @@
-import type { Skill } from "../types.ts";
+import type { Skill } from "./types.ts";
 import { join } from "@std/path";
-import { getSkillsDir, log } from "../utils/mod.ts";
+import { getSkillsDir } from "../shared/helpers.ts";
+import { log } from "../shared/log.ts";
 
 export class SkillsLoader {
   private skillsDir: string;

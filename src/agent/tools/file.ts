@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolResult } from "../../types.ts";
+import type { ToolDefinition, ToolResult } from "../../shared/types.ts";
 import { BaseTool } from "./registry.ts";
 import { dirname } from "@std/path";
 

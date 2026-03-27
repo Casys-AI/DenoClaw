@@ -1,4 +1,5 @@
-import type { AgentConfig, AgentResponse, Config } from "../types.ts";
+import type { AgentConfig, AgentResponse } from "../shared/types.ts";
+import type { Config } from "../types.ts";
 import { ProviderManager } from "../providers/manager.ts";
 import { Memory } from "./memory.ts";
 import { ContextBuilder } from "./context.ts";
@@ -7,7 +8,7 @@ import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 import { WebFetchTool } from "./tools/web.ts";
-import { log } from "../utils/log.ts";
+import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 
 export class AgentLoop {

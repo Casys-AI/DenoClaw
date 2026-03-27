@@ -47,11 +47,12 @@ Deno.test({
     const loop = new AgentLoop("test-session", minimalConfig, {}, 10, { tools: registry });
 
     const tools = loop.getTools();
-    // Only our injected stub should be present — built-ins are NOT added when deps.tools is provided
-    assertEquals(tools.size, 1);
+    // Our injected stub + memory tool (always registered)
+    assertEquals(tools.size, 2);
     const defs = tools.getDefinitions();
-    assertEquals(defs.length, 1);
-    assertEquals(defs[0].function.name, "stub");
+    assertEquals(defs.length, 2);
+    const names = defs.map((d) => d.function.name).sort();
+    assertEquals(names, ["memory", "stub"]);
 
     loop.close();
   },
@@ -65,11 +66,11 @@ Deno.test({
     const loop = new AgentLoop("test-session-defaults", minimalConfig);
 
     const tools = loop.getTools();
-    // 4 built-in tools: shell, read_file, write_file, web_fetch
-    assertEquals(tools.size, 4);
+    // 4 built-in tools + memory tool
+    assertEquals(tools.size, 5);
 
     const names = tools.getDefinitions().map((d) => d.function.name).sort();
-    assertEquals(names, ["read_file", "shell", "web_fetch", "write_file"]);
+    assertEquals(names, ["memory", "read_file", "shell", "web_fetch", "write_file"]);
 
     loop.close();
   },

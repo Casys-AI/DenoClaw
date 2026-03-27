@@ -1,5 +1,7 @@
-import type { AgentBrokerPort, BrokerEnvelope, Message } from "../shared/types.ts";
+import type { AgentBrokerPort, BrokerEnvelope } from "../shared/types.ts";
 import type { AgentConfig } from "./types.ts";
+import type { MemoryPort } from "./memory_port.ts";
+import { KvdexMemory } from "./memory_kvdex.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";
@@ -12,7 +14,7 @@ import { log } from "../shared/log.ts";
  * - Listens for messages via KV Queues
  * - Calls LLM via AgentBrokerPort (never directly)
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
- * - Persists state in its own KV
+ * - Persists state via MemoryPort (KvdexMemory by default)
  * - Runs heartbeat via Deno.cron
  *
  * No code executes here — all execution goes through Sandbox.
@@ -27,6 +29,7 @@ export class AgentRuntime {
   private skills: SkillsLoader;
   private cron: CronManager;
   private maxIterations: number;
+  private memories: Map<string, MemoryPort> = new Map();
 
   constructor(agentId: string, config: AgentConfig, broker: AgentBrokerPort, maxIterations = 10) {
     this.agentId = agentId;
@@ -41,6 +44,16 @@ export class AgentRuntime {
   private async getKv(): Promise<Deno.Kv> {
     if (!this.kv) this.kv = await Deno.openKv();
     return this.kv;
+  }
+
+  private async getMemory(sessionId: string): Promise<MemoryPort> {
+    let mem = this.memories.get(sessionId);
+    if (!mem) {
+      mem = new KvdexMemory(this.agentId, sessionId);
+      await mem.load();
+      this.memories.set(sessionId, mem);
+    }
+    return mem;
   }
 
   async start(): Promise<void> {
@@ -83,19 +96,17 @@ export class AgentRuntime {
     const payload = msg.payload as { instruction: string; data?: unknown };
     log.info(`Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`);
 
-    const kv = await this.getKv();
+    const sessionId = `agent:${msg.from}:${this.agentId}`;
+    const memory = await this.getMemory(sessionId);
 
-    const historyEntry = await kv.get<Message[]>(["memory", this.agentId, msg.from]);
-    const history: Message[] = historyEntry.value || [];
-
-    history.push({ role: "user", content: payload.instruction });
+    await memory.addMessage({ role: "user", content: payload.instruction });
 
     let iteration = 0;
     while (iteration < this.maxIterations) {
       iteration++;
 
       const skillsList = this.skills.getSkills();
-      const contextMessages = this.context.buildContextMessages(history, skillsList, []);
+      const contextMessages = this.context.buildContextMessages(memory.getMessages(), skillsList, []);
 
       const response = await this.broker.complete(
         contextMessages,
@@ -105,7 +116,7 @@ export class AgentRuntime {
       );
 
       if (response.toolCalls?.length) {
-        history.push({
+        await memory.addMessage({
           role: "assistant",
           content: response.content || "",
           tool_calls: response.toolCalls,
@@ -116,7 +127,7 @@ export class AgentRuntime {
           try {
             args = JSON.parse(tc.function.arguments);
           } catch {
-            history.push({
+            await memory.addMessage({
               role: "tool",
               content: `Error [INVALID_JSON]: bad arguments for ${tc.function.name}`,
               name: tc.function.name,
@@ -127,7 +138,7 @@ export class AgentRuntime {
 
           const result = await this.broker.execTool(tc.function.name, args);
 
-          history.push({
+          await memory.addMessage({
             role: "tool",
             content: result.success
               ? result.output
@@ -140,8 +151,7 @@ export class AgentRuntime {
         continue;
       }
 
-      history.push({ role: "assistant", content: response.content });
-      await kv.set(["memory", this.agentId, msg.from], history);
+      await memory.addMessage({ role: "assistant", content: response.content });
       await this.broker.sendToAgent(msg.from, response.content);
 
       log.info(`Réponse envoyée à ${msg.from} (${iteration} itérations)`);
@@ -149,12 +159,15 @@ export class AgentRuntime {
     }
 
     await this.broker.sendToAgent(msg.from, "Max iterations reached.");
-    await kv.set(["memory", this.agentId, msg.from], history);
   }
 
   async stop(): Promise<void> {
     this.cron.close();
     this.broker.close();
+    for (const mem of this.memories.values()) {
+      mem.close();
+    }
+    this.memories.clear();
     if (this.kv) {
       await this.kv.set(["agents", this.agentId, "status"], {
         status: "stopped",

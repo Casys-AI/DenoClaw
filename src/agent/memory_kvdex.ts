@@ -1,0 +1,228 @@
+import { kvdex, collection, model } from "@olli/kvdex";
+import type { Message } from "../shared/types.ts";
+import type { LongTermFact, MemoryPort } from "./memory_port.ts";
+import { log } from "../shared/log.ts";
+
+type ConvMessageDoc = {
+  sessionId: string;
+  seq: number;
+  role: string;
+  content: string;
+  name: string | undefined;
+  tool_call_id: string | undefined;
+  tool_calls_json: string | undefined;
+  timestamp: string;
+};
+
+type LongTermDoc = {
+  topic: string;
+  content: string;
+  source: string | undefined;
+  confidence: number | undefined;
+  timestamp: string;
+};
+
+function openDb(kv: Deno.Kv) {
+  return kvdex({
+    kv,
+    schema: {
+      convMessages: collection(model<ConvMessageDoc>(), {
+        indices: { sessionId: "secondary" },
+      }),
+      longTermFacts: collection(model<LongTermDoc>(), {
+        indices: { topic: "secondary" },
+      }),
+    },
+  });
+}
+
+type DbType = ReturnType<typeof openDb>;
+
+/**
+ * Mémoire agent structurée via kvdex.
+ * Collections indexées : conversations (par sessionId) + faits long-terme (par topic).
+ * Cache in-memory synchronisé pour getMessages() sync.
+ */
+export class KvdexMemory implements MemoryPort {
+  private _agentId: string;
+  private sessionId: string;
+  private maxMessages: number;
+  private kvPath?: string;
+  private kv: Deno.Kv | null = null;
+  private db: DbType | null = null;
+  private cache: Message[] = [];
+  private seq = 0;
+
+  constructor(agentId: string, sessionId: string, maxMessages = 100, kvPath?: string) {
+    this._agentId = agentId;
+    this.sessionId = sessionId;
+    this.maxMessages = maxMessages;
+    this.kvPath = kvPath;
+  }
+
+  get agentId(): string { return this._agentId; }
+
+  private async getDb(): Promise<DbType> {
+    if (!this.db) {
+      this.kv = await Deno.openKv(this.kvPath);
+      this.db = openDb(this.kv);
+    }
+    return this.db;
+  }
+
+  async load(): Promise<void> {
+    try {
+      const db = await this.getDb();
+      const result = await db.convMessages.findBySecondaryIndex("sessionId", this.sessionId);
+      const docs = result.result
+        .filter((d) => d.value != null)
+        .map((d) => d.value!)
+        .sort((a, b) => a.seq - b.seq);
+
+      this.cache = docs.map((d) => {
+        const msg: Message = { role: d.role as Message["role"], content: d.content };
+        if (d.name) msg.name = d.name;
+        if (d.tool_call_id) msg.tool_call_id = d.tool_call_id;
+        if (d.tool_calls_json) msg.tool_calls = JSON.parse(d.tool_calls_json);
+        return msg;
+      });
+      this.seq = docs.length > 0 ? docs[docs.length - 1].seq + 1 : 0;
+
+      // Trim on load (KV may have more than maxMessages)
+      if (this.cache.length > this.maxMessages) {
+        const system = this.cache.filter((m) => m.role === "system");
+        const rest = this.cache.filter((m) => m.role !== "system").slice(-this.maxMessages);
+        this.cache = [...system, ...rest];
+      }
+
+      log.debug(`KvdexMemory chargée : ${this.cache.length} messages (${this.sessionId})`);
+    } catch (e) {
+      log.error(`Échec chargement KvdexMemory (${this.sessionId})`, e);
+      this.cache = [];
+      this.seq = 0;
+    }
+  }
+
+  async addMessage(message: Message): Promise<void> {
+    this.cache.push(message);
+
+    if (this.cache.length > this.maxMessages) {
+      const system = this.cache.filter((m) => m.role === "system");
+      const rest = this.cache.filter((m) => m.role !== "system").slice(-this.maxMessages);
+      this.cache = [...system, ...rest];
+    }
+
+    try {
+      const db = await this.getDb();
+      const doc: ConvMessageDoc = {
+        sessionId: this.sessionId,
+        seq: this.seq++,
+        role: message.role,
+        content: message.content,
+        name: message.name,
+        tool_call_id: message.tool_call_id,
+        tool_calls_json: message.tool_calls ? JSON.stringify(message.tool_calls) : undefined,
+        timestamp: new Date().toISOString(),
+      };
+      await db.convMessages.add(doc);
+    } catch (e) {
+      log.error(`Échec écriture KvdexMemory (${this.sessionId})`, e);
+    }
+  }
+
+  getMessages(): Message[] {
+    return [...this.cache];
+  }
+
+  getRecentMessages(count: number): Message[] {
+    return this.cache.slice(-count);
+  }
+
+  async clear(): Promise<void> {
+    this.cache = [];
+    this.seq = 0;
+    try {
+      const db = await this.getDb();
+      await db.convMessages.deleteMany({
+        filter: (doc) => doc.value.sessionId === this.sessionId,
+      });
+    } catch (e) {
+      log.error(`Échec clear KvdexMemory (${this.sessionId})`, e);
+    }
+  }
+
+  get count(): number {
+    return this.cache.length;
+  }
+
+  async remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
+    try {
+      const db = await this.getDb();
+      const doc: LongTermDoc = {
+        topic: fact.topic,
+        content: fact.content,
+        source: fact.source,
+        confidence: fact.confidence,
+        timestamp: new Date().toISOString(),
+      };
+      await db.longTermFacts.add(doc);
+      log.debug(`Fait mémorisé [${fact.topic}]: ${fact.content.slice(0, 80)}`);
+    } catch (e) {
+      log.error(`Échec remember (${fact.topic})`, e);
+    }
+  }
+
+  async recall(topic: string, limit = 10): Promise<LongTermFact[]> {
+    try {
+      const db = await this.getDb();
+      const result = await db.longTermFacts.findBySecondaryIndex("topic", topic, { limit });
+      return result.result
+        .filter((d) => d.value != null)
+        .map((d) => ({
+          topic: d.value!.topic,
+          content: d.value!.content,
+          source: d.value!.source as LongTermFact["source"],
+          confidence: d.value!.confidence,
+          timestamp: d.value!.timestamp,
+        }));
+    } catch (e) {
+      log.error(`Échec recall (${topic})`, e);
+      return [];
+    }
+  }
+
+  async listTopics(): Promise<string[]> {
+    try {
+      const db = await this.getDb();
+      const all = await db.longTermFacts.getMany();
+      const topics = new Set<string>();
+      for (const doc of all.result) {
+        if (doc.value?.topic) topics.add(doc.value.topic);
+      }
+      return [...topics].sort();
+    } catch (e) {
+      log.error("Échec listTopics", e);
+      return [];
+    }
+  }
+
+  async forgetTopic(topic: string): Promise<void> {
+    try {
+      const db = await this.getDb();
+      await db.longTermFacts.deleteMany({
+        filter: (doc) => doc.value.topic === topic,
+      });
+      log.debug(`Faits oubliés [${topic}]`);
+    } catch (e) {
+      log.error(`Échec forgetTopic (${topic})`, e);
+    }
+  }
+
+  close(): void {
+    if (this.kv) {
+      this.kv.close();
+      this.kv = null;
+      this.db = null;
+    }
+  }
+}

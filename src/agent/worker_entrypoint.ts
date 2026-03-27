@@ -8,7 +8,7 @@
  */
 
 import { AgentLoop } from "./loop.ts";
-import { Memory } from "./memory.ts";
+import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
@@ -92,7 +92,7 @@ broadcast.onmessage = (e: MessageEvent) => {
 function createAgentLoop(sessionId: string, model?: string, traceId?: string): AgentLoop {
   if (!config) throw new AgentError("WORKER_NOT_INITIALIZED", { agentId }, "Worker has not received init message");
 
-  const memory = new Memory(sessionId, 100, kvPrivatePath);
+  const memory = new KvdexMemory(agentId, sessionId, 100, kvPrivatePath);
   const peers = config.agents.registry?.[agentId]?.peers ?? [];
   const sandboxConfig = config.agents.registry?.[agentId]?.sandbox ?? config.agents.defaults?.sandbox;
   return new AgentLoop(

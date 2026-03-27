@@ -9,6 +9,10 @@
 export { AgentLoop } from "./src/agent/loop.ts";
 export { AgentRuntime } from "./src/agent/runtime.ts";
 export { Memory } from "./src/agent/memory.ts";
+export { KvdexMemory } from "./src/agent/memory_kvdex.ts";
+export type { LongTermFact, MemoryPort } from "./src/agent/memory_port.ts";
+export { WorkspaceLoader } from "./src/agent/workspace.ts";
+export type { AgentWorkspace } from "./src/agent/workspace.ts";
 export { ContextBuilder } from "./src/agent/context.ts";
 export { SkillsLoader } from "./src/agent/skills.ts";
 export { CronManager } from "./src/agent/cron.ts";

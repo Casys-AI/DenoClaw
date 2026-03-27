@@ -21,6 +21,37 @@ export function getCronJobsPath(): string {
   return join(getHomeDir(), "cron.json");
 }
 
+export function getAgentsDir(): string {
+  return join(getHomeDir(), "agents");
+}
+
+export function validateAgentId(agentId: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(agentId)) {
+    throw new Error(`Invalid agent ID "${agentId}" — must be alphanumeric with hyphens/underscores/dots`);
+  }
+}
+
+export function getAgentDir(agentId: string): string {
+  validateAgentId(agentId);
+  return join(getAgentsDir(), agentId);
+}
+
+export function getAgentConfigPath(agentId: string): string {
+  return join(getAgentDir(agentId), "agent.json");
+}
+
+export function getAgentSoulPath(agentId: string): string {
+  return join(getAgentDir(agentId), "soul.md");
+}
+
+export function getAgentSkillsDir(agentId: string): string {
+  return join(getAgentDir(agentId), "skills");
+}
+
+export function getAgentMemoryPath(agentId: string): string {
+  return join(getAgentDir(agentId), "memory.db");
+}
+
 export function generateId(): string {
   return crypto.randomUUID();
 }

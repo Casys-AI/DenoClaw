@@ -1,11 +1,13 @@
 import type { Message } from "../shared/types.ts";
+import type { LongTermFact, MemoryPort } from "./memory_port.ts";
 import { log } from "../shared/log.ts";
 
 /**
- * KV-backed conversation memory.
- * Uses Deno KV instead of JSON files — works locally and on Deno Deploy.
+ * KV-backed conversation memory (raw Deno KV, sans kvdex).
+ * Implémente MemoryPort — utilisable comme fallback léger.
+ * Long-term memory = no-op (pas d'indexation dans cette implem).
  */
-export class Memory {
+export class Memory implements MemoryPort {
   private sessionId: string;
   private messages: Message[] = [];
   private maxMessages: number;
@@ -87,4 +89,10 @@ export class Memory {
       this.kv = null;
     }
   }
+
+  // Long-term memory — no-op dans cette implem (pas d'indexation raw KV)
+  remember(_fact: Omit<LongTermFact, "timestamp">): Promise<void> { return Promise.resolve(); }
+  recall(_topic: string, _limit?: number): Promise<LongTermFact[]> { return Promise.resolve([]); }
+  listTopics(): Promise<string[]> { return Promise.resolve([]); }
+  forgetTopic(_topic: string): Promise<void> { return Promise.resolve(); }
 }

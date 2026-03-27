@@ -1,5 +1,6 @@
 import type { Config } from "./types.ts";
 import { ConfigError, ensureDir, fileExists, getConfigPath, getHomeDir, log } from "../shared/mod.ts";
+import { WorkspaceLoader } from "../agent/workspace.ts";
 
 function createDefaultConfig(): Config {
   return {
@@ -70,9 +71,26 @@ export async function saveConfig(config: Config): Promise<void> {
   log.info("Config sauvegardée", configPath);
 }
 
+async function mergeWorkspaceAgents(config: Config): Promise<Config> {
+  try {
+    const wsRegistry = await WorkspaceLoader.buildRegistry();
+    if (Object.keys(wsRegistry).length === 0) return config;
+
+    const merged = { ...config };
+    merged.agents = {
+      ...merged.agents,
+      registry: { ...(merged.agents.registry || {}), ...wsRegistry },
+    };
+    return merged;
+  } catch {
+    return config;
+  }
+}
+
 export async function getConfig(): Promise<Config> {
   const config = await loadConfig();
-  return mergeEnvConfig(config);
+  const withEnv = mergeEnvConfig(config);
+  return mergeWorkspaceAgents(withEnv);
 }
 
 export async function getConfigOrDefault(): Promise<Config> {
@@ -81,7 +99,7 @@ export async function getConfigOrDefault(): Promise<Config> {
   } catch (e) {
     if (e instanceof ConfigError) {
       log.debug("Pas de config, utilisation des valeurs par défaut");
-      return mergeEnvConfig(createDefaultConfig());
+      return mergeWorkspaceAgents(mergeEnvConfig(createDefaultConfig()));
     }
     throw e;
   }

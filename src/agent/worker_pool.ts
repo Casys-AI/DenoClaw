@@ -1,7 +1,8 @@
 import type { AgentResponse } from "./types.ts";
 import type { WorkerConfig, WorkerRequest, WorkerResponse } from "./worker_protocol.ts";
 import { log } from "../shared/log.ts";
-import { generateId } from "../shared/helpers.ts";
+import { generateId, getAgentDir, getAgentMemoryPath } from "../shared/helpers.ts";
+import { ensureDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 
 interface PendingRequest {
@@ -61,6 +62,8 @@ export class WorkerPool {
       throw new AgentError("NO_AGENTS", {}, "Add agents to config.agents.registry first");
     }
     await Deno.mkdir(DATA_DIR, { recursive: true });
+    // Ensure each agent's workspace dir exists (for memory.db)
+    await Promise.all(agentIds.map((id) => ensureDir(getAgentDir(id))));
 
     const readyPromises: Promise<void>[] = [];
     for (const agentId of agentIds) {
@@ -121,7 +124,7 @@ export class WorkerPool {
         agentId,
         config: this.config,
         kvPaths: {
-          private: `${DATA_DIR}/${agentId}.db`,
+          private: getAgentMemoryPath(agentId),
           shared: `${DATA_DIR}/shared.db`,
         },
       };

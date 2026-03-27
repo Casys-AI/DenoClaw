@@ -1,0 +1,144 @@
+import { assertEquals, assertGreater } from "@std/assert";
+import { KvdexMemory } from "./memory_kvdex.ts";
+
+const testOpts = { sanitizeResources: false, sanitizeOps: false };
+
+Deno.test({
+  name: "KvdexMemory stores and retrieves messages",
+  async fn() {
+    const mem = new KvdexMemory("test", `sess-${crypto.randomUUID()}`, 10);
+    await mem.load();
+
+    await mem.addMessage({ role: "user", content: "hello" });
+    await mem.addMessage({ role: "assistant", content: "hi back" });
+
+    assertEquals(mem.count, 2);
+    assertEquals(mem.getMessages()[0].content, "hello");
+    assertEquals(mem.getMessages()[1].content, "hi back");
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory trims old messages beyond maxMessages",
+  async fn() {
+    const mem = new KvdexMemory("test", `sess-trim-${crypto.randomUUID()}`, 3);
+    await mem.load();
+
+    for (let i = 0; i < 5; i++) {
+      await mem.addMessage({ role: "user", content: `msg-${i}` });
+    }
+
+    const msgs = mem.getMessages();
+    assertEquals(msgs.length, 3);
+    assertEquals(msgs[0].content, "msg-2");
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory keeps system messages during trim",
+  async fn() {
+    const mem = new KvdexMemory("test", `sess-sys-${crypto.randomUUID()}`, 3);
+    await mem.load();
+
+    await mem.addMessage({ role: "system", content: "system prompt" });
+    for (let i = 0; i < 5; i++) {
+      await mem.addMessage({ role: "user", content: `msg-${i}` });
+    }
+
+    const msgs = mem.getMessages();
+    assertEquals(msgs[0].role, "system");
+    assertEquals(msgs[0].content, "system prompt");
+    assertGreater(msgs.length, 1);
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory clear empties all messages",
+  async fn() {
+    const mem = new KvdexMemory("test", `sess-clear-${crypto.randomUUID()}`, 10);
+    await mem.load();
+
+    await mem.addMessage({ role: "user", content: "hello" });
+    assertEquals(mem.count, 1);
+
+    await mem.clear();
+    assertEquals(mem.count, 0);
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory remember and recall long-term facts",
+  async fn() {
+    const dir = await Deno.makeTempDir();
+    const mem = new KvdexMemory("test", `sess-lt-${crypto.randomUUID()}`, 10, `${dir}/test.db`);
+    await mem.load();
+
+    await mem.remember({ topic: "color", content: "the sky is blue", source: "user" });
+    await mem.remember({ topic: "color", content: "grass is green", source: "agent" });
+    await mem.remember({ topic: "math", content: "2+2=4" });
+
+    const colors = await mem.recall("color");
+    assertEquals(colors.length, 2);
+    assertEquals(colors[0].topic, "color");
+
+    const math = await mem.recall("math");
+    assertEquals(math.length, 1);
+    assertEquals(math[0].content, "2+2=4");
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory forgetTopic removes facts",
+  async fn() {
+    const dir = await Deno.makeTempDir();
+    const mem = new KvdexMemory("test", `sess-forget-${crypto.randomUUID()}`, 10, `${dir}/test.db`);
+    await mem.load();
+
+    await mem.remember({ topic: "temp", content: "ephemeral fact" });
+    assertEquals((await mem.recall("temp")).length, 1);
+
+    await mem.forgetTopic("temp");
+    assertEquals((await mem.recall("temp")).length, 0);
+
+    mem.close();
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name: "KvdexMemory cross-session isolation",
+  async fn() {
+    const id = crypto.randomUUID();
+    const mem1 = new KvdexMemory("test", `sess-a-${id}`, 10);
+    const mem2 = new KvdexMemory("test", `sess-b-${id}`, 10);
+    await mem1.load();
+    await mem2.load();
+
+    await mem1.addMessage({ role: "user", content: "for session A" });
+    await mem2.addMessage({ role: "user", content: "for session B" });
+
+    assertEquals(mem1.count, 1);
+    assertEquals(mem1.getMessages()[0].content, "for session A");
+    assertEquals(mem2.count, 1);
+    assertEquals(mem2.getMessages()[0].content, "for session B");
+
+    mem1.close();
+    mem2.close();
+  },
+  ...testOpts,
+});

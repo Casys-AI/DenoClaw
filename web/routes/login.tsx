@@ -5,14 +5,20 @@ export default function Login() {
         <div class="card-body items-center text-center">
           {/* Logo */}
           <img src="/logo.png" alt="DenoClaw" class="w-20 h-20 mb-2" />
-          <h1 class="font-display text-2xl font-bold tracking-tight">DenoClaw</h1>
-          <p class="text-sm text-neutral-content mb-4">Agent Orchestration Dashboard</p>
+          <h1 class="font-display text-2xl font-bold tracking-tight">
+            DenoClaw
+          </h1>
+          <p class="text-sm text-neutral-content mb-4">
+            Agent Orchestration Dashboard
+          </p>
 
           {/* Login form */}
           <form class="w-full space-y-4" method="POST" action="/login">
             <div class="form-control w-full">
               <label class="label">
-                <span class="label-text text-xs font-data uppercase tracking-wider">Instance URL</span>
+                <span class="label-text text-xs font-data uppercase tracking-wider">
+                  Instance URL
+                </span>
               </label>
               <input
                 type="url"
@@ -24,7 +30,9 @@ export default function Login() {
             </div>
             <div class="form-control w-full">
               <label class="label">
-                <span class="label-text text-xs font-data uppercase tracking-wider">API Token</span>
+                <span class="label-text text-xs font-data uppercase tracking-wider">
+                  API Token
+                </span>
               </label>
               <input
                 type="password"
@@ -33,7 +41,10 @@ export default function Login() {
                 class="input input-bordered w-full font-data text-sm"
               />
             </div>
-            <button type="submit" class="btn w-full gradient-deno text-white border-none">
+            <button
+              type="submit"
+              class="btn w-full gradient-deno text-white border-none"
+            >
               Connect
             </button>
           </form>
@@ -41,7 +52,7 @@ export default function Login() {
           <div class="divider text-xs text-neutral-content">OR</div>
 
           {/* OAuth placeholder */}
-          <button class="btn btn-outline btn-sm w-full gap-2" disabled>
+          <button type="button" class="btn btn-outline btn-sm w-full gap-2" disabled>
             Sign in with Deno Deploy
             <span class="badge badge-xs badge-neutral">soon</span>
           </button>

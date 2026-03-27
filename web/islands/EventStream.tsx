@@ -53,7 +53,9 @@ export default function EventStream({ brokerUrl }: EventStreamProps) {
               // Refetch full agent list
               fetch(`${brokerUrl}/agents`)
                 .then((r) => r.json())
-                .then((agents) => { agentStatuses.value = agents; })
+                .then((agents) => {
+                  agentStatuses.value = agents;
+                })
                 .catch(() => {});
               break;
 
@@ -83,7 +85,11 @@ export default function EventStream({ brokerUrl }: EventStreamProps) {
 
   return (
     <div class="fixed bottom-4 right-4">
-      <span class={`badge badge-sm ${connected.value ? "badge-success" : "badge-error"}`}>
+      <span
+        class={`badge badge-sm ${
+          connected.value ? "badge-success" : "badge-error"
+        }`}
+      >
         {connected.value ? "Live" : "Disconnected"}
       </span>
     </div>

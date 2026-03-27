@@ -13,7 +13,10 @@ export function NavBar({ currentPath }: { currentPath: string }) {
   return (
     <div class="navbar bg-base-200 px-4">
       <div class="navbar-start">
-        <a href={`${BASE}/overview`} class="btn btn-ghost font-display text-xl font-bold tracking-tight gap-2">
+        <a
+          href={`${BASE}/overview`}
+          class="btn btn-ghost font-display text-xl font-bold tracking-tight gap-2"
+        >
           <img src="/logo.png" alt="DenoClaw" class="w-8 h-8" />
           DenoClaw
         </a>
@@ -21,12 +24,15 @@ export function NavBar({ currentPath }: { currentPath: string }) {
       <div class="navbar-center">
         <ul class="menu menu-horizontal gap-1 px-1">
           {NAV_ITEMS.map((item) => {
-            const isActive = currentPath === item.href || currentPath.startsWith(item.href + "/");
+            const isActive = currentPath === item.href ||
+              currentPath.startsWith(item.href + "/");
             return (
               <li key={item.href}>
                 <a
                   href={item.href}
-                  class={isActive ? "active nav-active font-medium" : "text-neutral-content"}
+                  class={isActive
+                    ? "active nav-active font-medium"
+                    : "text-neutral-content"}
                 >
                   {item.label}
                 </a>

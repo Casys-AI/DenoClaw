@@ -24,28 +24,32 @@ export default function Tunnels({ data }: { data: HealthResponse | null }) {
         </div>
       </div>
 
-      {tunnels.length === 0 ? (
-        <div class="alert">No tunnels connected.</div>
-      ) : (
-        <div class="overflow-x-auto">
-          <table class="table table-zebra bg-base-100 shadow rounded-box">
-            <thead>
-              <tr>
-                <th>Tunnel ID</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tunnels.map((id) => (
-                <tr key={id}>
-                  <td class="font-mono text-sm">{id}</td>
-                  <td><span class="badge badge-success badge-sm">connected</span></td>
+      {tunnels.length === 0
+        ? <div class="alert">No tunnels connected.</div>
+        : (
+          <div class="overflow-x-auto">
+            <table class="table table-zebra bg-base-100 shadow rounded-box">
+              <thead>
+                <tr>
+                  <th>Tunnel ID</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {tunnels.map((id) => (
+                  <tr key={id}>
+                    <td class="font-mono text-sm">{id}</td>
+                    <td>
+                      <span class="badge badge-success badge-sm">
+                        connected
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
     </div>
   );
 }

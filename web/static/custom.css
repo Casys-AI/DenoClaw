@@ -18,11 +18,11 @@ body {
 
 /* Deno Deploy gradient */
 .gradient-deno {
-  background: linear-gradient(135deg, #00C2FF, #0055FF);
+  background: linear-gradient(135deg, #00c2ff, #0055ff);
 }
 
 .text-gradient-deno {
-  background: linear-gradient(135deg, #00C2FF, #0055FF);
+  background: linear-gradient(135deg, #00c2ff, #0055ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -30,8 +30,12 @@ body {
 
 /* Live pulse indicator */
 @keyframes pulse-live {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 .pulse-live {
   animation: pulse-live 2s ease-in-out infinite;
@@ -48,5 +52,5 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, #00C2FF, #0055FF);
+  background: linear-gradient(90deg, #00c2ff, #0055ff);
 }

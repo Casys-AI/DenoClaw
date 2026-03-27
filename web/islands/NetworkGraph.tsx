@@ -22,7 +22,9 @@ const STATUS_COLORS: Record<string, string> = {
   stopped: "#ef4444",
 };
 
-export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }: NetworkGraphProps) {
+export default function NetworkGraph(
+  { agents, tunnels, brokerUrl: _brokerUrl }: NetworkGraphProps,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Agent | null>(null);
   const [cyLoaded, setCyLoaded] = useState(false);
@@ -31,7 +33,8 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
   useEffect(() => {
     if (typeof window !== "undefined" && !("cytoscape" in window)) {
       const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js";
+      script.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js";
       script.onload = () => setCyLoaded(true);
       document.head.appendChild(script);
     } else {
@@ -72,10 +75,18 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
     // Tunnel nodes
     for (const tunnelId of tunnels) {
       elements.push({
-        data: { id: `tunnel-${tunnelId}`, label: tunnelId.slice(0, 8), type: "tunnel" },
+        data: {
+          id: `tunnel-${tunnelId}`,
+          label: tunnelId.slice(0, 8),
+          type: "tunnel",
+        },
       });
       elements.push({
-        data: { source: `tunnel-${tunnelId}`, target: "broker", type: "tunnel-broker" },
+        data: {
+          source: `tunnel-${tunnelId}`,
+          target: "broker",
+          type: "tunnel-broker",
+        },
       });
     }
 
@@ -165,11 +176,15 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
     }
 
     // Click handler
-    cyInstance.on("tap", "node[type='agent']", (evt: { target: { id: () => string; data: (k: string) => string } }) => {
-      const id = evt.target.id();
-      const agent = agents.find((a) => a.agentId === id);
-      if (agent) setSelected(agent);
-    });
+    cyInstance.on(
+      "tap",
+      "node[type='agent']",
+      (evt: { target: { id: () => string; data: (k: string) => string } }) => {
+        const id = evt.target.id();
+        const agent = agents.find((a) => a.agentId === id);
+        if (agent) setSelected(agent);
+      },
+    );
 
     cyInstance.on("tap", "node[type='broker']", () => setSelected(null));
 
@@ -197,7 +212,11 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
             <span class="w-3 h-3 rounded-full bg-error" /> Stopped
           </div>
           <div class="flex items-center gap-1">
-            <span class="w-3 h-3 gradient-deno" style="clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)" /> Broker
+            <span
+              class="w-3 h-3 gradient-deno"
+              style="clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"
+            />{" "}
+            Broker
           </div>
           <div class="flex items-center gap-1">
             <span class="w-3 h-3 bg-neutral" /> Tunnel
@@ -211,13 +230,29 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
           <div class="card bg-base-200">
             <div class="card-body p-4">
               <div class="flex items-center justify-between">
-                <h3 class="font-display font-bold text-lg">{selected.agentId}</h3>
-                <button class="btn btn-ghost btn-xs" onClick={() => setSelected(null)}>✕</button>
+                <h3 class="font-display font-bold text-lg">
+                  {selected.agentId}
+                </h3>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs"
+                  onClick={() => setSelected(null)}
+                >
+                  ✕
+                </button>
               </div>
               <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                   <span class="text-neutral-content">Status</span>
-                  <span class={`badge badge-sm ${selected.status === "running" ? "badge-success" : selected.status === "stopped" ? "badge-error" : "badge-info"}`}>
+                  <span
+                    class={`badge badge-sm ${
+                      selected.status === "running"
+                        ? "badge-success"
+                        : selected.status === "stopped"
+                        ? "badge-error"
+                        : "badge-info"
+                    }`}
+                  >
                     {selected.status}
                   </span>
                 </div>
@@ -234,7 +269,12 @@ export default function NetworkGraph({ agents, tunnels, brokerUrl: _brokerUrl }:
                   </div>
                 )}
               </div>
-              <a href={`/agents/${selected.agentId}`} class="btn btn-primary btn-sm mt-2">View Details →</a>
+              <a
+                href={`/agents/${selected.agentId}`}
+                class="btn btn-primary btn-sm mt-2"
+              >
+                View Details →
+              </a>
             </div>
           </div>
         </div>

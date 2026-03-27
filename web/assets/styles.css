@@ -16,13 +16,13 @@
   --color-neutral: #1a1a1a;
   --color-neutral-content: #ababab;
 
-  --color-primary: #00C2FF;
+  --color-primary: #00c2ff;
   --color-primary-content: #001e2b;
 
-  --color-secondary: #0055FF;
+  --color-secondary: #0055ff;
   --color-secondary-content: #ffffff;
 
-  --color-accent: #00C2FF;
+  --color-accent: #00c2ff;
   --color-accent-content: #001e2b;
 
   --color-success: #22c55e;
@@ -58,11 +58,11 @@ body {
 
 /* Deno Deploy gradient */
 .gradient-deno {
-  background: linear-gradient(135deg, #00C2FF, #0055FF);
+  background: linear-gradient(135deg, #00c2ff, #0055ff);
 }
 
 .text-gradient-deno {
-  background: linear-gradient(135deg, #00C2FF, #0055FF);
+  background: linear-gradient(135deg, #00c2ff, #0055ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -70,8 +70,12 @@ body {
 
 /* Live pulse */
 @keyframes pulse-live {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 .pulse-live {
   animation: pulse-live 2s ease-in-out infinite;
@@ -88,7 +92,7 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, #00C2FF, #0055FF);
+  background: linear-gradient(90deg, #00c2ff, #0055ff);
 }
 
 /* Google fonts */

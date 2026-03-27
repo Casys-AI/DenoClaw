@@ -1,9 +1,18 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
-import { getAgent, getAgentMetrics, getBrokerUrl } from "../../lib/api-client.ts";
-import { formatCompact, formatCost, formatLatency, formatRelative } from "../../lib/format.ts";
+import {
+  getAgent,
+  getAgentMetrics,
+  getBrokerUrl,
+} from "../../lib/api-client.ts";
+import {
+  formatCompact,
+  formatCost,
+  formatLatency,
+  formatRelative,
+} from "../../lib/format.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
-import type { AgentStatusEntry, AgentMetrics } from "../../lib/types.ts";
+import type { AgentMetrics, AgentStatusEntry } from "../../lib/types.ts";
 import FlameChart from "../../islands/FlameChart.tsx";
 
 interface TraceRoot {
@@ -51,16 +60,23 @@ export const handler = {
     const agentId = ctx.params.id ?? "unknown";
     const brokerUrl = getBrokerUrl();
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
+    const headers: HeadersInit = token
+      ? { "Authorization": `Bearer ${token}` }
+      : {};
 
-    const [agent, metrics] = await Promise.all([getAgent(agentId), getAgentMetrics(agentId)]);
+    const [agent, metrics] = await Promise.all([
+      getAgent(agentId),
+      getAgentMetrics(agentId),
+    ]);
 
     // Fetch recent traces for this agent
     let traces: TraceRoot[] = [];
     let latestSpans: Span[] = [];
     let latestTraceDuration = 0;
     try {
-      const res = await fetch(`${brokerUrl}/agents/${agentId}/traces?limit=5`, { headers });
+      const res = await fetch(`${brokerUrl}/agents/${agentId}/traces?limit=5`, {
+        headers,
+      });
       if (res.ok) {
         const body = await res.json();
         traces = Array.isArray(body) ? body : [];
@@ -68,10 +84,15 @@ export const handler = {
 
       // Load spans for the most recent trace
       if (traces.length > 0) {
-        const spanRes = await fetch(`${brokerUrl}/traces/${traces[0].traceId}/spans`, { headers });
+        const spanRes = await fetch(
+          `${brokerUrl}/traces/${traces[0].traceId}/spans`,
+          { headers },
+        );
         if (spanRes.ok) latestSpans = await spanRes.json();
         const start = new Date(traces[0].startedAt).getTime();
-        const end = traces[0].endedAt ? new Date(traces[0].endedAt).getTime() : Date.now();
+        const end = traces[0].endedAt
+          ? new Date(traces[0].endedAt).getTime()
+          : Date.now();
         latestTraceDuration = end - start;
       }
     } catch { /* traces not available */ }
@@ -79,25 +100,47 @@ export const handler = {
     // Fetch tool breakdown
     let toolBreakdown: ToolBreakdown[] = [];
     try {
-      const res = await fetch(`${brokerUrl}/stats/tools?agent=${agentId}`, { headers });
+      const res = await fetch(`${brokerUrl}/stats/tools?agent=${agentId}`, {
+        headers,
+      });
       if (res.ok) {
         const body = await res.json();
         toolBreakdown = Array.isArray(body) ? body : [];
       }
     } catch { /* not available */ }
 
-    return page({ agent, metrics, agentId, traces, latestSpans, latestTraceDuration, toolBreakdown } as AgentDetailData);
+    return page(
+      {
+        agent,
+        metrics,
+        agentId,
+        traces,
+        latestSpans,
+        latestTraceDuration,
+        toolBreakdown,
+      } as AgentDetailData,
+    );
   },
 };
 
 export default function AgentDetail({ data }: { data: AgentDetailData }) {
-  const { agent, metrics, agentId, traces, latestSpans, latestTraceDuration, toolBreakdown } = data;
+  const {
+    agent,
+    metrics,
+    agentId,
+    traces,
+    latestSpans,
+    latestTraceDuration,
+    toolBreakdown,
+  } = data;
 
   if (!agent && !metrics) {
     return (
       <div class="space-y-4">
         <a href="/agents" class="btn btn-ghost btn-sm">&larr; Back</a>
-        <div role="alert" class="alert alert-error">Agent "{agentId}" not found.</div>
+        <div role="alert" class="alert alert-error">
+          Agent "{agentId}" not found.
+        </div>
       </div>
     );
   }
@@ -108,17 +151,29 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
       <div class="flex items-center gap-4">
         <a href="/agents" class="btn btn-ghost btn-sm">&larr;</a>
         <div>
-          <div class="text-xs text-neutral-content font-data">Agents / {agentId}</div>
+          <div class="text-xs text-neutral-content font-data">
+            Agents / {agentId}
+          </div>
           <div class="flex items-center gap-3">
             <h1 class="text-3xl font-display font-bold">{agentId}</h1>
             {agent && <StatusBadge status={agent.status} size="md" />}
           </div>
         </div>
         <div class="ml-auto text-right">
-          {agent?.model && <div class="font-data text-sm text-neutral-content">{agent.model}</div>}
-          {agent?.startedAt && <div class="font-data text-xs text-neutral-content">Started {formatRelative(agent.startedAt)}</div>}
+          {agent?.model && (
+            <div class="font-data text-sm text-neutral-content">
+              {agent.model}
+            </div>
+          )}
+          {agent?.startedAt && (
+            <div class="font-data text-xs text-neutral-content">
+              Started {formatRelative(agent.startedAt)}
+            </div>
+          )}
           {agent?.activeTask && (
-            <div class="font-data text-xs text-primary">Active: {agent.activeTask.taskId.slice(0, 16)}...</div>
+            <div class="font-data text-xs text-primary">
+              Active: {agent.activeTask.taskId.slice(0, 16)}...
+            </div>
           )}
         </div>
       </div>
@@ -128,25 +183,38 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
         <div class="stats stats-vertical lg:stats-horizontal w-full bg-base-200">
           <div class="stat">
             <div class="stat-title font-display text-xs">LLM PERFORMANCE</div>
-            <div class="stat-value font-data text-2xl">{formatCompact(metrics.llm.calls)}</div>
+            <div class="stat-value font-data text-2xl">
+              {formatCompact(metrics.llm.calls)}
+            </div>
             <div class="stat-desc">
-              {formatCost(metrics.llm.estimatedCostUsd)} · {formatLatency(metrics.llm.avgLatencyMs)} avg
+              {formatCost(metrics.llm.estimatedCostUsd)} ·{" "}
+              {formatLatency(metrics.llm.avgLatencyMs)} avg
             </div>
             <div class="stat-desc font-data text-xs">
-              {formatCompact(metrics.llm.promptTokens)} prompt / {formatCompact(metrics.llm.completionTokens)} completion
+              {formatCompact(metrics.llm.promptTokens)} prompt /{" "}
+              {formatCompact(metrics.llm.completionTokens)} completion
             </div>
           </div>
           <div class="stat">
             <div class="stat-title font-display text-xs">TOOL UTILIZATION</div>
-            <div class="stat-value font-data text-2xl">{formatCompact(metrics.tools.calls)}</div>
+            <div class="stat-value font-data text-2xl">
+              {formatCompact(metrics.tools.calls)}
+            </div>
             <div class="stat-desc">
               {metrics.tools.calls > 0
-                ? `${Math.round((metrics.tools.successes / metrics.tools.calls) * 100)}% success`
+                ? `${
+                  Math.round(
+                    (metrics.tools.successes / metrics.tools.calls) * 100,
+                  )
+                }% success`
                 : "no calls"}
-              {" · "}{formatLatency(metrics.tools.avgLatencyMs)} avg
+              {" · "}
+              {formatLatency(metrics.tools.avgLatencyMs)} avg
             </div>
             {metrics.tools.failures > 0 && (
-              <div class="stat-desc text-error font-data">{metrics.tools.failures} failures</div>
+              <div class="stat-desc text-error font-data">
+                {metrics.tools.failures} failures
+              </div>
             )}
           </div>
           <div class="stat">
@@ -155,12 +223,17 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
               {metrics.a2a.messagesSent + metrics.a2a.messagesReceived}
             </div>
             <div class="stat-desc">
-              {metrics.a2a.messagesSent} sent · {metrics.a2a.messagesReceived} received
+              {metrics.a2a.messagesSent} sent · {metrics.a2a.messagesReceived}
+              {" "}
+              received
             </div>
             {metrics.a2a.peersContacted.length > 0 && (
               <div class="stat-desc">
-                Peers: {metrics.a2a.peersContacted.map((p) => (
-                  <span key={p} class="badge badge-sm badge-ghost mr-1">{p}</span>
+                Peers:{" "}
+                {metrics.a2a.peersContacted.map((p) => (
+                  <span key={p} class="badge badge-sm badge-ghost mr-1">
+                    {p}
+                  </span>
                 ))}
               </div>
             )}
@@ -176,7 +249,9 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
               <h2 class="card-title font-display">
                 Execution Trace
                 {traces.length > 0 && (
-                  <span class="badge badge-sm badge-primary font-data">{traces[0].traceId.slice(0, 8)}</span>
+                  <span class="badge badge-sm badge-primary font-data">
+                    {traces[0].traceId.slice(0, 8)}
+                  </span>
                 )}
               </h2>
               <FlameChart
@@ -193,21 +268,36 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {/* Recent traces */}
           <div class="card bg-base-200">
             <div class="card-body p-4">
-              <h3 class="font-display text-sm text-neutral-content">RECENT TRACES</h3>
-              {traces.length === 0 ? (
-                <div class="text-xs text-neutral-content">No traces yet.</div>
-              ) : (
-                <ul class="space-y-2">
-                  {traces.map((t) => (
-                    <li key={t.traceId} class="flex items-center justify-between text-xs">
-                      <span class="font-data text-primary">{t.traceId.slice(0, 12)}...</span>
-                      <span class={`badge badge-xs ${t.status === "completed" ? "badge-success" : t.status === "failed" ? "badge-error" : "badge-info"}`}>
-                        {t.status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <h3 class="font-display text-sm text-neutral-content">
+                RECENT TRACES
+              </h3>
+              {traces.length === 0
+                ? <div class="text-xs text-neutral-content">No traces yet.</div>
+                : (
+                  <ul class="space-y-2">
+                    {traces.map((t) => (
+                      <li
+                        key={t.traceId}
+                        class="flex items-center justify-between text-xs"
+                      >
+                        <span class="font-data text-primary">
+                          {t.traceId.slice(0, 12)}...
+                        </span>
+                        <span
+                          class={`badge badge-xs ${
+                            t.status === "completed"
+                              ? "badge-success"
+                              : t.status === "failed"
+                              ? "badge-error"
+                              : "badge-info"
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
             </div>
           </div>
 
@@ -215,11 +305,18 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {metrics && metrics.a2a.peersContacted.length > 0 && (
             <div class="card bg-base-200">
               <div class="card-body p-4">
-                <h3 class="font-display text-sm text-neutral-content">CONNECTED PEERS</h3>
+                <h3 class="font-display text-sm text-neutral-content">
+                  CONNECTED PEERS
+                </h3>
                 <ul class="space-y-1">
                   {metrics.a2a.peersContacted.map((peer) => (
                     <li key={peer}>
-                      <a href={`/agents/${peer}`} class="link link-primary text-sm">{peer}</a>
+                      <a
+                        href={`/agents/${peer}`}
+                        class="link link-primary text-sm"
+                      >
+                        {peer}
+                      </a>
                     </li>
                   ))}
                 </ul>
@@ -231,16 +328,27 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {toolBreakdown.length > 0 && (
             <div class="card bg-base-200">
               <div class="card-body p-4">
-                <h3 class="font-display text-sm text-neutral-content">TOOL BREAKDOWN</h3>
+                <h3 class="font-display text-sm text-neutral-content">
+                  TOOL BREAKDOWN
+                </h3>
                 <div class="space-y-2">
                   {toolBreakdown.map((t) => {
-                    const failRate = t.calls > 0 ? Math.round((t.failures / t.calls) * 100) : 0;
+                    const failRate = t.calls > 0
+                      ? Math.round((t.failures / t.calls) * 100)
+                      : 0;
                     return (
-                      <div key={t.tool} class="flex items-center justify-between text-xs">
+                      <div
+                        key={t.tool}
+                        class="flex items-center justify-between text-xs"
+                      >
                         <span class="font-data">{t.tool}</span>
                         <div class="flex items-center gap-2">
                           <span class="font-data">{t.calls} calls</span>
-                          {failRate > 0 && <span class="text-error font-data">{failRate}% fail</span>}
+                          {failRate > 0 && (
+                            <span class="text-error font-data">
+                              {failRate}% fail
+                            </span>
+                          )}
                         </div>
                       </div>
                     );

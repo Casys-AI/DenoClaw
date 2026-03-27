@@ -5,6 +5,8 @@ export const app = new App()
   .fsRoutes();
 
 /** Export handler for composition with Gateway (no Deno.serve). */
-export function createDashboardHandler(): (req: Request) => Response | Promise<Response> {
+export function createDashboardHandler(): (
+  req: Request,
+) => Response | Promise<Response> {
   return app.handler();
 }

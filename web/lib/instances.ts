@@ -25,7 +25,8 @@ export function getInstances(): Instance[] {
   }
 
   if (!_instances || _instances.length === 0) {
-    const single = Deno.env.get("DENOCLAW_BROKER_URL") || "http://localhost:3000";
+    const single = Deno.env.get("DENOCLAW_BROKER_URL") ||
+      "http://localhost:3000";
     _instances = [{ name: "local", url: single }];
   }
 

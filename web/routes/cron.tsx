@@ -16,40 +16,48 @@ export default function Cron({ data }: { data: CronJob[] }) {
     <div class="space-y-6">
       <h1 class="text-2xl font-bold">Cron Jobs</h1>
 
-      {data.length === 0 ? (
-        <div class="alert">No cron jobs configured.</div>
-      ) : (
-        <div class="overflow-x-auto">
-          <table class="table table-zebra bg-base-100 shadow rounded-box">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Schedule</th>
-                <th>Task</th>
-                <th>Enabled</th>
-                <th>Last Run</th>
-                <th>Next Run</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((job) => (
-                <tr key={job.id}>
-                  <td class="font-medium">{job.name}</td>
-                  <td class="font-mono text-sm">{job.schedule}</td>
-                  <td class="text-sm">{job.task}</td>
-                  <td>
-                    <span class={`badge badge-sm ${job.enabled ? "badge-success" : "badge-ghost"}`}>
-                      {job.enabled ? "on" : "off"}
-                    </span>
-                  </td>
-                  <td class="text-sm">{job.lastRun ? formatRelative(job.lastRun) : "—"}</td>
-                  <td class="text-sm">{job.nextRun ? formatRelative(job.nextRun) : "—"}</td>
+      {data.length === 0
+        ? <div class="alert">No cron jobs configured.</div>
+        : (
+          <div class="overflow-x-auto">
+            <table class="table table-zebra bg-base-100 shadow rounded-box">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Schedule</th>
+                  <th>Task</th>
+                  <th>Enabled</th>
+                  <th>Last Run</th>
+                  <th>Next Run</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {data.map((job) => (
+                  <tr key={job.id}>
+                    <td class="font-medium">{job.name}</td>
+                    <td class="font-mono text-sm">{job.schedule}</td>
+                    <td class="text-sm">{job.task}</td>
+                    <td>
+                      <span
+                        class={`badge badge-sm ${
+                          job.enabled ? "badge-success" : "badge-ghost"
+                        }`}
+                      >
+                        {job.enabled ? "on" : "off"}
+                      </span>
+                    </td>
+                    <td class="text-sm">
+                      {job.lastRun ? formatRelative(job.lastRun) : "—"}
+                    </td>
+                    <td class="text-sm">
+                      {job.nextRun ? formatRelative(job.nextRun) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
     </div>
   );
 }

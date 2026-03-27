@@ -8,11 +8,23 @@ export default function App({ Component, url }: PageProps) {
       <html lang="fr" data-theme="black">
         <head>
           <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+          />
           <title>DenoClaw — Login</title>
-          <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-          <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
-          <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+          <link
+            href="https://cdn.jsdelivr.net/npm/daisyui@5"
+            rel="stylesheet"
+            type="text/css"
+          />
+          <link
+            href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css"
+            rel="stylesheet"
+            type="text/css"
+          />
+          <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4">
+          </script>
           <link rel="stylesheet" href="/custom.css" />
         </head>
         <body>
@@ -29,8 +41,16 @@ export default function App({ Component, url }: PageProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>DenoClaw Dashboard</title>
         {/* DaisyUI 5 + Tailwind CSS v4 — CDN */}
-        <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-        <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
+        <link
+          href="https://cdn.jsdelivr.net/npm/daisyui@5"
+          rel="stylesheet"
+          type="text/css"
+        />
+        <link
+          href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css"
+          rel="stylesheet"
+          type="text/css"
+        />
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" />
         {/* Custom overrides */}
         <link rel="stylesheet" href="/custom.css" />

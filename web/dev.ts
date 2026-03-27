@@ -15,5 +15,7 @@ const builder = new Builder({
 if (Deno.args.includes("build")) {
   await builder.build(async () => (await import("./mod.ts")).app);
 } else {
-  await builder.listen(async () => (await import("./mod.ts")).app, { port: 3001 });
+  await builder.listen(async () => (await import("./mod.ts")).app, {
+    port: 3001,
+  });
 }

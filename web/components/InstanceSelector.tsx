@@ -7,7 +7,9 @@ interface Props {
 }
 
 /** Horizontal instance selector bar — DaisyUI tabs. */
-export function InstanceSelector({ instances, selected = "all", basePath = "" }: Props) {
+export function InstanceSelector(
+  { instances, selected = "all", basePath = "" }: Props,
+) {
   if (instances.length <= 1) return null;
 
   return (
@@ -15,7 +17,9 @@ export function InstanceSelector({ instances, selected = "all", basePath = "" }:
       <a
         role="tab"
         href={`${basePath}?instance=all`}
-        class={`tab font-data text-xs ${selected === "all" ? "tab-active" : ""}`}
+        class={`tab font-data text-xs ${
+          selected === "all" ? "tab-active" : ""
+        }`}
       >
         All Instances
         <span class="badge badge-xs badge-neutral ml-1">
@@ -27,11 +31,19 @@ export function InstanceSelector({ instances, selected = "all", basePath = "" }:
           key={inst.instance.name}
           role="tab"
           href={`${basePath}?instance=${inst.instance.name}`}
-          class={`tab font-data text-xs ${selected === inst.instance.name ? "tab-active" : ""}`}
+          class={`tab font-data text-xs ${
+            selected === inst.instance.name ? "tab-active" : ""
+          }`}
         >
-          <span class={`w-2 h-2 rounded-full mr-1 ${inst.reachable ? "bg-success" : "bg-error"}`} />
+          <span
+            class={`w-2 h-2 rounded-full mr-1 ${
+              inst.reachable ? "bg-success" : "bg-error"
+            }`}
+          />
           {inst.instance.name}
-          <span class="badge badge-xs badge-neutral ml-1">{inst.agents.length}</span>
+          <span class="badge badge-xs badge-neutral ml-1">
+            {inst.agents.length}
+          </span>
         </a>
       ))}
     </div>

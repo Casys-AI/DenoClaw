@@ -9,14 +9,20 @@ export const handler = {
   GET(_ctx: FreshContext) {
     const brokerUrl = getBrokerUrl();
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
+    const headers: HeadersInit = token
+      ? { "Authorization": `Bearer ${token}` }
+      : {};
 
     const body = new ReadableStream({
       async start(controller) {
         try {
           const res = await fetch(`${brokerUrl}/events`, { headers });
           if (!res.ok || !res.body) {
-            controller.enqueue(new TextEncoder().encode(`data: {"type":"error","detail":"Gateway unreachable"}\n\n`));
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: {"type":"error","detail":"Gateway unreachable"}\n\n`,
+              ),
+            );
             controller.close();
             return;
           }
@@ -27,9 +33,15 @@ export const handler = {
             controller.enqueue(value);
           }
         } catch {
-          controller.enqueue(new TextEncoder().encode(`data: {"type":"error","detail":"Connection failed"}\n\n`));
+          controller.enqueue(
+            new TextEncoder().encode(
+              `data: {"type":"error","detail":"Connection failed"}\n\n`,
+            ),
+          );
         } finally {
-          try { controller.close(); } catch { /* already closed */ }
+          try {
+            controller.close();
+          } catch { /* already closed */ }
         }
       },
     });
@@ -44,4 +56,6 @@ export const handler = {
   },
 };
 
-export default function ApiEvents() { return null; }
+export default function ApiEvents() {
+  return null;
+}

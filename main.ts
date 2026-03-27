@@ -27,6 +27,7 @@ import {
 import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
+import { createDashboardHandler } from "./web/mod.ts";
 
 const args = parseArgs(Deno.args, {
   string: [
@@ -146,55 +147,66 @@ async function gateway(config: Config): Promise<void> {
   // DI : wiring explicite
   const agentIds = Object.keys(config.agents?.registry ?? {});
   if (agentIds.length === 0) {
-    console.log(
-      "Aucun agent configuré. Créez-en un d'abord :\n\n  denoclaw agent create <nom>\n",
+    log.info(
+      "Aucun agent configuré — démarrage du gateway en mode vide.",
     );
-    return;
   }
 
-  // Ensure data dir exists before opening KV
-  await Deno.mkdir("./data", { recursive: true });
-
-  // Shared KV — single instance for metrics, agent status, dashboard
-  const kv = await Deno.openKv("./data/shared.db");
-  const metrics = new MetricsCollector(kv);
+  // Shared KV — single instance for metrics, agent status, dashboard.
+  // On Deploy use the platform KV; locally keep the file-backed DB for dev.
+  let kv: Deno.Kv | null = null;
+  try {
+    if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+      kv = await Deno.openKv();
+    } else {
+      await Deno.mkdir("./data", { recursive: true });
+      kv = await Deno.openKv("./data/shared.db");
+    }
+  } catch (e) {
+    log.warn("KV partagé indisponible — gateway en mode dégradé.", e);
+  }
+  const metrics = new MetricsCollector(kv ?? undefined);
 
   // WorkerPool with lifecycle callbacks → writes agent status to shared KV
   const workerPool = new WorkerPool(config, {
     onWorkerReady: (id) => {
-      writeAgentStatus(kv, id, {
+      if (!kv) return;
+      void writeAgentStatus(kv, id, {
         status: "running",
         startedAt: new Date().toISOString(),
       });
     },
     onWorkerStopped: (id) => {
-      writeAgentStatus(kv, id, {
+      if (!kv) return;
+      void writeAgentStatus(kv, id, {
         status: "stopped",
         stoppedAt: new Date().toISOString(),
       });
     },
     onAgentMessage: (from, to, message) => {
-      metrics.recordAgentMessage(from, to);
+      void metrics.recordAgentMessage(from, to);
       log.debug(
         `Agent message routed: ${from} → ${to} (${message.slice(0, 50)}...)`,
       );
     },
   });
-  workerPool.setSharedKv(kv);
+  if (kv) workerPool.setSharedKv(kv);
   await workerPool.start(agentIds);
   // Write complete agents list once all workers are ready
-  await updateAgentsList(kv, workerPool.getAgentIds());
+  if (kv) await updateAgentsList(kv, workerPool.getAgentIds());
 
-  const bus = new MessageBus();
-  const session = new SessionManager();
+  const bus = new MessageBus(kv ?? undefined);
+  const session = new SessionManager(kv ?? undefined);
   const channels = new ChannelManager(bus);
+  const freshHandler = createDashboardHandler("/ui");
   const gw = new Gateway(config, {
     bus,
     session,
     channels,
     workerPool,
     metrics,
-    kv,
+    kv: kv ?? undefined,
+    freshHandler: async (req) => await freshHandler(req),
   });
   await gw.start();
 
@@ -209,7 +221,6 @@ async function gateway(config: Config): Promise<void> {
   } catch {
     await gw.stop();
     workerPool.shutdown();
-    kv.close();
   }
 }
 

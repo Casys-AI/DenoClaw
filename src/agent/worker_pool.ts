@@ -83,6 +83,8 @@ export class WorkerPool {
     // Fix #1 + #5: use addEventListener (additive), reject on error, timeout on init
     return new Promise<void>((resolve, reject) => {
       const initTimer = setTimeout(() => {
+        worker.terminate();
+        this.agents.delete(agentId);
         reject(new AgentError("WORKER_INIT_TIMEOUT", { agentId }, `Worker ${agentId} failed to start within ${INIT_TIMEOUT_MS}ms`));
       }, INIT_TIMEOUT_MS);
 
@@ -108,6 +110,8 @@ export class WorkerPool {
         log.error(`Worker ${agentId} erreur: ${e.message}`);
         e.preventDefault();
         if (!entry.ready) {
+          worker.terminate();
+          this.agents.delete(agentId);
           reject(new AgentError("WORKER_INIT_FAILED", { agentId, error: e.message }, "Check worker entrypoint for import errors"));
         }
       };

@@ -9,6 +9,7 @@
 
 import { AgentLoop } from "./loop.ts";
 import { Memory } from "./memory.ts";
+import { TraceWriter } from "../telemetry/traces.ts";
 import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import type { WorkerConfig, WorkerRequest, WorkerResponse } from "./worker_protocol.ts";
@@ -16,30 +17,29 @@ import type { WorkerConfig, WorkerRequest, WorkerResponse } from "./worker_proto
 let agentId = "default";
 let config: WorkerConfig | null = null;
 let kvPrivatePath: string | undefined;
-let currentTraceId: string | undefined;
-
+let traceWriter: TraceWriter | null = null;
 function respond(msg: WorkerResponse): void {
   self.postMessage(msg);
 }
 
 // ── Observability — emit to main process (no direct KV writes) ──
 
-function emitTaskStarted(requestId: string, sessionId: string): void {
-  respond({ type: "task_started", requestId, sessionId, traceId: currentTraceId });
+function emitTaskStarted(requestId: string, sessionId: string, traceId?: string): void {
+  respond({ type: "task_started", requestId, sessionId, traceId });
 }
 
 function emitTaskCompleted(requestId: string): void {
   respond({ type: "task_completed", requestId });
 }
 
-function emitAgentTask(taskId: string, from: string, to: string, message: string, status: string, result?: string): void {
+function emitAgentTask(taskId: string, from: string, to: string, message: string, status: string, result?: string, traceId?: string): void {
   respond({
     type: "agent_task",
     taskId, from, to,
     message: message.slice(0, 500),
     status,
     result: result?.slice(0, 500),
-    traceId: currentTraceId,
+    traceId,
   });
 }
 
@@ -72,7 +72,7 @@ function sendToAgent(toAgent: string, message: string): Promise<string> {
       },
     });
 
-    respond({ type: "agent_send", requestId, toAgent, message, traceId: currentTraceId });
+    respond({ type: "agent_send", requestId, toAgent, message, traceId: undefined });
     emitAgentTask(requestId, agentId, toAgent, message, "sent");
   });
 }
@@ -89,17 +89,18 @@ broadcast.onmessage = (e: MessageEvent) => {
 
 // ── Helpers ──────────────────────────────────────────────
 
-function createAgentLoop(sessionId: string, model?: string): AgentLoop {
+function createAgentLoop(sessionId: string, model?: string, traceId?: string): AgentLoop {
   if (!config) throw new AgentError("WORKER_NOT_INITIALIZED", { agentId }, "Worker has not received init message");
 
   const memory = new Memory(sessionId, 100, kvPrivatePath);
   const peers = config.agents.registry?.[agentId]?.peers ?? [];
+  const sandboxConfig = config.agents.registry?.[agentId]?.sandbox ?? config.agents.defaults?.sandbox;
   return new AgentLoop(
     sessionId,
     config,
     model ? { model } : undefined,
     10,
-    { memory, sendToAgent, availablePeers: peers },
+    { memory, sendToAgent, availablePeers: peers, sandboxConfig, traceWriter: traceWriter ?? undefined, traceId, agentId },
   );
 }
 
@@ -113,6 +114,11 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       agentId = msg.agentId;
       config = msg.config;
       kvPrivatePath = msg.kvPaths.private;
+      // Open shared KV for trace writing (best-effort observability)
+      try {
+        const sharedKv = await Deno.openKv(msg.kvPaths.shared);
+        traceWriter = new TraceWriter(sharedKv);
+      } catch { /* shared KV not available — tracing disabled */ }
       respond({ type: "ready", agentId });
       break;
     }
@@ -128,11 +134,11 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break;
       }
 
-      currentTraceId = msg.traceId;
-      emitTaskStarted(msg.requestId, msg.sessionId);
+      const traceId = msg.traceId;
+      emitTaskStarted(msg.requestId, msg.sessionId, traceId);
 
       try {
-        const loop = createAgentLoop(msg.sessionId, msg.model);
+        const loop = createAgentLoop(msg.sessionId, msg.model, msg.traceId);
         try {
           const result = await loop.processMessage(msg.message);
           respond({
@@ -154,17 +160,17 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         });
       } finally {
         emitTaskCompleted(msg.requestId);
-        currentTraceId = undefined;
       }
       break;
     }
 
     case "agent_deliver": {
-      currentTraceId = msg.traceId;
-      emitTaskStarted(msg.requestId, `agent-${msg.fromAgent}-${agentId}`);
-      emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "received");
+      const traceId = msg.traceId;
+      emitTaskStarted(msg.requestId, `agent:${msg.fromAgent}:${agentId}`, traceId);
+      emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "received", undefined, traceId);
 
       if (!config) {
+        emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "failed", "Worker not initialized", traceId);
         emitTaskCompleted(msg.requestId);
         respond({
           type: "agent_result",
@@ -176,13 +182,13 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
 
       try {
-        const sessionId = `agent-${msg.fromAgent}-${agentId}`;
-        const loop = createAgentLoop(sessionId);
+        const sessionId = `agent:${msg.fromAgent}:${agentId}`;
+        const loop = createAgentLoop(sessionId, undefined, msg.traceId);
         try {
           const result = await loop.processMessage(
             `[Message from agent "${msg.fromAgent}"]: ${msg.message}`,
           );
-          emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "completed", result.content);
+          emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "completed", result.content, traceId);
           respond({
             type: "agent_result",
             requestId: msg.requestId,
@@ -193,7 +199,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "failed", errMsg);
+        emitAgentTask(msg.requestId, msg.fromAgent, agentId, msg.message, "failed", errMsg, traceId);
         respond({
           type: "agent_result",
           requestId: msg.requestId,
@@ -202,7 +208,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         });
       } finally {
         emitTaskCompleted(msg.requestId);
-        currentTraceId = undefined;
       }
       break;
     }

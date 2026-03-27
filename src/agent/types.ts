@@ -1,11 +1,16 @@
 /**
- * Agent domain types — phase 2 DDD migration.
- *
- * Types spécifiques au domaine agent (non partagés avec d'autres bounded contexts).
- * Les types cross-domain (AgentConfig, AgentEntry, SandboxConfig…) restent dans src/shared/types.ts.
+ * Agent domain types.
+ * Les types cross-domain (AgentEntry, SandboxConfig…) restent dans src/shared/types.ts.
  */
 
 import type { AgentEntry, SandboxConfig, ToolCall } from "../shared/types.ts";
+
+export interface AgentConfig {
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+}
 
 export interface AgentResponse {
   content: string;

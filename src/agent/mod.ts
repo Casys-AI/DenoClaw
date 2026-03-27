@@ -4,7 +4,7 @@ export { Memory } from "./memory.ts";
 export { ContextBuilder } from "./context.ts";
 export { SkillsLoader } from "./skills.ts";
 export { CronManager } from "./cron.ts";
-export type { AgentDefaults, AgentsConfig, CronJob, Skill, ToolsConfig } from "./types.ts";
+export type { AgentConfig, AgentDefaults, AgentResponse, AgentsConfig, CronJob, Skill, ToolsConfig } from "./types.ts";
 export { BaseTool, ToolRegistry } from "./tools/registry.ts";
 export { ShellTool } from "./tools/shell.ts";
 export { ReadFileTool, WriteFileTool } from "./tools/file.ts";

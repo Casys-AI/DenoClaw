@@ -1,5 +1,4 @@
-import type { AgentConfig } from "../shared/types.ts";
-import type { AgentResponse } from "./types.ts";
+import type { AgentConfig, AgentResponse } from "./types.ts";
 import type { Config } from "../config/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { Memory } from "./memory.ts";
@@ -12,6 +11,12 @@ import { WebFetchTool } from "./tools/web.ts";
 import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 
+export interface AgentLoopDeps {
+  providers?: ProviderManager;
+  memory?: Memory;
+  tools?: ToolRegistry;
+}
+
 export class AgentLoop {
   private config: AgentConfig;
   private providers: ProviderManager;
@@ -21,7 +26,7 @@ export class AgentLoop {
   private tools: ToolRegistry;
   private maxIterations: number;
 
-  constructor(sessionId: string, config: Config, agentConfig?: Partial<AgentConfig>, maxIterations = 10) {
+  constructor(sessionId: string, config: Config, agentConfig?: Partial<AgentConfig>, maxIterations = 10, deps?: AgentLoopDeps) {
     this.config = {
       model: config.agents?.defaults?.model || "anthropic/claude-sonnet-4-6",
       temperature: config.agents?.defaults?.temperature ?? 0.7,
@@ -30,14 +35,14 @@ export class AgentLoop {
       ...agentConfig,
     };
 
-    this.providers = new ProviderManager(config.providers);
-    this.memory = new Memory(sessionId);
+    this.providers = deps?.providers ?? new ProviderManager(config.providers);
+    this.memory = deps?.memory ?? new Memory(sessionId);
+    this.tools = deps?.tools ?? new ToolRegistry();
     this.context = new ContextBuilder(this.config);
     this.skills = new SkillsLoader();
-    this.tools = new ToolRegistry();
     this.maxIterations = maxIterations;
 
-    this.registerBuiltInTools(config);
+    if (!deps?.tools) this.registerBuiltInTools(config);
   }
 
   private registerBuiltInTools(config: Config): void {
@@ -148,5 +153,9 @@ export class AgentLoop {
 
   getTools(): ToolRegistry {
     return this.tools;
+  }
+
+  close(): void {
+    this.memory.close();
   }
 }

@@ -3,6 +3,7 @@ import type { Config } from "../config/types.ts";
 import type { MessageBus } from "../messaging/bus.ts";
 import type { SessionManager } from "../messaging/session.ts";
 import type { ChannelManager } from "../messaging/channels/manager.ts";
+import type { AuthManager, AuthResult } from "./auth.ts";
 import { TelegramChannel } from "../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../messaging/channels/webhook.ts";
 import { AgentLoop } from "../agent/loop.ts";
@@ -12,6 +13,7 @@ export interface GatewayDeps {
   bus: MessageBus;
   session: SessionManager;
   channels: ChannelManager;
+  auth?: AuthManager;
 }
 
 /**
@@ -24,6 +26,7 @@ export class Gateway {
   private bus: MessageBus;
   private session: SessionManager;
   private channels: ChannelManager;
+  private auth: AuthManager | null;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
@@ -33,6 +36,7 @@ export class Gateway {
     this.bus = deps.bus;
     this.session = deps.session;
     this.channels = deps.channels;
+    this.auth = deps.auth ?? null;
   }
 
   async start(): Promise<void> {
@@ -118,19 +122,28 @@ export class Gateway {
     }
   }
 
-  private checkAuth(req: Request): Response | null {
-    const token = Deno.env.get("DENOCLAW_API_TOKEN");
-    if (!token) return null;
+  private async checkAuth(req: Request): Promise<Response | null> {
+    if (!this.auth) {
+      // Pas d'AuthManager injecté — fallback static token (mode local)
+      const token = Deno.env.get("DENOCLAW_API_TOKEN");
+      if (!token) return null;
+      const auth = req.headers.get("authorization");
+      const queryToken = new URL(req.url).searchParams.get("token");
+      if (auth === `Bearer ${token}` || queryToken === token) return null;
+      return Response.json(
+        { error: { code: "UNAUTHORIZED", recovery: "Add Authorization: Bearer <token> header" } },
+        { status: 401 },
+      );
+    }
 
-    const auth = req.headers.get("authorization");
-    const queryToken = new URL(req.url).searchParams.get("token");
-
-    if (auth === `Bearer ${token}` || queryToken === token) return null;
-
-    return Response.json(
-      { error: { code: "UNAUTHORIZED", recovery: "Add Authorization: Bearer <token> header" } },
-      { status: 401 },
-    );
+    const result: AuthResult = await this.auth.checkRequest(req);
+    if (!result.ok) {
+      return Response.json(
+        { error: { code: result.code, recovery: result.recovery } },
+        { status: 401 },
+      );
+    }
+    return null;
   }
 
   private async handleHttp(req: Request): Promise<Response> {
@@ -140,7 +153,7 @@ export class Gateway {
       return new Response("DenoClaw Gateway");
     }
 
-    const authErr = this.checkAuth(req);
+    const authErr = await this.checkAuth(req);
     if (authErr) return authErr;
 
     if (url.pathname === "/health") {

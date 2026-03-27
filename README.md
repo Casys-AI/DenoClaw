@@ -9,8 +9,8 @@ Tout est natif Deno 2.7+ :
 | Besoin | API Deno |
 |---|---|
 | Persistence | `Deno.openKv()` |
-| Cron / Heartbeat | `Deno.cron()` |
-| File d'attente | `kv.enqueue()` / `kv.listenQueue()` |
+| Cron / Heartbeat | `Deno.cron()` (Broker/local only) |
+| File d'attente | `kv.enqueue()` / `kv.listenQueue()` (Broker/local only) |
 | HTTP server | `Deno.serve()` |
 | WebSocket | `Deno.upgradeWebSocket()` |
 | Shell | `Deno.Command` |
@@ -60,7 +60,7 @@ Deploy : Broker (Deno Deploy)  → Subhosting (agents) → Sandbox (exécution)
 - **Subhosting** = héberge l'agent (warm-cached, KV pour état). Réactif — se réveille sur HTTP du Broker.
 - **Sandbox** = exécute le code (éphémère, permissions hardened)
 - **Local** : Workers (= Subhosting) + `Deno.Command` (= Sandbox), même code, `postMessage` au lieu de HTTP
-- **Tunnels** = WebSocket vers machines locales (Codex CLI, Claude CLI)
+- **Tunnels** = mesh réseau (noeuds VPS/GPU, inter-brokers, machines locales) — à la Tailscale
 
 Voir `docs/architecture-distributed.md` et les ADRs dans `docs/`.
 
@@ -92,7 +92,7 @@ src/
 ├── agent/          # Boucle ReAct, mémoire (KV), skills, context
 │   └── tools/      # Shell, file, web, registry
 ├── providers/      # Anthropic, OpenAI-compat, manager
-├── bus/            # MessageBus (KV Queues)
+├── bus/            # MessageBus (KV Queues — Broker/local only)
 ├── session/        # Sessions (KV)
 ├── channels/       # Console, webhook, manager
 ├── gateway/        # HTTP + WebSocket (Deno.serve)

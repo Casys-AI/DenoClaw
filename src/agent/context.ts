@@ -1,5 +1,5 @@
-import type { AgentConfig, Message, ToolDefinition } from "../shared/types.ts";
-import type { Skill } from "./types.ts";
+import type { Message, ToolDefinition } from "../shared/types.ts";
+import type { AgentConfig, Skill } from "./types.ts";
 import { formatDate } from "../shared/helpers.ts";
 
 export class ContextBuilder {

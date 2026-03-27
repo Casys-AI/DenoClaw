@@ -20,6 +20,12 @@ import { log } from "../shared/log.ts";
  * - Tunnel hub (WebSocket connections to local machines)
  * - Agent lifecycle (Subhosting + Sandbox CRUD)
  */
+export interface BrokerServerDeps {
+  providers?: ProviderManager;
+  sandbox?: SandboxManager;
+  metrics?: MetricsCollector;
+}
+
 export class BrokerServer {
   private config: Config;
   private auth!: AuthManager;
@@ -30,11 +36,11 @@ export class BrokerServer {
   private tunnels = new Map<string, { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }>();
   private httpServer?: Deno.HttpServer;
 
-  constructor(config: Config) {
+  constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
-    this.providers = new ProviderManager(config.providers);
-    this.sandbox = new SandboxManager();
-    this.metrics = new MetricsCollector();
+    this.providers = deps?.providers ?? new ProviderManager(config.providers);
+    this.sandbox = deps?.sandbox ?? new SandboxManager();
+    this.metrics = deps?.metrics ?? new MetricsCollector();
   }
 
   private async getKv(): Promise<Deno.Kv> {

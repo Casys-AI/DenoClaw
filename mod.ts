@@ -17,7 +17,7 @@ export { ShellTool } from "./src/agent/tools/shell.ts";
 export { ReadFileTool, WriteFileTool } from "./src/agent/tools/file.ts";
 export { WebFetchTool } from "./src/agent/tools/web.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./src/agent/tools/types.ts";
-export type { AgentDefaults, AgentResponse, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
+export type { AgentConfig, AgentDefaults, AgentResponse, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
 export type { BuiltinToolName } from "./src/agent/tools/types.ts";
 
 // ── Messaging domain ────────────────────────────────────
@@ -67,7 +67,7 @@ export type { AgentMetrics } from "./src/telemetry/metrics.ts";
 
 // ── Shared kernel ────────────────────────────────────────
 export type {
-  AgentConfig, AgentEntry, ChannelRouting,
+  AgentBrokerPort, AgentEntry, BrokerEnvelope, ChannelRouting,
   LLMResponse, Message, MessageRole, SandboxConfig, SandboxPermission,
   StructuredError, ToolCall, ToolDefinition, ToolResult,
 } from "./src/shared/types.ts";

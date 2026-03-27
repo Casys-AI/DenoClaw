@@ -73,19 +73,19 @@ Agent "researcher" (Subhosting)     Broker (Deploy)         Agent "coder" (Subho
      │                                   │                       │
      │  A2A message/send                 │                       │
      │  Task: "write code for finding"   │                       │
-     ├──────── KV Queue ────────────────►│                       │
+     ├──────── HTTP POST (OIDC) ────────►│                       │
      │                                   │  route vers "coder"   │
-     │                                   ├──── KV Queue ────────►│
+     │                                   ├──── HTTP POST ───────►│
      │                                   │                       │ exécute
      │                                   │                       │ (working → completed)
-     │                                   │◄──── KV Queue ────────┤
-     │◄──────── KV Queue ───────────────┤  Task result           │
+     │                                   │◄──── HTTP response ───┤
+     │◄──────── HTTP response ──────────┤  Task result           │
 ```
 
-Chaque agent Subhosting expose un endpoint A2A. Le broker peut :
-1. Router les Tasks entre agents internes (via KV Queues)
-2. Recevoir des Tasks d'agents externes (via HTTP)
-3. Envoyer des Tasks vers des agents externes (via HTTP)
+Chaque agent Subhosting expose un endpoint A2A HTTP. Le broker :
+1. Route les Tasks entre agents internes (HTTP POST vers chaque agent Subhosting)
+2. Route les Tasks cross-instance (via tunnels Broker ↔ Broker)
+3. Reçoit/envoie des Tasks d'agents externes (HTTP standard A2A)
 
 ## Agent Card DenoClaw
 
@@ -183,7 +183,7 @@ const result = await fetch(card.url, {
 ## Conséquences
 
 - Chaque agent DenoClaw est interopérable avec tout agent A2A (LangChain, Bedrock, etc.)
-- Le format custom `BrokerMessage` reste pour le transport interne (KV Queues) mais les payloads s'alignent sur A2A
+- Le format custom `BrokerMessage` reste pour le transport interne (HTTP) mais les payloads s'alignent sur A2A
 - L'AgentCard est générée automatiquement depuis la config agent (registry)
 - Le streaming SSE est natif Deno, pas besoin de lib
 - Compatible avec le routing channel → agent(s) : le broker est un routeur A2A

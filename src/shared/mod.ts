@@ -14,8 +14,9 @@ export {
   truncate,
 } from "./helpers.ts";
 export type {
-  AgentConfig,
+  AgentBrokerPort,
   AgentEntry,
+  BrokerEnvelope,
   ChannelRouting,
   LLMResponse,
   Message,

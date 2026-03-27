@@ -53,15 +53,6 @@ export interface ToolResult {
   error?: StructuredError;
 }
 
-// ── Agent (cross-domain: utilisé par agent, orchestration, messaging, cli) ─
-
-export interface AgentConfig {
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  systemPrompt?: string;
-}
-
 // ── LLM ───────────────────────────────────────────────────
 
 export interface LLMResponse {

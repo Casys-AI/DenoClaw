@@ -296,75 +296,45 @@ export async function publishAgent(): Promise<void> {
 
 /**
  * Génère le code entrypoint pour un agent Subhosting.
- * C'est un AgentRuntime minimal qui écoute KV Queues.
+ * Utilise le vrai AgentRuntime + BrokerClient du SDK DenoClaw.
  */
 function generateAgentEntrypoint(agentId: string, model: string, permissions: string[]): string {
   return `// Auto-generated DenoClaw Agent Runtime
 // Agent: ${agentId} | Model: ${model}
 
-const kv = await Deno.openKv();
+import { AgentRuntime } from "@denoclaw/denoclaw";
+import { BrokerClient } from "@denoclaw/denoclaw";
+
 const agentId = Deno.env.get("DENOCLAW_AGENT_ID") || "${agentId}";
 const model = Deno.env.get("DENOCLAW_MODEL") || "${model}";
 
-console.log("Agent started:", agentId, "model:", model);
-
-// Register agent status
-await kv.set(["agents", agentId, "status"], {
-  status: "running",
-  startedAt: new Date().toISOString(),
-  model,
-  sandboxPermissions: ${JSON.stringify(permissions)},
-});
-
 // Store agent config for broker permission checks
+const kv = await Deno.openKv();
 await kv.set(["agents", agentId, "config"], {
   model,
   sandbox: { allowedPermissions: ${JSON.stringify(permissions)} },
 });
+kv.close();
 
-// Listen for messages via KV Queue
-kv.listenQueue(async (raw) => {
-  const msg = raw;
-  if (msg.to !== agentId) return;
+// Create the runtime with a real BrokerClient (implements AgentBrokerPort)
+const broker = new BrokerClient(agentId);
+const runtime = new AgentRuntime(agentId, { model }, broker);
 
-  console.log("Message received:", msg.type, "from:", msg.from);
+await runtime.start();
+console.log("Agent started:", agentId, "model:", model);
 
-  if (msg.type === "agent_message") {
-    const payload = msg.payload;
-
-    // Load conversation history
-    const historyEntry = await kv.get(["memory", agentId, msg.from]);
-    const history = historyEntry.value || [];
-    history.push({ role: "user", content: payload.instruction });
-
-    // Request LLM completion via broker
-    const llmRequestId = crypto.randomUUID();
-    await kv.enqueue({
-      id: llmRequestId,
-      from: agentId,
-      to: "broker",
-      type: "llm_request",
-      payload: { messages: [{ role: "system", content: "You are a helpful agent." }, ...history], model },
-      timestamp: new Date().toISOString(),
-    });
-
-    // Note: response comes back via KV Queue as llm_response
-    // A full implementation would use a promise-based request/response pattern
-    // (see BrokerClient in the full DenoClaw SDK)
-  }
-});
-
-// Heartbeat
-Deno.cron("heartbeat", "*/5 * * * *", async () => {
-  await kv.set(["agents", agentId, "status"], {
-    status: "alive",
-    lastHeartbeat: new Date().toISOString(),
-    model,
-  });
-});
+// Graceful shutdown
+const ac = new AbortController();
+Deno.addSignalListener("SIGINT", () => ac.abort());
+Deno.addSignalListener("SIGTERM", () => ac.abort());
 
 // Keep alive
-Deno.serve({ port: 8000 }, () => new Response("DenoClaw Agent: " + agentId));
+Deno.serve({ port: 8000, signal: ac.signal }, () => new Response("DenoClaw Agent: " + agentId));
+
+ac.signal.addEventListener("abort", async () => {
+  await runtime.stop();
+  console.log("Agent stopped:", agentId);
+});
 `;
 }
 

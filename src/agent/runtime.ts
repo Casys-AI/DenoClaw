@@ -1,4 +1,5 @@
-import type { AgentConfig, AgentBrokerPort, BrokerEnvelope, Message } from "../shared/types.ts";
+import type { AgentBrokerPort, BrokerEnvelope, Message } from "../shared/types.ts";
+import type { AgentConfig } from "./types.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";

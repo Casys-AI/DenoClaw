@@ -39,8 +39,12 @@ async function agent(config: Config): Promise<void> {
 
   if (args.message) {
     const loop = new AgentLoop(sessionId, config, args.model ? { model: args.model } : undefined);
-    const result = await loop.processMessage(args.message as string);
-    console.log(result.content);
+    try {
+      const result = await loop.processMessage(args.message as string);
+      console.log(result.content);
+    } finally {
+      loop.close();
+    }
     return;
   }
 
@@ -57,8 +61,12 @@ async function agent(config: Config): Promise<void> {
   bus.subscribeAll(async (msg) => {
     await session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
     const loop = new AgentLoop(msg.sessionId, config, args.model ? { model: args.model } : undefined);
-    const result = await loop.processMessage(msg.content);
-    await channels.send(msg.channelType, msg.userId, result.content, msg.metadata);
+    try {
+      const result = await loop.processMessage(msg.content);
+      await channels.send(msg.channelType, msg.userId, result.content, msg.metadata);
+    } finally {
+      loop.close();
+    }
   });
 
   await channels.startAll();

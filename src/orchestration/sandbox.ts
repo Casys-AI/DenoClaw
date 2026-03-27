@@ -11,7 +11,7 @@ import { log } from "../shared/log.ts";
  * API docs: https://docs.deno.com/sandbox/
  */
 
-interface SandboxConfig {
+interface SandboxApiConfig {
   apiToken: string;
   apiBase?: string;
   region?: "amsterdam" | "chicago";
@@ -43,7 +43,7 @@ export class SandboxManager {
     networkAllow: string[];
   };
 
-  constructor(config?: Partial<SandboxConfig>) {
+  constructor(config?: Partial<SandboxApiConfig>) {
     this.apiToken = config?.apiToken || Deno.env.get("DENO_SANDBOX_API_TOKEN") || "";
     this.apiBase = config?.apiBase || "https://api.deno.com/v1/sandbox";
     this.defaults = {

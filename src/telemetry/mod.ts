@@ -14,9 +14,9 @@
 
 import { log } from "../shared/log.ts";
 
-// Use the npm OTEL API which Deno wires to its built-in implementation
-let trace: typeof import("npm:@opentelemetry/api").trace | null = null;
-let SpanStatusCode: typeof import("npm:@opentelemetry/api").SpanStatusCode | null = null;
+// Use the OTEL API which Deno wires to its built-in implementation
+let trace: typeof import("@opentelemetry/api").trace | null = null;
+let SpanStatusCode: typeof import("@opentelemetry/api").SpanStatusCode | null = null;
 
 async function loadOtel(): Promise<boolean> {
   try {

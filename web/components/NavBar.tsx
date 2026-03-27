@@ -21,7 +21,7 @@ export function NavBar({ currentPath }: { currentPath: string }) {
       <div class="navbar-center">
         <ul class="menu menu-horizontal gap-1 px-1">
           {NAV_ITEMS.map((item) => {
-            const isActive = currentPath.startsWith(item.href);
+            const isActive = currentPath === item.href || currentPath.startsWith(item.href + "/");
             return (
               <li key={item.href}>
                 <a

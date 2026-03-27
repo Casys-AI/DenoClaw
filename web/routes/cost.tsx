@@ -1,5 +1,5 @@
 import { page } from "@fresh/core";
-import { getAllInstancesData, aggregateSummaries, type InstanceData, getBrokerUrl } from "../lib/api-client.ts";
+import { getAllInstancesData, aggregateSummaries, getAllAgentMetrics, type InstanceData, getBrokerUrl } from "../lib/api-client.ts";
 import { formatCompact, formatCost } from "../lib/format.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import type { MetricsSummary, AgentMetrics } from "../lib/types.ts";
@@ -30,21 +30,22 @@ export const handler = {
     const agents: AgentMetrics[] = [];
 
     // Fetch metrics from filtered instances
-    const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
     for (const inst of filtered) {
       if (!inst.reachable) continue;
       try {
-        const res = await fetch(`${inst.instance.url}/stats/agents`, { headers });
-        if (res.ok) agents.push(...(await res.json()));
+        const metrics = await getAllAgentMetrics(inst.instance.url);
+        agents.push(...metrics);
       } catch { /* skip */ }
     }
 
     // Fetch hourly data for all agents
+    const baseUrl = filtered[0]?.instance.url ?? getBrokerUrl();
+    const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
+    const authHeaders: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
     let hourly: HourlyBucket[] = [];
     try {
       for (const agent of agents) {
-        const res = await fetch(`${filtered[0]?.instance.url ?? getBrokerUrl()}/stats/history?agent=${agent.agentId}`, { headers });
+        const res = await fetch(`${baseUrl}/stats/history?agent=${agent.agentId}`, { headers: authHeaders });
         if (res.ok) {
           const data: HourlyBucket[] = await res.json();
           hourly.push(...data);
@@ -61,7 +62,16 @@ export default function Cost({ data }: { data: CostData }) {
   const totalCost = summary?.totalCostUsd ?? 0;
   const sortedByCost = [...agents].sort((a, b) => b.llm.estimatedCostUsd - a.llm.estimatedCostUsd);
   const maxCost = sortedByCost[0]?.llm.estimatedCostUsd ?? 1;
-  const projectedMonthly = totalCost * 30;
+
+  // Compute daily average from hourly buckets; fall back to null if no hourly data
+  const hourlyTotalsForProjection = new Map<string, number>();
+  for (const b of hourly) {
+    hourlyTotalsForProjection.set(b.hour, (hourlyTotalsForProjection.get(b.hour) ?? 0) + b.costUsd);
+  }
+  const uniqueDays = new Set([...hourlyTotalsForProjection.keys()].map((h) => h.slice(0, 10)));
+  const projectedMonthly = uniqueDays.size > 0
+    ? ([...hourlyTotalsForProjection.values()].reduce((s, c) => s + c, 0) / uniqueDays.size) * 30
+    : null;
 
   // Aggregate hourly by provider
   const providerCosts = new Map<string, number>();
@@ -98,7 +108,7 @@ export default function Cost({ data }: { data: CostData }) {
         </div>
         <div class="stat">
           <div class="stat-title">Projected Monthly</div>
-          <div class="stat-value text-primary font-data">{formatCost(projectedMonthly)}</div>
+          <div class="stat-value text-primary font-data">{projectedMonthly !== null ? formatCost(projectedMonthly) : "—"}</div>
           <div class="stat-desc">at current rate</div>
         </div>
         <div class="stat">
@@ -250,7 +260,7 @@ export default function Cost({ data }: { data: CostData }) {
           <span>
             Agent <strong class="text-primary">{sortedByCost[0].agentId}</strong> accounts for{" "}
             <strong class="font-data">{Math.round((sortedByCost[0].llm.estimatedCostUsd / totalCost) * 100)}%</strong>{" "}
-            of total cost. Projected monthly: <strong class="font-data text-warning">{formatCost(projectedMonthly)}</strong>.
+            of total cost. Projected monthly: <strong class="font-data text-warning">{projectedMonthly !== null ? formatCost(projectedMonthly) : "—"}</strong>.
           </span>
         </div>
       )}

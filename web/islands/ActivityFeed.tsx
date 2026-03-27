@@ -1,5 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 interface ActivityEvent {
   id: number;
@@ -10,29 +9,25 @@ interface ActivityEvent {
   color: string;
 }
 
-const events = signal<ActivityEvent[]>([]);
-const connected = signal(false);
-let eventCounter = 0;
-
 function formatTime(): string {
   return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions);
 }
 
-function parseSSEEvent(data: Record<string, unknown>): ActivityEvent | null {
+function parseSSEEvent(data: Record<string, unknown>, counterRef: { current: number }): ActivityEvent | null {
   const time = formatTime();
 
   switch (data.type) {
     case "snapshot": {
       const agents = data.agents as Array<{ agentId: string; status: string }>;
       return {
-        id: ++eventCounter, time, type: "snapshot", color: "badge-ghost",
+        id: ++counterRef.current, time, type: "snapshot", color: "badge-ghost",
         detail: `System snapshot: ${agents?.length ?? 0} agents`,
       };
     }
     case "agent_status": {
       const status = data.status as Record<string, unknown>;
       return {
-        id: ++eventCounter, time, type: "status", agent: data.agentId as string,
+        id: ++counterRef.current, time, type: "status", agent: data.agentId as string,
         color: status?.status === "running" ? "badge-success" : status?.status === "stopped" ? "badge-error" : "badge-info",
         detail: `Status → ${(status?.status as string) ?? "unknown"}`,
       };
@@ -40,7 +35,7 @@ function parseSSEEvent(data: Record<string, unknown>): ActivityEvent | null {
     case "agent_task": {
       const task = data.task as Record<string, unknown>;
       return {
-        id: ++eventCounter, time, type: "A2A", color: "badge-accent",
+        id: ++counterRef.current, time, type: "A2A", color: "badge-accent",
         agent: `${task?.from} → ${task?.to}`,
         detail: `${task?.status}: ${(task?.message as string)?.slice(0, 60) ?? ""}`,
       };
@@ -48,7 +43,7 @@ function parseSSEEvent(data: Record<string, unknown>): ActivityEvent | null {
     case "agents_list_updated": {
       const ids = data.agentIds as string[];
       return {
-        id: ++eventCounter, time, type: "registry", color: "badge-warning",
+        id: ++counterRef.current, time, type: "registry", color: "badge-warning",
         detail: `Agents updated: ${ids?.join(", ")}`,
       };
     }
@@ -56,7 +51,7 @@ function parseSSEEvent(data: Record<string, unknown>): ActivityEvent | null {
       return null; // skip keepalives
     default:
       return {
-        id: ++eventCounter, time, type: data.type as string, color: "badge-ghost",
+        id: ++counterRef.current, time, type: data.type as string, color: "badge-ghost",
         detail: JSON.stringify(data).slice(0, 80),
       };
   }
@@ -66,43 +61,46 @@ const MAX_EVENTS = 500;
 
 const FILTER_TYPES = ["All", "status", "A2A", "snapshot", "registry"] as const;
 
-export default function ActivityFeed({ brokerUrl: _brokerUrl }: { brokerUrl: string }) {
+export default function ActivityFeed() {
   const [filter, setFilter] = useState<string>("All");
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [connected, setConnected] = useState(false);
+  const counterRef = useRef(0);
 
   useEffect(() => {
     // Connect via local proxy (same origin, no CORS)
     const es = new EventSource(`/api/events`);
 
-    es.onopen = () => { connected.value = true; };
+    es.onopen = () => { setConnected(true); };
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        const event = parseSSEEvent(data);
+        const event = parseSSEEvent(data, counterRef);
         if (!event) return;
-        events.value = [event, ...events.value].slice(0, MAX_EVENTS);
+        setEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS));
       } catch { /* ignore parse errors */ }
     };
 
     es.onerror = () => {
-      connected.value = false;
+      setConnected(false);
     };
 
     return () => es.close();
   }, []);
 
   const filtered = filter === "All"
-    ? events.value
-    : events.value.filter((e) => e.type === filter);
+    ? events
+    : events.filter((e) => e.type === filter);
 
   return (
     <div>
       {/* Connection status + filters */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class={`w-2 h-2 rounded-full ${connected.value ? "bg-success" : "bg-error"}`} />
+          <span class={`w-2 h-2 rounded-full ${connected ? "bg-success" : "bg-error"}`} />
           <span class="text-xs font-data text-neutral-content">
-            {connected.value ? "Connected" : "Disconnected"} · {filtered.length}/{events.value.length} events
+            {connected ? "Connected" : "Disconnected"} · {filtered.length}/{events.length} events
           </span>
         </div>
         <div class="join">

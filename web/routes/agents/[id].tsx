@@ -47,10 +47,8 @@ interface AgentDetailData {
 }
 
 export const handler = {
-  async GET(req: Request, ctx: FreshContext) {
-    const url = new URL(req.url);
-    const segments = url.pathname.split("/").filter(Boolean);
-    const agentId = segments[segments.length - 1] || ctx.params?.id || "unknown";
+  async GET(_req: Request, ctx: FreshContext) {
+    const agentId = ctx.params.id ?? "unknown";
     const brokerUrl = getBrokerUrl();
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
     const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};

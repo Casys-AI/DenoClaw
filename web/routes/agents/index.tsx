@@ -1,5 +1,5 @@
 import { page } from "@fresh/core";
-import { getAllInstancesData, type InstanceData } from "../../lib/api-client.ts";
+import { getAllInstancesData, getAllAgentMetrics, type InstanceData } from "../../lib/api-client.ts";
 import { formatCompact, formatCost, formatLatency } from "../../lib/format.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
 import { InstanceSelector } from "../../components/InstanceSelector.tsx";
@@ -21,13 +21,8 @@ export const handler = {
     for (const inst of instances) {
       if (!inst.reachable) continue;
       try {
-        const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-        const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
-        const res = await fetch(`${inst.instance.url}/stats/agents`, { headers });
-        if (res.ok) {
-          const metrics: AgentMetrics[] = await res.json();
-          allMetrics.push(...metrics);
-        }
+        const metrics = await getAllAgentMetrics(inst.instance.url);
+        allMetrics.push(...metrics);
       } catch { /* skip */ }
     }
 

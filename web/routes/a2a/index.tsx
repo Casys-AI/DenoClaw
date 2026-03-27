@@ -1,21 +1,11 @@
 import { page } from "@fresh/core";
 import { getBrokerUrl } from "../../lib/api-client.ts";
+import { StatusBadge } from "../../components/StatusBadge.tsx";
 import type { AgentTaskEntry } from "../../lib/types.ts";
 
 interface A2AData {
   tasks: AgentTaskEntry[];
   brokerUrl: string;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const variant: Record<string, string> = {
-    completed: "badge-success",
-    running: "badge-info",
-    sent: "badge-info",
-    received: "badge-warning",
-    failed: "badge-error",
-  };
-  return <span class={`badge badge-xs ${variant[status] ?? "badge-ghost"}`}>{status}</span>;
 }
 
 export const handler = {
@@ -132,7 +122,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
                           <span class="text-neutral-content mx-1">→</span>
                           <span class="font-medium">{task.to}</span>
                         </td>
-                        <td><StatusBadge status={task.status} /></td>
+                        <td><StatusBadge status={task.status} size="xs" /></td>
                         <td class="text-sm text-neutral-content truncate max-w-xs">{task.message}</td>
                         <td class="text-right font-data text-xs text-neutral-content">{task.timestamp.slice(11, 19)}</td>
                       </tr>
@@ -151,7 +141,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
                         <span class="text-neutral-content mx-1">→</span>
                         <span class="font-medium">{task.to}</span>
                       </td>
-                      <td><StatusBadge status={task.status} /></td>
+                      <td><StatusBadge status={task.status} size="xs" /></td>
                       <td class="text-sm text-neutral-content truncate max-w-xs">{task.message}</td>
                       <td class="text-right font-data text-xs text-neutral-content">{task.timestamp.slice(11, 19)}</td>
                     </tr>

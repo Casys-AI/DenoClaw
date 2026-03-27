@@ -1,6 +1,7 @@
 import { page } from "@fresh/core";
 import { getAllInstancesData, type InstanceData } from "../lib/api-client.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
+import { StatusDot } from "../components/StatusBadge.tsx";
 import type { AgentStatusEntry, HealthResponse } from "../lib/types.ts";
 import NetworkGraph from "../islands/NetworkGraph.tsx";
 
@@ -77,7 +78,7 @@ export default function Network({ data }: { data: NetworkData }) {
                 {agents.map((agent) => (
                   <li key={agent.agentId} class="flex items-center justify-between">
                     <a href={`/agents/${agent.agentId}`} class="link link-primary text-sm">{agent.agentId}</a>
-                    <span class={`w-2 h-2 rounded-full ${agent.status === "running" ? "bg-success" : agent.status === "stopped" ? "bg-error" : "bg-info"}`} />
+                    <StatusDot status={agent.status} />
                   </li>
                 ))}
               </ul>

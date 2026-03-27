@@ -68,7 +68,7 @@ export function AlertStrip({ agents, metrics, totalCostUsd }: AlertStripProps) {
         >
           <span class="text-sm">{alert.message}</span>
           {alert.agent && (
-            <a href={`/agents/${alert.agent}`} class="btn btn-ghost btn-xs">
+            <a href={`agents/${alert.agent}`} class="btn btn-ghost btn-xs">
               View →
             </a>
           )}

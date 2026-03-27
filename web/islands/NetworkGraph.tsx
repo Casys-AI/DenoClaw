@@ -280,7 +280,7 @@ export default function NetworkGraph(
                 )}
               </div>
               <a
-                href={`/agents/${selected.agentId}`}
+                href={`agents/${selected.agentId}`}
                 class="btn btn-primary btn-sm mt-2"
               >
                 View Details →

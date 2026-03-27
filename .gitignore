@@ -1,5 +1,7 @@
 # Deno
 deno.lock
+node_modules/
+_fresh/
 
 # KV local database
 *.sqlite3

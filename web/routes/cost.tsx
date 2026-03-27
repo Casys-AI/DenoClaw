@@ -282,7 +282,7 @@ export default function Cost({ data }: { data: CostData }) {
                     <div key={agent.agentId} class="space-y-1">
                       <div class="flex justify-between text-sm">
                         <a
-                          href={`/agents/${agent.agentId}`}
+                          href={`agents/${agent.agentId}`}
                           class="link link-primary"
                         >
                           {agent.agentId}

@@ -36,7 +36,7 @@ export default function AgentStatusGrid() {
           <div class="card-body p-4">
             <div class="flex justify-between items-center">
               <a
-                href={`/ui/agents/${agent.agentId}`}
+                href={`agents/${agent.agentId}`}
                 class="font-medium link link-primary"
               >
                 {agent.agentId}

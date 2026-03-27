@@ -1,12 +1,10 @@
-const BASE = Deno.env.get("DENOCLAW_DASHBOARD_BASE") || "";
-
 const NAV_ITEMS = [
-  { href: `${BASE}/overview`, label: "Overview" },
-  { href: `${BASE}/network`, label: "Network" },
-  { href: `${BASE}/agents`, label: "Agents" },
-  { href: `${BASE}/a2a`, label: "A2A" },
-  { href: `${BASE}/cost`, label: "Cost" },
-  { href: `${BASE}/activity`, label: "Activity" },
+  { href: "overview", label: "Overview" },
+  { href: "network", label: "Network" },
+  { href: "agents", label: "Agents" },
+  { href: "a2a", label: "A2A" },
+  { href: "cost", label: "Cost" },
+  { href: "activity", label: "Activity" },
 ];
 
 export function NavBar({ currentPath }: { currentPath: string }) {
@@ -14,10 +12,10 @@ export function NavBar({ currentPath }: { currentPath: string }) {
     <div class="navbar bg-base-200 px-4">
       <div class="navbar-start">
         <a
-          href={`${BASE}/overview`}
+          href="overview"
           class="btn btn-ghost font-display text-xl font-bold tracking-tight gap-2"
         >
-          <img src="/logo.png" alt="DenoClaw" class="w-8 h-8" />
+          <img src="logo.png" alt="DenoClaw" class="w-8 h-8" />
           DenoClaw
         </a>
       </div>

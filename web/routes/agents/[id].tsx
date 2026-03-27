@@ -137,7 +137,7 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
   if (!agent && !metrics) {
     return (
       <div class="space-y-4">
-        <a href="/agents" class="btn btn-ghost btn-sm">&larr; Back</a>
+        <a href="agents" class="btn btn-ghost btn-sm">&larr; Back</a>
         <div role="alert" class="alert alert-error">
           Agent "{agentId}" not found.
         </div>
@@ -149,7 +149,7 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
     <div class="space-y-6">
       {/* Header */}
       <div class="flex items-center gap-4">
-        <a href="/agents" class="btn btn-ghost btn-sm">&larr;</a>
+        <a href="agents" class="btn btn-ghost btn-sm">&larr;</a>
         <div>
           <div class="text-xs text-neutral-content font-data">
             Agents / {agentId}
@@ -315,7 +315,7 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
                   {metrics.a2a.peersContacted.map((peer) => (
                     <li key={peer}>
                       <a
-                        href={`/agents/${peer}`}
+                        href={`agents/${peer}`}
                         class="link link-primary text-sm"
                       >
                         {peer}

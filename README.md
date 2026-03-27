@@ -88,7 +88,8 @@ Voir `CLAUDE.md` pour les conventions complètes.
 ## Développement
 
 ```bash
-deno task dev       # Dev avec watch
+deno task dev       # Backend avec watch
+deno task dashboard # Dashboard Fresh/Vite avec HMR
 deno task test      # Tests
 deno task check     # Type-check
 deno task lint      # Lint

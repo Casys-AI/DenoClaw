@@ -11,12 +11,15 @@ export function InstanceSelector(
   { instances, selected = "all", basePath = "" }: Props,
 ) {
   if (instances.length <= 1) return null;
+  const normalizedBasePath = basePath.startsWith("/")
+    ? basePath.slice(1)
+    : basePath;
 
   return (
     <div role="tablist" class="tabs tabs-box bg-base-200">
       <a
         role="tab"
-        href={`${basePath}?instance=all`}
+        href={`${normalizedBasePath}?instance=all`}
         class={`tab font-data text-xs ${
           selected === "all" ? "tab-active" : ""
         }`}
@@ -30,7 +33,7 @@ export function InstanceSelector(
         <a
           key={inst.instance.name}
           role="tab"
-          href={`${basePath}?instance=${inst.instance.name}`}
+          href={`${normalizedBasePath}?instance=${inst.instance.name}`}
           class={`tab font-data text-xs ${
             selected === inst.instance.name ? "tab-active" : ""
           }`}

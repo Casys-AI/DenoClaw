@@ -114,7 +114,7 @@ export default function Network({ data }: { data: NetworkData }) {
                         class="flex items-center justify-between"
                       >
                         <a
-                          href={`/agents/${agent.agentId}`}
+                          href={`agents/${agent.agentId}`}
                           class="link link-primary text-sm"
                         >
                           {agent.agentId}

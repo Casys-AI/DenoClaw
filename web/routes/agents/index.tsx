@@ -10,9 +10,8 @@ import { StatusBadge } from "../../components/StatusBadge.tsx";
 import { InstanceSelector } from "../../components/InstanceSelector.tsx";
 import type { AgentMetrics, AgentStatusEntry } from "../../lib/types.ts";
 import {
-  CreateAgentButton,
-  CreateAgentModal,
-} from "../../components/CreateAgentModal.tsx";
+  default as CreateAgentModal,
+} from "../../islands/CreateAgentModal.tsx";
 import { getBrokerUrl } from "../../lib/api-client.ts";
 
 export const handler = {
@@ -57,7 +56,7 @@ export default function AgentsList(
     <div class="space-y-4">
       <div class="flex justify-between items-center">
         <h1 class="text-2xl font-display font-bold">Agents</h1>
-        <CreateAgentButton />
+        <CreateAgentModal brokerUrl={getBrokerUrl()} />
       </div>
 
       {/* Instance selector */}
@@ -136,7 +135,7 @@ export default function AgentsList(
                     >
                       <td>
                         <a
-                          href={`/agents/${agent.agentId}`}
+                          href={`agents/${agent.agentId}`}
                           class="link link-primary font-medium"
                         >
                           {agent.agentId}
@@ -204,8 +203,6 @@ export default function AgentsList(
             </table>
           </div>
         )}
-
-      <CreateAgentModal brokerUrl={getBrokerUrl()} />
     </div>
   );
 }

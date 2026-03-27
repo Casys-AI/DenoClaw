@@ -2,11 +2,13 @@
   "name": "@denoclaw/denoclaw",
   "version": "0.1.0",
   "exports": "./mod.ts",
+  "nodeModulesDir": "auto",
   "tasks": {
     "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all --env main.ts",
     "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts",
     "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
-    "dashboard": "deno run --unstable-kv --unstable-cron --allow-all --env web/dev.ts",
+    "dashboard": "deno run -A npm:vite --config vite.config.ts",
+    "dashboard:build": "deno run -A npm:vite build --config vite.config.ts",
     "test": "deno test --unstable-kv --allow-all",
     "check": "deno check main.ts mod.ts",
     "lint": "deno lint",
@@ -24,13 +26,17 @@
     "@deno/sandbox": "jsr:@deno/sandbox@^0",
     "jose": "jsr:@panva/jose@^6",
     "@olli/kvdex": "jsr:@olli/kvdex@^3",
+    "fresh": "jsr:@fresh/core@^2",
     "@fresh/core": "jsr:@fresh/core@^2",
+    "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@^1",
     "preact": "npm:preact@^10",
     "preact/jsx-runtime": "npm:preact@^10/jsx-runtime",
     "preact/jsx-dev-runtime": "npm:preact@^10/jsx-dev-runtime",
     "@preact/signals": "npm:@preact/signals@^2",
+    "vite": "npm:vite@^7",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4",
     "tailwindcss": "npm:tailwindcss@^4",
-    "daisyui": "npm:daisyui@^5"
+    "daisyui": "npm:daisyui@^5.5.19"
   },
   "compilerOptions": {
     "strict": true,

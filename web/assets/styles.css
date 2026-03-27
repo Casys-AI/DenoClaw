@@ -1,51 +1,81 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @plugin "daisyui";
 
-/* ── Digital Monolith theme for DaisyUI ──────────────── */
-
 @plugin "daisyui/theme" {
-  name: "monolith";
+  name: "denoclaw";
   default: true;
   prefersdark: true;
 
-  --color-base-100: #131313;
-  --color-base-200: #0e0e0e;
-  --color-base-300: #000000;
-  --color-base-content: #e5e5e5;
+  --color-base-100: oklch(5% 0.02 260);
+  --color-base-200: oklch(10% 0.025 255);
+  --color-base-300: oklch(14% 0.03 250);
+  --color-base-content: oklch(92% 0.01 250);
 
-  --color-neutral: #1a1a1a;
-  --color-neutral-content: #ababab;
+  --color-neutral: oklch(18% 0.02 250);
+  --color-neutral-content: oklch(65% 0.02 250);
 
-  --color-primary: #00c2ff;
-  --color-primary-content: #001e2b;
+  --color-primary: oklch(68% 0.16 245);
+  --color-primary-content: oklch(5% 0.02 260);
 
-  --color-secondary: #0055ff;
-  --color-secondary-content: #ffffff;
+  --color-secondary: oklch(48% 0.2 275);
+  --color-secondary-content: oklch(95% 0.01 260);
 
-  --color-accent: #00c2ff;
-  --color-accent-content: #001e2b;
+  --color-accent: oklch(72% 0.1 230);
+  --color-accent-content: oklch(5% 0.02 260);
 
-  --color-success: #22c55e;
-  --color-success-content: #002109;
+  --color-success: oklch(65% 0.2 155);
+  --color-success-content: oklch(5% 0 0);
 
-  --color-error: #ef4444;
-  --color-error-content: #ffffff;
+  --color-error: oklch(60% 0.24 25);
+  --color-error-content: oklch(95% 0 0);
 
-  --color-warning: #f59e0b;
-  --color-warning-content: #1a0800;
+  --color-warning: oklch(78% 0.16 80);
+  --color-warning-content: oklch(10% 0 0);
 
-  --color-info: #3b82f6;
-  --color-info-content: #ffffff;
+  --color-info: oklch(62% 0.18 255);
+  --color-info-content: oklch(95% 0 0);
 
-  --rounded-box: 0;
-  --rounded-btn: 0;
-  --rounded-badge: 0;
+  --rounded-box: 0.25rem;
+  --rounded-btn: 0.2rem;
+  --rounded-badge: 0.15rem;
 }
-
-/* ── Digital Monolith extras ─────────────────────────── */
 
 body {
   font-family: "Inter", system-ui, sans-serif;
+  background:
+    radial-gradient(1px 1px at 10% 15%, rgba(180, 200, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 25% 35%, rgba(180, 200, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 45% 8%, rgba(200, 220, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 60% 42%, rgba(180, 200, 255, 0.2), transparent),
+    radial-gradient(1px 1px at 75% 18%, rgba(200, 220, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 88% 55%, rgba(180, 200, 255, 0.15), transparent),
+    radial-gradient(1px 1px at 15% 72%, rgba(200, 220, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 35% 88%, rgba(180, 200, 255, 0.3), transparent),
+    radial-gradient(1px 1px at 55% 65%, rgba(200, 220, 255, 0.2), transparent),
+    radial-gradient(1px 1px at 92% 80%, rgba(180, 200, 255, 0.35), transparent),
+    radial-gradient(
+    1.5px 1.5px at 5% 50%,
+    rgba(200, 220, 255, 0.5),
+    transparent
+  ),
+    radial-gradient(
+    1.5px 1.5px at 50% 25%,
+    rgba(200, 220, 255, 0.45),
+    transparent
+  ),
+    radial-gradient(
+    1.5px 1.5px at 80% 70%,
+    rgba(200, 220, 255, 0.4),
+    transparent
+  ),
+    linear-gradient(
+    180deg,
+    oklch(5% 0.02 260) 0%,
+    oklch(6% 0.03 265) 40%,
+    oklch(7% 0.04 270) 100%
+  );
+  background-attachment: fixed;
 }
 
 .font-display {
@@ -56,35 +86,59 @@ body {
   font-family: "JetBrains Mono", "Fira Code", monospace;
 }
 
-/* Deno Deploy gradient */
 .gradient-deno {
-  background: linear-gradient(135deg, #00c2ff, #0055ff);
+  background: linear-gradient(
+    135deg,
+    oklch(35% 0.12 270) 0%,
+    oklch(50% 0.18 255) 40%,
+    oklch(65% 0.14 235) 100%
+  );
 }
 
 .text-gradient-deno {
-  background: linear-gradient(135deg, #00c2ff, #0055ff);
+  background: linear-gradient(
+    135deg,
+    oklch(55% 0.15 270),
+    oklch(70% 0.16 245)
+  );
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Live pulse */
-@keyframes pulse-live {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-.pulse-live {
-  animation: pulse-live 2s ease-in-out infinite;
+.card {
+  border: 1px solid oklch(20% 0.03 255 / 0.4);
+  box-shadow:
+    0 0 0 1px oklch(25% 0.04 260 / 0.1),
+    0 4px 24px oklch(20% 0.05 265 / 0.15);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
-/* Navbar active underline */
+.card:hover {
+  border-color: oklch(30% 0.05 250 / 0.6);
+  box-shadow:
+    0 0 0 1px oklch(30% 0.06 260 / 0.15),
+    0 4px 32px oklch(25% 0.06 265 / 0.25);
+}
+
+.stats {
+  border: 1px solid oklch(20% 0.03 255 / 0.3);
+}
+
+.stat + .stat {
+  border-color: oklch(20% 0.03 255 / 0.2);
+}
+
+.navbar {
+  background: oklch(8% 0.025 260 / 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid oklch(22% 0.04 255 / 0.3);
+}
+
 .nav-active {
   position: relative;
 }
+
 .nav-active::after {
   content: "";
   position: absolute;
@@ -92,8 +146,77 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, #00c2ff, #0055ff);
+  background: linear-gradient(
+    90deg,
+    oklch(40% 0.15 275),
+    oklch(65% 0.14 245),
+    oklch(40% 0.15 275)
+  );
+  border-radius: 1px;
 }
 
-/* Google fonts */
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+@keyframes pulse-live {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+}
+
+.pulse-live {
+  animation: pulse-live 2.5s ease-in-out infinite;
+}
+
+.progress::-webkit-progress-value {
+  background: linear-gradient(90deg, oklch(40% 0.15 270), oklch(60% 0.16 245));
+}
+
+.progress::-moz-progress-bar {
+  background: linear-gradient(90deg, oklch(40% 0.15 270), oklch(60% 0.16 245));
+}
+
+.badge-success {
+  box-shadow: 0 0 6px oklch(65% 0.2 155 / 0.3);
+}
+
+.badge-error {
+  box-shadow: 0 0 6px oklch(60% 0.24 25 / 0.3);
+}
+
+.badge-warning {
+  box-shadow: 0 0 6px oklch(78% 0.16 80 / 0.2);
+}
+
+.badge-info {
+  box-shadow: 0 0 6px oklch(62% 0.18 255 / 0.3);
+}
+
+.alert {
+  border: 1px solid oklch(25% 0.04 255 / 0.3);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: oklch(8% 0.02 260);
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(25% 0.04 255);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(35% 0.06 250);
+}
+
+::selection {
+  background: oklch(40% 0.12 255 / 0.4);
+  color: oklch(95% 0.01 250);
+}

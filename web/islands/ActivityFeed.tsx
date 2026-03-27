@@ -90,7 +90,11 @@ function parseSSEEvent(
   }
 }
 
-const MAX_EVENTS = 500;
+const MAX_EVENTS = 200;
+const MAX_PENDING_EVENTS = 200;
+const FLUSH_INTERVAL_MS = 250;
+const INITIAL_VISIBLE_EVENTS = 50;
+const LOAD_MORE_EVENTS = 50;
 
 const FILTER_TYPES = ["All", "status", "A2A", "snapshot", "registry"] as const;
 
@@ -98,11 +102,19 @@ export default function ActivityFeed() {
   const [filter, setFilter] = useState<string>("All");
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_EVENTS);
   const counterRef = useRef(0);
+  const pendingEventsRef = useRef<ActivityEvent[]>([]);
 
   useEffect(() => {
     // Connect via local proxy (same origin, no CORS)
-    const es = new EventSource(`/api/events`);
+    const es = new EventSource("api/events");
+    const flushTimer = setInterval(() => {
+      if (pendingEventsRef.current.length === 0) return;
+
+      const batch = pendingEventsRef.current.splice(0).reverse();
+      setEvents((prev) => [...batch, ...prev].slice(0, MAX_EVENTS));
+    }, FLUSH_INTERVAL_MS);
 
     es.onopen = () => {
       setConnected(true);
@@ -113,7 +125,14 @@ export default function ActivityFeed() {
         const data = JSON.parse(e.data);
         const event = parseSSEEvent(data, counterRef);
         if (!event) return;
-        setEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS));
+
+        pendingEventsRef.current.push(event);
+        if (pendingEventsRef.current.length > MAX_PENDING_EVENTS) {
+          pendingEventsRef.current.splice(
+            0,
+            pendingEventsRef.current.length - MAX_PENDING_EVENTS,
+          );
+        }
       } catch { /* ignore parse errors */ }
     };
 
@@ -121,12 +140,21 @@ export default function ActivityFeed() {
       setConnected(false);
     };
 
-    return () => es.close();
+    return () => {
+      clearInterval(flushTimer);
+      pendingEventsRef.current = [];
+      es.close();
+    };
   }, []);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_EVENTS);
+  }, [filter]);
 
   const filtered = filter === "All"
     ? events
     : events.filter((e) => e.type === filter);
+  const visibleEvents = filtered.slice(0, visibleCount);
 
   return (
     <div>
@@ -140,7 +168,9 @@ export default function ActivityFeed() {
           />
           <span class="text-xs font-data text-neutral-content">
             {connected ? "Connected" : "Disconnected"} ·{" "}
-            {filtered.length}/{events.length} events
+            {visibleEvents.length}/{filtered.length} shown · {events.length}
+            {" "}
+            buffered
           </span>
         </div>
         <div class="join">
@@ -180,7 +210,7 @@ export default function ActivityFeed() {
                 </tr>
               )
               : (
-                filtered.map((ev) => (
+                visibleEvents.map((ev) => (
                   <tr key={ev.id} class="hover">
                     <td class="text-neutral-content">{ev.time}</td>
                     <td>
@@ -198,6 +228,23 @@ export default function ActivityFeed() {
           </tbody>
         </table>
       </div>
+
+      {filtered.length > visibleCount && (
+        <div class="flex justify-center mt-4">
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            onClick={() =>
+              setVisibleCount((count) =>
+                Math.min(count + LOAD_MORE_EVENTS, filtered.length)
+              )}
+          >
+            Load {Math.min(LOAD_MORE_EVENTS, filtered.length - visibleCount)}
+            {" "}
+            more
+          </button>
+        </div>
+      )}
     </div>
   );
 }

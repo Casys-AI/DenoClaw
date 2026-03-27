@@ -22,7 +22,7 @@ export default function EventStream({ brokerUrl }: EventStreamProps) {
 
     function connect() {
       // Connect via local proxy (same origin, no CORS)
-      es = new EventSource(`/api/events`);
+      es = new EventSource("api/events");
 
       es.onopen = () => {
         connected.value = true;

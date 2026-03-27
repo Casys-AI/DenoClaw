@@ -4,7 +4,7 @@ export default function Login() {
       <div class="card bg-base-200 w-full max-w-sm">
         <div class="card-body items-center text-center">
           {/* Logo */}
-          <img src="/logo.png" alt="DenoClaw" class="w-20 h-20 mb-2" />
+          <img src="logo.png" alt="DenoClaw" class="w-20 h-20 mb-2" />
           <h1 class="font-display text-2xl font-bold tracking-tight">
             DenoClaw
           </h1>
@@ -13,7 +13,7 @@ export default function Login() {
           </p>
 
           {/* Login form */}
-          <form class="w-full space-y-4" method="POST" action="/login">
+          <form class="w-full space-y-4" method="POST" action="login">
             <div class="form-control w-full">
               <label class="label">
                 <span class="label-text text-xs font-data uppercase tracking-wider">
@@ -53,7 +53,7 @@ export default function Login() {
 
           {/* GitHub OAuth */}
           <a
-            href="/auth/github"
+            href="../auth/github"
             class="btn btn-outline btn-sm w-full gap-2"
           >
             <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">

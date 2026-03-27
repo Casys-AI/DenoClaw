@@ -3,6 +3,7 @@ import { getAllInstancesData, aggregateSummaries, type InstanceData } from "../l
 import { formatCompact, formatCost } from "../lib/format.ts";
 import { StatusDot } from "../components/StatusBadge.tsx";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
+import { AlertStrip } from "../components/AlertStrip.tsx";
 import type { MetricsSummary, AgentStatusEntry } from "../lib/types.ts";
 
 interface OverviewData {
@@ -42,18 +43,8 @@ export default function Overview({ data }: { data: OverviewData }) {
       {/* Instance Selector */}
       <InstanceSelector instances={instances} selected={selectedInstance} basePath="/overview" />
 
-      {/* Alerts */}
-      {agents.some((a) => a.status === "stopped") && (
-        <div role="alert" class="alert alert-error">
-          <span>
-            Agent "{agents.find((a) => a.status === "stopped")?.agentId}"
-            {agents.find((a) => a.status === "stopped")?.instance && (
-              <span class="font-data text-xs"> ({agents.find((a) => a.status === "stopped")?.instance})</span>
-            )}
-            {" "}stopped unexpectedly.
-          </span>
-        </div>
-      )}
+      {/* Alert system */}
+      <AlertStrip agents={agents} totalCostUsd={summary.totalCostUsd} />
 
       {/* KPIs — DaisyUI stats */}
       <div class="stats stats-horizontal w-full bg-base-200">

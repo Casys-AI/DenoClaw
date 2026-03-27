@@ -1,6 +1,7 @@
 import { page } from "@fresh/core";
-import { getSummary, getAllAgentMetrics, getBrokerUrl } from "../lib/api-client.ts";
+import { getAllInstancesData, aggregateSummaries, type InstanceData, getBrokerUrl } from "../lib/api-client.ts";
 import { formatCompact, formatCost } from "../lib/format.ts";
+import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import type { MetricsSummary, AgentMetrics } from "../lib/types.ts";
 
 interface HourlyBucket {
@@ -12,23 +13,38 @@ interface HourlyBucket {
 }
 
 interface CostData {
+  instances: InstanceData[];
   summary: MetricsSummary | null;
   agents: AgentMetrics[];
   hourly: HourlyBucket[];
+  selectedInstance: string;
 }
 
 export const handler = {
-  async GET(_req: Request) {
-    const [summary, agents] = await Promise.all([getSummary(), getAllAgentMetrics()]);
+  async GET(req: Request) {
+    const url = new URL(req.url);
+    const selectedInstance = url.searchParams.get("instance") || "all";
+    const instances = await getAllInstancesData();
+    const filtered = selectedInstance === "all" ? instances : instances.filter((i) => i.instance.name === selectedInstance);
+    const summary = aggregateSummaries(filtered);
+    const agents: AgentMetrics[] = [];
 
-    // Fetch hourly data for all agents
-    const brokerUrl = getBrokerUrl();
+    // Fetch metrics from filtered instances
     const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
     const headers: HeadersInit = token ? { "Authorization": `Bearer ${token}` } : {};
+    for (const inst of filtered) {
+      if (!inst.reachable) continue;
+      try {
+        const res = await fetch(`${inst.instance.url}/stats/agents`, { headers });
+        if (res.ok) agents.push(...(await res.json()));
+      } catch { /* skip */ }
+    }
+
+    // Fetch hourly data for all agents
     let hourly: HourlyBucket[] = [];
     try {
       for (const agent of agents) {
-        const res = await fetch(`${brokerUrl}/stats/history?agent=${agent.agentId}`, { headers });
+        const res = await fetch(`${filtered[0]?.instance.url ?? getBrokerUrl()}/stats/history?agent=${agent.agentId}`, { headers });
         if (res.ok) {
           const data: HourlyBucket[] = await res.json();
           hourly.push(...data);
@@ -36,12 +52,12 @@ export const handler = {
       }
     } catch { /* gateway not available */ }
 
-    return page({ summary, agents, hourly } as CostData);
+    return page({ instances, summary, agents, hourly, selectedInstance } as CostData);
   },
 };
 
 export default function Cost({ data }: { data: CostData }) {
-  const { summary, agents, hourly } = data;
+  const { instances, summary, agents, hourly, selectedInstance } = data;
   const totalCost = summary?.totalCostUsd ?? 0;
   const sortedByCost = [...agents].sort((a, b) => b.llm.estimatedCostUsd - a.llm.estimatedCostUsd);
   const maxCost = sortedByCost[0]?.llm.estimatedCostUsd ?? 1;
@@ -66,6 +82,7 @@ export default function Cost({ data }: { data: CostData }) {
   return (
     <div class="space-y-6">
       <h1 class="text-2xl font-display font-bold">Cost Analytics</h1>
+      <InstanceSelector instances={instances} selected={selectedInstance} basePath="/cost" />
 
       {/* KPIs */}
       <div class="stats stats-horizontal w-full bg-base-200">

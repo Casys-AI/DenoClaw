@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="web/static/logo.png" alt="DenoClaw" width="128" />
+</p>
+
 # DenoClaw
 
 Agent AI Deno-natif. Zéro dépendance Node.js. Inspiré de

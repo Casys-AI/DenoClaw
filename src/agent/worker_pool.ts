@@ -16,6 +16,12 @@ interface AgentWorker {
   ready: boolean;
 }
 
+export interface WorkerPoolCallbacks {
+  onWorkerReady?: (agentId: string) => void;
+  onWorkerStopped?: (agentId: string) => void;
+  onAgentMessage?: (fromAgent: string, toAgent: string, message: string) => void;
+}
+
 const DEFAULT_TIMEOUT_MS = 120_000;
 const INIT_TIMEOUT_MS = 30_000;
 const DATA_DIR = "./data";
@@ -24,15 +30,30 @@ const DATA_DIR = "./data";
  * WorkerPool — spawne et gère un Worker par agent.
  * Communication via postMessage (protocol typé WorkerRequest/WorkerResponse).
  */
+interface AgentMessagePending {
+  fromAgent: string;
+  sourceRequestId: string;
+  timer: number;
+}
+
 export class WorkerPool {
   private config: WorkerConfig;
   private agents: Map<string, AgentWorker> = new Map();
   private pending: Map<string, PendingRequest> = new Map();
+  private agentPending: Map<string, AgentMessagePending> = new Map();
   private entrypointUrl: string;
+  private callbacks: WorkerPoolCallbacks;
+  private sharedKv: Deno.Kv | null = null;
 
-  constructor(config: WorkerConfig) {
+  constructor(config: WorkerConfig, callbacks?: WorkerPoolCallbacks) {
     this.config = config;
+    this.callbacks = callbacks ?? {};
     this.entrypointUrl = new URL("./worker_entrypoint.ts", import.meta.url).href;
+  }
+
+  /** Inject shared KV for observability writes (task tracking, agent status). */
+  setSharedKv(kv: Deno.Kv): void {
+    this.sharedKv = kv;
   }
 
   async start(agentIds: string[]): Promise<void> {
@@ -75,6 +96,7 @@ export class WorkerPool {
             this.handleWorkerMessage(agentId, ev.data);
           });
           log.info(`Worker ${agentId} prêt`);
+          this.callbacks.onWorkerReady?.(agentId);
           resolve();
         }
       };
@@ -103,7 +125,7 @@ export class WorkerPool {
     });
   }
 
-  private handleWorkerMessage(_agentId: string, msg: WorkerResponse): void {
+  private handleWorkerMessage(fromAgentId: string, msg: WorkerResponse): void {
     switch (msg.type) {
       case "result": {
         const req = this.pending.get(msg.requestId);
@@ -124,6 +146,45 @@ export class WorkerPool {
         } else {
           log.error(`Worker erreur non corrélée: [${msg.code}] ${msg.message}`);
         }
+        break;
+      }
+
+      case "agent_send": {
+        this.routeAgentMessage(fromAgentId, msg.toAgent, msg.message, msg.requestId);
+        break;
+      }
+
+      case "agent_result": {
+        const pendingReq = this.agentPending.get(msg.requestId);
+        if (pendingReq) {
+          clearTimeout(pendingReq.timer);
+          this.agentPending.delete(msg.requestId);
+          const source = this.agents.get(pendingReq.fromAgent);
+          if (source) {
+            const response: WorkerRequest = {
+              type: "agent_response",
+              requestId: pendingReq.sourceRequestId,
+              content: msg.content,
+              error: msg.error,
+            };
+            source.worker.postMessage(response);
+          }
+        }
+        break;
+      }
+
+      case "task_started": {
+        this.writeActiveTask(fromAgentId, msg.requestId, msg.sessionId, msg.traceId);
+        break;
+      }
+
+      case "task_completed": {
+        this.clearActiveTask(fromAgentId);
+        break;
+      }
+
+      case "agent_task": {
+        this.writeAgentTask(msg);
         break;
       }
 
@@ -178,9 +239,10 @@ export class WorkerPool {
       } catch {
         log.debug(`Worker ${agentId} déjà terminé`);
       }
+      this.callbacks.onWorkerStopped?.(agentId);
     }
 
-    // Fix #3: drain pending map before iterating
+    // Drain pending maps
     const snapshot = [...this.pending.entries()];
     this.pending.clear();
     for (const [_, req] of snapshot) {
@@ -188,8 +250,101 @@ export class WorkerPool {
       req.reject(new AgentError("WORKER_POOL_SHUTDOWN", {}, "WorkerPool is shutting down"));
     }
 
+    for (const [_, pendingReq] of this.agentPending) {
+      clearTimeout(pendingReq.timer);
+    }
+    this.agentPending.clear();
+
     this.agents.clear();
     log.info("WorkerPool arrêté");
+  }
+
+  // ── Shared KV writes (observability, on behalf of Workers) ──
+
+  private writeActiveTask(agentId: string, taskId: string, sessionId: string, traceId?: string): void {
+    if (!this.sharedKv) return;
+    this.sharedKv.set(["agents", agentId, "active_task"], {
+      taskId, sessionId, traceId, startedAt: new Date().toISOString(),
+    }).catch(() => { /* best-effort */ });
+  }
+
+  private clearActiveTask(agentId: string): void {
+    if (!this.sharedKv) return;
+    this.sharedKv.delete(["agents", agentId, "active_task"]).catch(() => { /* best-effort */ });
+  }
+
+  private writeAgentTask(msg: { taskId: string; from: string; to: string; message: string; status: string; result?: string; traceId?: string }): void {
+    if (!this.sharedKv) return;
+    const task = { ...msg, timestamp: new Date().toISOString() };
+    this.sharedKv.atomic()
+      .set(["agent_tasks", msg.taskId], task)
+      .set(["_dashboard", "agent_task_update"], task)
+      .commit()
+      .catch(() => { /* best-effort */ });
+  }
+
+  // ── Agent Message Routing ───────────────────────────────
+
+  private routeAgentMessage(fromAgent: string, toAgent: string, message: string, sourceRequestId: string): void {
+    // Peer check
+    const registry = this.config.agents.registry;
+    if (registry) {
+      const sender = registry[fromAgent];
+      const target = registry[toAgent];
+
+      // Closed by default (ADR-006): undefined/empty = deny all, must explicitly list peers
+      const senderPeers = sender?.peers ?? [];
+      if (!senderPeers.includes(toAgent) && !senderPeers.includes("*")) {
+        this.rejectAgentRequest(fromAgent, sourceRequestId, "PEER_NOT_ALLOWED", `Agent "${fromAgent}" cannot send to "${toAgent}" (not in peers)`);
+        return;
+      }
+      const targetAccept = target?.acceptFrom ?? [];
+      if (!targetAccept.includes(fromAgent) && !targetAccept.includes("*")) {
+        this.rejectAgentRequest(fromAgent, sourceRequestId, "PEER_REJECTED", `Agent "${toAgent}" does not accept from "${fromAgent}"`);
+        return;
+      }
+    }
+
+    // Target worker exists?
+    const targetEntry = this.agents.get(toAgent);
+    if (!targetEntry || !targetEntry.ready) {
+      this.rejectAgentRequest(fromAgent, sourceRequestId, "NO_WORKER", `Agent "${toAgent}" not found or not ready`);
+      return;
+    }
+
+    // Callback for metrics/logging
+    this.callbacks.onAgentMessage?.(fromAgent, toAgent, message);
+
+    // Route to target Worker with timeout
+    const deliverRequestId = generateId();
+    const timer = setTimeout(() => {
+      this.agentPending.delete(deliverRequestId);
+      this.rejectAgentRequest(fromAgent, sourceRequestId, "AGENT_MSG_TIMEOUT", `Agent "${toAgent}" did not respond within 120s`);
+    }, DEFAULT_TIMEOUT_MS);
+    this.agentPending.set(deliverRequestId, { fromAgent, sourceRequestId, timer });
+
+    const deliverMsg: WorkerRequest = {
+      type: "agent_deliver",
+      requestId: deliverRequestId,
+      fromAgent,
+      message,
+    };
+    targetEntry.worker.postMessage(deliverMsg);
+
+    log.info(`Agent message: ${fromAgent} → ${toAgent}`);
+  }
+
+  private rejectAgentRequest(fromAgent: string, sourceRequestId: string, code: string, message: string): void {
+    const source = this.agents.get(fromAgent);
+    if (source) {
+      const response: WorkerRequest = {
+        type: "agent_response",
+        requestId: sourceRequestId,
+        content: `[${code}] ${message}`,
+        error: true,
+      };
+      source.worker.postMessage(response);
+    }
   }
 
   getAgentIds(): string[] {

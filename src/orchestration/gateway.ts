@@ -5,8 +5,11 @@ import type { SessionManager } from "../messaging/session.ts";
 import type { ChannelManager } from "../messaging/channels/manager.ts";
 import type { AuthManager, AuthResult } from "./auth.ts";
 import type { WorkerPool } from "../agent/worker_pool.ts";
+import type { MetricsCollector } from "../telemetry/metrics.ts";
 import { TelegramChannel } from "../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../messaging/channels/webhook.ts";
+import { generateAllCards } from "../messaging/a2a/card.ts";
+import { listAgentStatuses, getAgentStatus, listCronJobs, listAgentTasks, createSSEResponse } from "./monitoring.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
@@ -15,6 +18,9 @@ export interface GatewayDeps {
   channels: ChannelManager;
   workerPool: WorkerPool;
   auth?: AuthManager;
+  metrics?: MetricsCollector;
+  kv?: Deno.Kv;
+  freshHandler?: (req: Request) => Promise<Response>;
 }
 
 /**
@@ -29,6 +35,9 @@ export class Gateway {
   private channels: ChannelManager;
   private workerPool: WorkerPool;
   private auth: AuthManager | null;
+  private metrics: MetricsCollector | null;
+  private kv: Deno.Kv | null;
+  private freshHandler: ((req: Request) => Promise<Response>) | null;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
@@ -40,6 +49,9 @@ export class Gateway {
     this.channels = deps.channels;
     this.workerPool = deps.workerPool;
     this.auth = deps.auth ?? null;
+    this.metrics = deps.metrics ?? null;
+    this.kv = deps.kv ?? null;
+    this.freshHandler = deps.freshHandler ?? null;
   }
 
   async start(): Promise<void> {
@@ -155,6 +167,11 @@ export class Gateway {
   private async handleHttp(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
+    // Dashboard Fresh handler — avant auth (gère sa propre auth si besoin)
+    if (this.freshHandler && (url.pathname.startsWith("/ui") || url.pathname === "/favicon.ico")) {
+      return await this.freshHandler(req);
+    }
+
     if (url.pathname === "/") {
       return new Response("DenoClaw Gateway");
     }
@@ -262,6 +279,126 @@ export class Gateway {
       };
 
       return response;
+    }
+
+    // ── Monitoring endpoints ─────────────────────────────
+
+    if (url.pathname === "/stats") {
+      if (!this.metrics) {
+        return Response.json({
+          mode: "local",
+          agents: this.workerPool.getAgentIds(),
+          sessions: (await this.session.getActive()).length,
+        });
+      }
+      const agentId = url.searchParams.get("agent");
+      if (agentId) {
+        return Response.json(await this.metrics.getAgentMetrics(agentId));
+      }
+      return Response.json(await this.metrics.getSummary());
+    }
+
+    if (url.pathname === "/stats/agents") {
+      if (!this.metrics) {
+        return Response.json(
+          { error: { code: "NO_METRICS", recovery: "Pass MetricsCollector to GatewayDeps" } },
+          { status: 503 },
+        );
+      }
+      return Response.json(await this.metrics.getAllMetrics());
+    }
+
+    // ── Agent task endpoints (before the /agents/ wildcard) ──
+
+    if (url.pathname === "/agents/tasks") {
+      if (!this.kv) return Response.json([]);
+      return Response.json(await listAgentTasks(this.kv));
+    }
+
+    if (url.pathname.match(/^\/agents\/[^/]+\/task$/) && req.method === "POST") {
+      const agentName = url.pathname.split("/")[2];
+      if (!agentName) return new Response("Not Found", { status: 404 });
+
+      if (!this.workerPool.isReady(agentName)) {
+        return Response.json(
+          { error: { code: "AGENT_NOT_FOUND", context: { agentId: agentName }, recovery: "Check agent name" } },
+          { status: 404 },
+        );
+      }
+
+      try {
+        const body = await req.json() as { message: string; sessionId?: string };
+        if (!body.message) {
+          return Response.json(
+            { error: { code: "INVALID_INPUT", context: { field: "message" }, recovery: "Provide a message" } },
+            { status: 400 },
+          );
+        }
+        const sessionId = body.sessionId || `agent-task-${crypto.randomUUID()}`;
+        const result = await this.workerPool.send(agentName, sessionId, body.message);
+        return Response.json({ agentId: agentName, response: result.content });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return Response.json(
+          { error: { code: "AGENT_TASK_FAILED", context: { message: msg }, recovery: "Check agent and message" } },
+          { status: 500 },
+        );
+      }
+    }
+
+    if (url.pathname === "/agents") {
+      if (!this.kv) {
+        // Fallback: return agent IDs from WorkerPool without status
+        return Response.json(this.workerPool.getAgentIds().map((id) => ({
+          agentId: id,
+          status: this.workerPool.isReady(id) ? "running" : "stopped",
+        })));
+      }
+      return Response.json(await listAgentStatuses(this.kv));
+    }
+
+    if (url.pathname.startsWith("/agents/")) {
+      const agentId = url.pathname.split("/")[2];
+      if (!agentId) return new Response("Not Found", { status: 404 });
+
+      const status = this.kv ? await getAgentStatus(this.kv, agentId) : null;
+      const metrics = this.metrics ? await this.metrics.getAgentMetrics(agentId) : null;
+
+      if (!status && !metrics) {
+        return Response.json(
+          { error: { code: "AGENT_NOT_FOUND", context: { agentId }, recovery: "Check agent ID" } },
+          { status: 404 },
+        );
+      }
+
+      return Response.json({ ...status, metrics });
+    }
+
+    if (url.pathname === "/cron") {
+      if (!this.kv) {
+        return Response.json([]);
+      }
+      return Response.json(await listCronJobs(this.kv));
+    }
+
+    if (url.pathname === "/events") {
+      if (!this.kv) {
+        return Response.json(
+          { error: { code: "NO_KV", recovery: "Pass shared KV to GatewayDeps" } },
+          { status: 503 },
+        );
+      }
+      const agentIds = this.workerPool.getAgentIds();
+      return createSSEResponse(this.kv, agentIds);
+    }
+
+    // ── Discovery ─────────────────────────────────────────
+
+    if (url.pathname === "/.well-known/agent-card.json") {
+      if (!this.config.agents?.registry) return Response.json([], { status: 200 });
+      const baseUrl = `${url.protocol}//${url.host}`;
+      const cards = generateAllCards(this.config.agents, baseUrl);
+      return Response.json(cards);
     }
 
     return new Response("Not Found", { status: 404 });

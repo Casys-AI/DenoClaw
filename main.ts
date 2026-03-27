@@ -19,6 +19,8 @@ import {
 } from "./src/cli/setup.ts";
 import { BrokerServer } from "./src/orchestration/broker.ts";
 import { LocalRelay } from "./src/orchestration/relay.ts";
+import { MetricsCollector } from "./src/telemetry/metrics.ts";
+import { writeAgentStatus, updateAgentsList } from "./src/orchestration/monitoring.ts";
 import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
@@ -118,13 +120,36 @@ async function gateway(config: Config): Promise<void> {
     console.log("Aucun agent configuré. Créez-en un d'abord :\n\n  denoclaw agent create <nom>\n");
     return;
   }
-  const workerPool = new WorkerPool(config);
+
+  // Ensure data dir exists before opening KV
+  await Deno.mkdir("./data", { recursive: true });
+
+  // Shared KV — single instance for metrics, agent status, dashboard
+  const kv = await Deno.openKv("./data/shared.db");
+  const metrics = new MetricsCollector(kv);
+
+  // WorkerPool with lifecycle callbacks → writes agent status to shared KV
+  const workerPool = new WorkerPool(config, {
+    onWorkerReady: (id) => {
+      writeAgentStatus(kv, id, { status: "running", startedAt: new Date().toISOString() });
+    },
+    onWorkerStopped: (id) => {
+      writeAgentStatus(kv, id, { status: "stopped", stoppedAt: new Date().toISOString() });
+    },
+    onAgentMessage: (from, to, message) => {
+      metrics.recordAgentMessage(from, to);
+      log.debug(`Agent message routed: ${from} → ${to} (${message.slice(0, 50)}...)`);
+    },
+  });
+  workerPool.setSharedKv(kv);
   await workerPool.start(agentIds);
+  // Write complete agents list once all workers are ready
+  await updateAgentsList(kv, workerPool.getAgentIds());
 
   const bus = new MessageBus();
   const session = new SessionManager();
   const channels = new ChannelManager(bus);
-  const gw = new Gateway(config, { bus, session, channels, workerPool });
+  const gw = new Gateway(config, { bus, session, channels, workerPool, metrics, kv });
   await gw.start();
 
   const ac = new AbortController();
@@ -138,6 +163,7 @@ async function gateway(config: Config): Promise<void> {
   } catch {
     await gw.stop();
     workerPool.shutdown();
+    kv.close();
   }
 }
 

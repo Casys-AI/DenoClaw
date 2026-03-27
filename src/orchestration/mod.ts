@@ -8,3 +8,4 @@ export { LocalRelay } from "./relay.ts";
 export { Gateway } from "./gateway.ts";
 export type { GatewayDeps } from "./gateway.ts";
 export { SandboxManager } from "./sandbox.ts";
+export * from "./monitoring.ts";

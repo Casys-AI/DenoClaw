@@ -9,6 +9,7 @@ import { SandboxManager } from "./sandbox.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
+import { createSSEResponse } from "./monitoring.ts";
 import { log } from "../shared/log.ts";
 
 /**
@@ -352,8 +353,8 @@ console.log(await r.text());`;
       timestamp: new Date().toISOString(),
     };
 
-    // Record A2A metrics
-    await this.metrics.recordA2AMessage(msg.from, payload.targetAgent);
+    // Record agent-to-agent metrics
+    await this.metrics.recordAgentMessage(msg.from, payload.targetAgent);
 
     // Check if target agent is on a remote instance (via instance tunnel)
     const remoteTunnel = this.findTunnelForAgent(payload.targetAgent);
@@ -485,6 +486,15 @@ console.log(await r.text());`;
     // Detailed per-agent stats
     if (url.pathname === "/stats/agents") {
       return Response.json(await this.metrics.getAllMetrics());
+    }
+
+    // SSE stream for dashboard real-time updates
+    if (url.pathname === "/events") {
+      const kv = await this.getKv();
+      const agentIds = [...this.tunnels.values()]
+        .filter((t) => t.capabilities.agents)
+        .flatMap((t) => t.capabilities.agents ?? []);
+      return createSSEResponse(kv, agentIds);
     }
 
     return new Response("Not Found", { status: 404 });

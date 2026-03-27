@@ -6,6 +6,7 @@
     "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all --env main.ts",
     "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts",
     "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
+    "dashboard": "deno run --unstable-kv --unstable-cron --allow-all --env web/dev.ts",
     "test": "deno test --unstable-kv --allow-all",
     "check": "deno check main.ts mod.ts",
     "lint": "deno lint",
@@ -17,12 +18,21 @@
     "@std/fmt": "jsr:@std/fmt@^1",
     "@std/async": "jsr:@std/async@^1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1",
-    "@std/assert": "jsr:@std/assert@^1"
+    "@std/assert": "jsr:@std/assert@^1",
+    "@fresh/core": "jsr:@fresh/core@^2",
+    "preact": "npm:preact@^10",
+    "preact/jsx-runtime": "npm:preact@^10/jsx-runtime",
+    "preact/jsx-dev-runtime": "npm:preact@^10/jsx-dev-runtime",
+    "@preact/signals": "npm:@preact/signals@^2",
+    "tailwindcss": "npm:tailwindcss@^4",
+    "daisyui": "npm:daisyui@^5"
   },
   "compilerOptions": {
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noImplicitReturns": true
+    "noImplicitReturns": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   }
 }

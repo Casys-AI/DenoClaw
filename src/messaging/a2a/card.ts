@@ -64,7 +64,7 @@ export function generateAgentCard(
     description: agent.description || `DenoClaw agent: ${agentName}`,
     version: "1.0.0",
     protocolVersion: "1.0",
-    url: `${baseUrl}/a2a/${agentName}`,
+    url: `${baseUrl}/agents/${agentName}/task`,
     capabilities: {
       streaming: true,
       pushNotifications: false,

@@ -126,3 +126,41 @@ export interface AgentEntry {
   channels?: string[];           // noms des channels assignés
   channelRouting?: ChannelRouting;
 }
+
+// ── Observability types (cross-domain: written by agent/, read by orchestration/) ──
+
+export interface AgentStatusValue {
+  status: "running" | "alive" | "stopped";
+  startedAt?: string;
+  lastHeartbeat?: string;
+  stoppedAt?: string;
+  model?: string;
+}
+
+export interface ActiveTaskEntry {
+  taskId: string;
+  sessionId: string;
+  traceId?: string;
+  startedAt: string;
+}
+
+export interface AgentStatusEntry {
+  agentId: string;
+  status: "running" | "alive" | "stopped";
+  startedAt?: string;
+  lastHeartbeat?: string;
+  stoppedAt?: string;
+  model?: string;
+  activeTask?: ActiveTaskEntry | null;
+}
+
+export interface AgentTaskEntry {
+  id: string;
+  from: string;
+  to: string;
+  message: string;
+  status: string;
+  result?: string;
+  traceId?: string;
+  timestamp: string;
+}

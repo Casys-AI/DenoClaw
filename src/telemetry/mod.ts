@@ -111,3 +111,7 @@ export function spanBusPublish<T>(channelType: string, messageId: string, fn: ()
 // Re-export metrics — tout dans telemetry/
 export { MetricsCollector } from "./metrics.ts";
 export type { AgentMetrics } from "./metrics.ts";
+
+// Re-export traces
+export { TraceWriter, getTrace, getTraceSpans, listAgentTraces } from "./traces.ts";
+export type { TraceRoot, Span, SpanType, SpanData } from "./traces.ts";

@@ -15,6 +15,8 @@ import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 import { WebFetchTool } from "./tools/web.ts";
+import { SendToAgentTool } from "./tools/send_to_agent.ts";
+import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 
@@ -22,6 +24,7 @@ export interface AgentLoopDeps {
   providers?: ProviderManager;
   memory?: Memory;
   tools?: ToolRegistry;
+  sendToAgent?: SendToAgentFn;
 }
 
 export class AgentLoop {
@@ -50,6 +53,7 @@ export class AgentLoop {
     this.maxIterations = maxIterations;
 
     if (!deps?.tools) this.registerBuiltInTools(config);
+    if (deps?.sendToAgent) this.tools.register(new SendToAgentTool(deps.sendToAgent));
   }
 
   private registerBuiltInTools(config: AgentLoopConfig): void {

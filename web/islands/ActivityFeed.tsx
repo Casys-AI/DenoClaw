@@ -1,4 +1,4 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 
 interface ActivityEvent {
@@ -64,7 +64,11 @@ function parseSSEEvent(data: Record<string, unknown>): ActivityEvent | null {
 
 const MAX_EVENTS = 500;
 
+const FILTER_TYPES = ["All", "status", "A2A", "snapshot", "registry"] as const;
+
 export default function ActivityFeed({ brokerUrl: _brokerUrl }: { brokerUrl: string }) {
+  const [filter, setFilter] = useState<string>("All");
+
   useEffect(() => {
     // Connect via local proxy (same origin, no CORS)
     const es = new EventSource(`/api/events`);
@@ -87,14 +91,31 @@ export default function ActivityFeed({ brokerUrl: _brokerUrl }: { brokerUrl: str
     return () => es.close();
   }, []);
 
+  const filtered = filter === "All"
+    ? events.value
+    : events.value.filter((e) => e.type === filter);
+
   return (
     <div>
-      {/* Connection status */}
-      <div class="flex items-center gap-2 mb-3">
-        <span class={`w-2 h-2 rounded-full ${connected.value ? "bg-success" : "bg-error"}`} />
-        <span class="text-xs font-data text-neutral-content">
-          {connected.value ? "Connected" : "Disconnected"} · {events.value.length} events
-        </span>
+      {/* Connection status + filters */}
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class={`w-2 h-2 rounded-full ${connected.value ? "bg-success" : "bg-error"}`} />
+          <span class="text-xs font-data text-neutral-content">
+            {connected.value ? "Connected" : "Disconnected"} · {filtered.length}/{events.value.length} events
+          </span>
+        </div>
+        <div class="join">
+          {FILTER_TYPES.map((t) => (
+            <button
+              key={t}
+              class={`join-item btn btn-xs ${filter === t ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setFilter(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Event table */}
@@ -109,14 +130,14 @@ export default function ActivityFeed({ brokerUrl: _brokerUrl }: { brokerUrl: str
             </tr>
           </thead>
           <tbody class="font-data text-xs">
-            {events.value.length === 0 ? (
+            {filtered.length === 0 ? (
               <tr>
                 <td colspan={4} class="text-neutral-content text-center py-8">
                   Waiting for events...
                 </td>
               </tr>
             ) : (
-              events.value.map((ev) => (
+              filtered.map((ev) => (
                 <tr key={ev.id} class="hover">
                   <td class="text-neutral-content">{ev.time}</td>
                   <td><span class={`badge badge-xs ${ev.color}`}>{ev.type}</span></td>

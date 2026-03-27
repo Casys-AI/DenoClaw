@@ -10,6 +10,7 @@ import { TelegramChannel } from "../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../messaging/channels/webhook.ts";
 import { generateAllCards } from "../messaging/a2a/card.ts";
 import { listAgentStatuses, getAgentStatus, listCronJobs, listAgentTasks, createSSEResponse } from "./monitoring.ts";
+import { listAgentTraces, getTrace, getTraceSpans } from "../telemetry/traces.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
@@ -357,6 +358,25 @@ export class Gateway {
       return Response.json(await listAgentStatuses(this.kv));
     }
 
+    // ── Trace endpoints (before /agents/:id to avoid conflicts) ──
+
+    if (url.pathname.startsWith("/traces/") && this.kv) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const traceId = parts[1];
+      if (parts[2] === "spans") {
+        return Response.json(await getTraceSpans(this.kv, traceId));
+      }
+      const trace = await getTrace(this.kv, traceId);
+      if (!trace) return Response.json({ error: { code: "TRACE_NOT_FOUND" } }, { status: 404 });
+      return Response.json(trace);
+    }
+
+    if (url.pathname.startsWith("/agents/") && url.pathname.endsWith("/traces") && this.kv) {
+      const agentId = url.pathname.split("/")[2];
+      const limit = parseInt(url.searchParams.get("limit") ?? "20");
+      return Response.json(await listAgentTraces(this.kv, agentId, limit));
+    }
+
     if (url.pathname.startsWith("/agents/")) {
       const agentId = url.pathname.split("/")[2];
       if (!agentId) return new Response("Not Found", { status: 404 });
@@ -372,6 +392,44 @@ export class Gateway {
       }
 
       return Response.json({ ...status, metrics });
+    }
+
+    // Hourly metrics history
+    if (url.pathname === "/stats/history" && this.metrics) {
+      const agentId = url.searchParams.get("agent") || "";
+      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const to = url.searchParams.get("to") || new Date().toISOString();
+      if (!agentId) {
+        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+      }
+      return Response.json(await this.metrics.getHourlyMetrics(agentId, from, to));
+    }
+
+    // Per-tool breakdown
+    if (url.pathname === "/stats/tools" && this.metrics) {
+      const agentId = url.searchParams.get("agent") || "";
+      if (!agentId) {
+        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+      }
+      return Response.json(await this.metrics.getToolBreakdown(agentId));
+    }
+
+    // Hourly A2A history
+    if (url.pathname === "/stats/a2a" && this.metrics) {
+      const agentId = url.searchParams.get("agent") || "";
+      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const to = url.searchParams.get("to") || new Date().toISOString();
+      if (!agentId) {
+        return Response.json({ error: { code: "MISSING_PARAM", recovery: "Add ?agent=<id>" } }, { status: 400 });
+      }
+      return Response.json(await this.metrics.getHourlyA2A(agentId, from, to));
+    }
+
+    // A2A frequency matrix
+    if (url.pathname === "/stats/a2a/matrix" && this.metrics) {
+      const from = url.searchParams.get("from") || new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const to = url.searchParams.get("to") || new Date().toISOString();
+      return Response.json(await this.metrics.getA2AFrequencyMatrix(from, to));
     }
 
     if (url.pathname === "/cron") {

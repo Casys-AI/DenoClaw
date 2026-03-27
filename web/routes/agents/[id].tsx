@@ -28,6 +28,14 @@ interface Span {
   data: Record<string, unknown>;
 }
 
+interface ToolBreakdown {
+  tool: string;
+  calls: number;
+  successes: number;
+  failures: number;
+  avgLatencyMs: number;
+}
+
 interface AgentDetailData {
   agent: AgentStatusEntry | null;
   metrics: AgentMetrics | null;
@@ -35,6 +43,7 @@ interface AgentDetailData {
   traces: TraceRoot[];
   latestSpans: Span[];
   latestTraceDuration: number;
+  toolBreakdown: ToolBreakdown[];
 }
 
 export const handler = {
@@ -69,12 +78,22 @@ export const handler = {
       }
     } catch { /* traces not available */ }
 
-    return page({ agent, metrics, agentId, traces, latestSpans, latestTraceDuration } as AgentDetailData);
+    // Fetch tool breakdown
+    let toolBreakdown: ToolBreakdown[] = [];
+    try {
+      const res = await fetch(`${brokerUrl}/stats/tools?agent=${agentId}`, { headers });
+      if (res.ok) {
+        const body = await res.json();
+        toolBreakdown = Array.isArray(body) ? body : [];
+      }
+    } catch { /* not available */ }
+
+    return page({ agent, metrics, agentId, traces, latestSpans, latestTraceDuration, toolBreakdown } as AgentDetailData);
   },
 };
 
 export default function AgentDetail({ data }: { data: AgentDetailData }) {
-  const { agent, metrics, agentId, traces, latestSpans, latestTraceDuration } = data;
+  const { agent, metrics, agentId, traces, latestSpans, latestTraceDuration, toolBreakdown } = data;
 
   if (!agent && !metrics) {
     return (
@@ -206,6 +225,29 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
                     </li>
                   ))}
                 </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Tool breakdown */}
+          {toolBreakdown.length > 0 && (
+            <div class="card bg-base-200">
+              <div class="card-body p-4">
+                <h3 class="font-display text-sm text-neutral-content">TOOL BREAKDOWN</h3>
+                <div class="space-y-2">
+                  {toolBreakdown.map((t) => {
+                    const failRate = t.calls > 0 ? Math.round((t.failures / t.calls) * 100) : 0;
+                    return (
+                      <div key={t.tool} class="flex items-center justify-between text-xs">
+                        <span class="font-data">{t.tool}</span>
+                        <div class="flex items-center gap-2">
+                          <span class="font-data">{t.calls} calls</span>
+                          {failRate > 0 && <span class="text-error font-data">{failRate}% fail</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

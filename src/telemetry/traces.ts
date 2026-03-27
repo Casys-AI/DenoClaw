@@ -39,8 +39,19 @@ export interface Span {
 
 export type SpanData =
   | { type: "iteration"; iteration: number }
-  | { type: "llm_call"; model: string; provider: string; promptTokens: number; completionTokens: number }
-  | { type: "tool_call"; tool: string; success: boolean; args?: Record<string, unknown> }
+  | {
+    type: "llm_call";
+    model: string;
+    provider: string;
+    promptTokens: number;
+    completionTokens: number;
+  }
+  | {
+    type: "tool_call";
+    tool: string;
+    success: boolean;
+    args?: Record<string, unknown>;
+  }
   | { type: "a2a_send"; toAgent: string; taskId: string };
 
 // ── TTL ────────────────────────────────────────────────
@@ -74,7 +85,11 @@ export class TraceWriter {
   }
 
   /** End a trace with final status. */
-  async endTrace(traceId: string, status: "completed" | "failed", totalIterations: number): Promise<void> {
+  async endTrace(
+    traceId: string,
+    status: "completed" | "failed",
+    totalIterations: number,
+  ): Promise<void> {
     const entry = await this.kv.get<TraceRoot>(["traces", traceId]);
     if (!entry.value) return;
     const updated: TraceRoot = {
@@ -99,7 +114,11 @@ export class TraceWriter {
   }
 
   /** End a span (update with endedAt + latencyMs). */
-  async endSpan(traceId: string, spanId: string, latencyMs: number): Promise<void> {
+  async endSpan(
+    traceId: string,
+    spanId: string,
+    latencyMs: number,
+  ): Promise<void> {
     const entry = await this.kv.get<Span>(["traces", traceId, "span", spanId]);
     if (!entry.value) return;
     const updated: Span = {
@@ -116,7 +135,12 @@ export class TraceWriter {
 
   // ── Convenience methods ────────────────────────────────
 
-  async writeIterationSpan(traceId: string, agentId: string, iteration: number, parentSpanId?: string): Promise<string> {
+  writeIterationSpan(
+    traceId: string,
+    agentId: string,
+    iteration: number,
+    parentSpanId?: string,
+  ): Promise<string> {
     return this.writeSpan({
       traceId,
       parentSpanId,
@@ -127,7 +151,7 @@ export class TraceWriter {
     });
   }
 
-  async writeLLMSpan(
+  writeLLMSpan(
     traceId: string,
     agentId: string,
     parentSpanId: string,
@@ -154,7 +178,7 @@ export class TraceWriter {
     });
   }
 
-  async writeToolSpan(
+  writeToolSpan(
     traceId: string,
     agentId: string,
     parentSpanId: string,
@@ -175,7 +199,7 @@ export class TraceWriter {
     });
   }
 
-  async writeA2ASendSpan(
+  writeA2ASendSpan(
     traceId: string,
     agentId: string,
     parentSpanId: string,
@@ -195,21 +219,33 @@ export class TraceWriter {
 
 // ── Reader ─────────────────────────────────────────────
 
-export async function getTrace(kv: Deno.Kv, traceId: string): Promise<TraceRoot | null> {
+export async function getTrace(
+  kv: Deno.Kv,
+  traceId: string,
+): Promise<TraceRoot | null> {
   const entry = await kv.get<TraceRoot>(["traces", traceId]);
   return entry.value;
 }
 
-export async function getTraceSpans(kv: Deno.Kv, traceId: string): Promise<Span[]> {
+export async function getTraceSpans(
+  kv: Deno.Kv,
+  traceId: string,
+): Promise<Span[]> {
   const spans: Span[] = [];
-  for await (const entry of kv.list<Span>({ prefix: ["traces", traceId, "span"] })) {
+  for await (
+    const entry of kv.list<Span>({ prefix: ["traces", traceId, "span"] })
+  ) {
     if (entry.value) spans.push(entry.value);
   }
   return spans.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
 /** List recent traces for an agent. */
-export async function listAgentTraces(kv: Deno.Kv, agentId: string, limit = 20): Promise<TraceRoot[]> {
+export async function listAgentTraces(
+  kv: Deno.Kv,
+  agentId: string,
+  limit = 20,
+): Promise<TraceRoot[]> {
   const traces: TraceRoot[] = [];
   for await (const entry of kv.list<TraceRoot>({ prefix: ["traces"] })) {
     // Only match root entries ["traces", traceId] (length 2)

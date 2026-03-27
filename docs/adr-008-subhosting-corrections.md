@@ -69,9 +69,32 @@ En Subhosting, l'agent est un serveur HTTP pur. Il reçoit du travail par POST, 
 | Orchestrateur | Broker (Deno Deploy) | **Process** (main) |
 | Agent | Subhosting (warm-cached V8 isolate) | **Worker** (`new Worker()`) |
 | Exécution code | Sandbox (microVM) | **Subprocess** (`Deno.Command`) |
-| Transport orchestrateur → agent | HTTP POST | `postMessage` |
 
-Multi-agent est le mode par défaut, même en dev.
+Multi-agent est le mode par défaut, même en dev. Chaque agent a un nom — pas de "default".
+
+### Communication — 3 couches
+
+| Couche | Rôle | Local | Deploy |
+|---|---|---|---|
+| **HTTP POST** | Réveiller un agent dormant | Pas nécessaire (Workers always-on) | Seul moyen de wake Subhosting |
+| **WebSocket** | Communication continue (perf) | `postMessage` (≈ WS local) | WS persistant tant que l'agent est éveillé |
+| **BroadcastChannel** | Infra seulement (shutdown, config reload) | ✅ entre Workers | N/A (ne marche pas cross-deployment) |
+
+Flux deploy : HTTP POST réveille l'agent → agent ouvre WS vers Broker → communication bidirectionnelle → agent idle → WS meurt → retour à HTTP POST.
+
+L'agent voit une seule interface (`AgentBrokerPort`). Le dual mode est dans l'infra, pas dans le code agent.
+
+### Routing — le Broker est le routeur universel
+
+Toute communication agent ↔ agent passe par le Broker. L'agent ne sait pas où est la cible.
+
+| L'agent veut parler à... | Le Broker fait... |
+|---|---|
+| Un agent même instance | postMessage (local) ou WS (deploy) |
+| Un agent autre instance | Tunnel → Broker distant → WS vers l'agent |
+| Plusieurs agents (multicast) | Fan-out, même logique par agent cible |
+
+BroadcastChannel n'est PAS utilisé pour la communication inter-agents — seulement pour l'infra (shutdown, config reload).
 
 ### KV — store vs transport
 

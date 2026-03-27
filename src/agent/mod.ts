@@ -1,6 +1,8 @@
 export { AgentLoop } from "./loop.ts";
 export { AgentRuntime } from "./runtime.ts";
 export { Memory } from "./memory.ts";
+export { WorkerPool } from "./worker_pool.ts";
+export type { WorkerConfig, WorkerKvPaths, WorkerRequest, WorkerResponse } from "./worker_protocol.ts";
 export { ContextBuilder } from "./context.ts";
 export { SkillsLoader } from "./skills.ts";
 export { CronManager } from "./cron.ts";

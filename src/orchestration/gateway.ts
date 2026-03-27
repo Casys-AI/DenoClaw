@@ -4,15 +4,16 @@ import type { MessageBus } from "../messaging/bus.ts";
 import type { SessionManager } from "../messaging/session.ts";
 import type { ChannelManager } from "../messaging/channels/manager.ts";
 import type { AuthManager, AuthResult } from "./auth.ts";
+import type { WorkerPool } from "../agent/worker_pool.ts";
 import { TelegramChannel } from "../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../messaging/channels/webhook.ts";
-import { AgentLoop } from "../agent/loop.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
   bus: MessageBus;
   session: SessionManager;
   channels: ChannelManager;
+  workerPool: WorkerPool;
   auth?: AuthManager;
 }
 
@@ -26,6 +27,7 @@ export class Gateway {
   private bus: MessageBus;
   private session: SessionManager;
   private channels: ChannelManager;
+  private workerPool: WorkerPool;
   private auth: AuthManager | null;
   private httpServer?: Deno.HttpServer;
   private running = false;
@@ -36,6 +38,7 @@ export class Gateway {
     this.bus = deps.bus;
     this.session = deps.session;
     this.channels = deps.channels;
+    this.workerPool = deps.workerPool;
     this.auth = deps.auth ?? null;
   }
 
@@ -98,18 +101,18 @@ export class Gateway {
     try {
       await this.session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
 
-      const agent = new AgentLoop(msg.sessionId, this.config);
-      try {
-        const result = await agent.processMessage(msg.content);
-        await this.channels.send(
-          msg.channelType,
-          msg.userId,
-          result.content,
-          msg.metadata,
-        );
-      } finally {
-        agent.close();
+      const agentId = msg.metadata?.agentId as string | undefined;
+      if (!agentId) {
+        log.error("Message sans agentId — ignoré");
+        return;
       }
+      const result = await this.workerPool.send(agentId, msg.sessionId, msg.content);
+      await this.channels.send(
+        msg.channelType,
+        msg.userId,
+        result.content,
+        msg.metadata,
+      );
     } catch (e) {
       log.error("Erreur traitement message", e);
       try {
@@ -173,6 +176,7 @@ export class Gateway {
           message: string;
           sessionId?: string;
           model?: string;
+          agentId: string;
         };
 
         // AX-5: validate at the boundary
@@ -182,17 +186,20 @@ export class Gateway {
             { status: 400 },
           );
         }
+        if (!body.agentId || typeof body.agentId !== "string") {
+          return Response.json(
+            { error: { code: "INVALID_INPUT", context: { field: "agentId" }, recovery: "Provide 'agentId' in the JSON body" } },
+            { status: 400 },
+          );
+        }
 
         const sessionId = body.sessionId || crypto.randomUUID();
         await this.session.getOrCreate(sessionId, "api", "http");
 
-        const agent = new AgentLoop(sessionId, this.config, body.model ? { model: body.model } : undefined);
-        try {
-          const result = await agent.processMessage(body.message);
-          return Response.json({ sessionId, response: result.content });
-        } finally {
-          agent.close();
-        }
+        const result = await this.workerPool.send(body.agentId, sessionId, body.message, {
+          model: body.model,
+        });
+        return Response.json({ sessionId, response: result.content });
       } catch (e) {
         log.error("Erreur API /chat", e);
         // AX-3: structured error output
@@ -224,23 +231,23 @@ export class Gateway {
             type: string;
             message?: string;
             sessionId?: string;
+            agentId?: string;
           };
 
           if (data.type === "chat" && data.message) {
+            if (!data.agentId) {
+              socket.send(JSON.stringify({ type: "error", error: { code: "INVALID_INPUT", context: { field: "agentId" }, recovery: "Provide 'agentId' in the message" } }));
+              return;
+            }
             const sessionId = data.sessionId || `ws-${token}`;
             await this.session.getOrCreate(sessionId, token, "websocket");
 
-            const agent = new AgentLoop(sessionId, this.config);
-            try {
-              const result = await agent.processMessage(data.message);
-              socket.send(JSON.stringify({
-                type: "response",
+            const result = await this.workerPool.send(data.agentId, sessionId, data.message);
+            socket.send(JSON.stringify({
+              type: "response",
               sessionId,
               content: result.content,
             }));
-            } finally {
-              agent.close();
-            }
           }
         } catch (err) {
           log.error("Erreur WebSocket message", err);

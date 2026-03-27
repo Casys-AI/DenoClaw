@@ -10,15 +10,17 @@ export class Memory {
   private messages: Message[] = [];
   private maxMessages: number;
   private kv: Deno.Kv | null = null;
+  private kvPath?: string;
 
-  constructor(sessionId: string, maxMessages = 100) {
+  constructor(sessionId: string, maxMessages = 100, kvPath?: string) {
     this.sessionId = sessionId;
     this.maxMessages = maxMessages;
+    this.kvPath = kvPath;
   }
 
   private async getKv(): Promise<Deno.Kv> {
     if (!this.kv) {
-      this.kv = await Deno.openKv();
+      this.kv = await Deno.openKv(this.kvPath);
     }
     return this.kv;
   }

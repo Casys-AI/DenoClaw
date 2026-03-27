@@ -1,5 +1,5 @@
 // Shared Kernel — barrel
-export { DenoClawError, ConfigError, ProviderError, ToolError, ChannelError } from "./errors.ts";
+export { AgentError, DenoClawError, ConfigError, ProviderError, ToolError, ChannelError } from "./errors.ts";
 export { log } from "./log.ts";
 export {
   ensureDir,

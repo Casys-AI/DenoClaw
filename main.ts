@@ -3,7 +3,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { getConfig, getConfigOrDefault } from "./src/config/loader.ts";
 import type { Config } from "./src/config/types.ts";
-import { AgentLoop } from "./src/agent/loop.ts";
+import { WorkerPool } from "./src/agent/worker_pool.ts";
 import { Gateway } from "./src/orchestration/gateway.ts";
 import { ConsoleChannel } from "./src/messaging/channels/console.ts";
 import { ChannelManager } from "./src/messaging/channels/manager.ts";
@@ -24,8 +24,8 @@ import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
 
 const args = parseArgs(Deno.args, {
-  string: ["message", "session", "model"],
-  alias: { m: "message", s: "session" },
+  string: ["message", "session", "model", "agent"],
+  alias: { m: "message", s: "session", a: "agent" },
   default: { session: "default" },
 });
 
@@ -35,15 +35,43 @@ const subcommand = args._[1] as string | undefined;
 // ── Commands ──────────────────────────────────────────────
 
 async function agent(config: Config): Promise<void> {
+  const agentId = args.agent as string | undefined;
+  const registry = config.agents?.registry;
+
+  if (!registry || Object.keys(registry).length === 0) {
+    console.log("Aucun agent configuré. Créez-en un d'abord :\n");
+    console.log("  denoclaw agent create <nom>\n");
+    return;
+  }
+
+  if (!agentId) {
+    const names = Object.keys(registry);
+    console.log("Précise quel agent utiliser avec --agent <nom>.\n");
+    console.log(`  Agents disponibles : ${names.join(", ")}\n`);
+    console.log(`  Exemple : denoclaw agent -m "hello" --agent ${names[0]}\n`);
+    return;
+  }
+
+  if (!registry[agentId]) {
+    console.log(`Agent "${agentId}" introuvable.\n`);
+    console.log(`  Agents disponibles : ${Object.keys(registry).join(", ")}\n`);
+    return;
+  }
+
   const sessionId = args.session as string;
+  const agentIds = Object.keys(registry);
+
+  const pool = new WorkerPool(config);
+  await pool.start(agentIds);
 
   if (args.message) {
-    const loop = new AgentLoop(sessionId, config, args.model ? { model: args.model } : undefined);
     try {
-      const result = await loop.processMessage(args.message as string);
+      const result = await pool.send(agentId, sessionId, args.message as string, {
+        model: args.model as string | undefined,
+      });
       console.log(result.content);
     } finally {
-      loop.close();
+      pool.shutdown();
     }
     return;
   }
@@ -60,24 +88,43 @@ async function agent(config: Config): Promise<void> {
 
   bus.subscribeAll(async (msg) => {
     await session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
-    const loop = new AgentLoop(msg.sessionId, config, args.model ? { model: args.model } : undefined);
     try {
-      const result = await loop.processMessage(msg.content);
+      const result = await pool.send(agentId, msg.sessionId, msg.content, {
+        model: args.model as string | undefined,
+      });
       await channels.send(msg.channelType, msg.userId, result.content, msg.metadata);
-    } finally {
-      loop.close();
+    } catch (e) {
+      log.error("Erreur traitement message", e);
+      await channels.send(msg.channelType, msg.userId, "Désolé, une erreur s'est produite.", msg.metadata);
     }
   });
 
+  // Graceful shutdown
+  const ac = new AbortController();
+  Deno.addSignalListener("SIGINT", () => ac.abort());
+  Deno.addSignalListener("SIGTERM", () => ac.abort());
+
   await channels.startAll();
+
+  ac.signal.addEventListener("abort", () => {
+    pool.shutdown();
+  });
 }
 
 async function gateway(config: Config): Promise<void> {
   // DI : wiring explicite
+  const agentIds = Object.keys(config.agents?.registry ?? {});
+  if (agentIds.length === 0) {
+    console.log("Aucun agent configuré. Créez-en un d'abord :\n\n  denoclaw agent create <nom>\n");
+    return;
+  }
+  const workerPool = new WorkerPool(config);
+  await workerPool.start(agentIds);
+
   const bus = new MessageBus();
   const session = new SessionManager();
   const channels = new ChannelManager(bus);
-  const gw = new Gateway(config, { bus, session, channels });
+  const gw = new Gateway(config, { bus, session, channels, workerPool });
   await gw.start();
 
   const ac = new AbortController();
@@ -90,6 +137,7 @@ async function gateway(config: Config): Promise<void> {
     });
   } catch {
     await gw.stop();
+    workerPool.shutdown();
   }
 }
 

@@ -50,3 +50,10 @@ export class ChannelError extends DenoClawError {
     this.name = "ChannelError";
   }
 }
+
+export class AgentError extends DenoClawError {
+  constructor(code: string, context?: Record<string, unknown>, recovery?: string) {
+    super(code, context, recovery);
+    this.name = "AgentError";
+  }
+}

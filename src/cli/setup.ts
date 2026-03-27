@@ -476,8 +476,8 @@ export async function showStatus(config: Config): Promise<void> {
 
   // Sessions (KV)
   try {
-    const { getSessionManager } = await import("../messaging/session.ts");
-    const sm = getSessionManager();
+    const { SessionManager } = await import("../messaging/session.ts");
+    const sm = new SessionManager();
     const sessions = await sm.getActive();
     print(`Sessions     : ${sessions.length} active(s)`);
     sm.close();

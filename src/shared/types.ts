@@ -62,12 +62,6 @@ export interface AgentConfig {
   systemPrompt?: string;
 }
 
-export interface AgentResponse {
-  content: string;
-  toolCalls?: ToolCall[];
-  finishReason?: string;
-}
-
 // ── LLM ───────────────────────────────────────────────────
 
 export interface LLMResponse {

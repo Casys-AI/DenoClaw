@@ -128,9 +128,3 @@ export class MessageBus {
     }
   }
 }
-
-let _bus: MessageBus | null = null;
-export function getMessageBus(): MessageBus {
-  if (!_bus) _bus = new MessageBus();
-  return _bus;
-}

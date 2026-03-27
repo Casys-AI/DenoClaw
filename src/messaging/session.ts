@@ -92,9 +92,3 @@ export class SessionManager {
     }
   }
 }
-
-let _sm: SessionManager | null = null;
-export function getSessionManager(): SessionManager {
-  if (!_sm) _sm = new SessionManager();
-  return _sm;
-}

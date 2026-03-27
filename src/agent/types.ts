@@ -5,7 +5,13 @@
  * Les types cross-domain (AgentConfig, AgentEntry, SandboxConfig…) restent dans src/shared/types.ts.
  */
 
-import type { AgentEntry, SandboxConfig } from "../shared/types.ts";
+import type { AgentEntry, SandboxConfig, ToolCall } from "../shared/types.ts";
+
+export interface AgentResponse {
+  content: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
+}
 
 export interface Skill {
   name: string;

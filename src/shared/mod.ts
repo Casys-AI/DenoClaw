@@ -16,7 +16,6 @@ export {
 export type {
   AgentConfig,
   AgentEntry,
-  AgentResponse,
   ChannelRouting,
   LLMResponse,
   Message,

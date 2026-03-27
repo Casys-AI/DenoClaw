@@ -1,4 +1,5 @@
-import type { AgentConfig, AgentResponse } from "../shared/types.ts";
+import type { AgentConfig } from "../shared/types.ts";
+import type { AgentResponse } from "./types.ts";
 import type { Config } from "../config/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { Memory } from "./memory.ts";

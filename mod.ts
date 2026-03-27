@@ -17,7 +17,7 @@ export { ShellTool } from "./src/agent/tools/shell.ts";
 export { ReadFileTool, WriteFileTool } from "./src/agent/tools/file.ts";
 export { WebFetchTool } from "./src/agent/tools/web.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./src/agent/tools/types.ts";
-export type { AgentDefaults, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
+export type { AgentDefaults, AgentResponse, AgentsConfig, ToolsConfig } from "./src/agent/types.ts";
 export type { BuiltinToolName } from "./src/agent/tools/types.ts";
 
 // ── Messaging domain ────────────────────────────────────
@@ -34,10 +34,11 @@ export { generateAgentCard, generateAllCards } from "./src/messaging/a2a/card.ts
 export { TaskStore } from "./src/messaging/a2a/tasks.ts";
 export { A2A_ERRORS, TERMINAL_STATES } from "./src/messaging/a2a/types.ts";
 export type {
-  A2AMessage, A2AMethod, A2ARole, AgentCard, AgentSkill, Artifact,
-  JsonRpcError, JsonRpcRequest, JsonRpcResponse, Part, Task, TaskState, TaskStatus,
+  A2AMessage, A2AMethod, A2ARole, AgentCard, AgentSkill, Artifact, DataPart, FilePart,
+  JsonRpcError, JsonRpcRequest, JsonRpcResponse, Part, Task, TaskArtifactUpdateEvent,
+  TaskState, TaskStatus, TaskStatusUpdateEvent, TextPart,
 } from "./src/messaging/a2a/types.ts";
-export type { ChannelMessage, ChannelsConfig, Session } from "./src/messaging/types.ts";
+export type { ChannelMessage, ChannelsConfig, DiscordConfig, Session, TelegramConfig, WebhookConfig } from "./src/messaging/types.ts";
 
 // ── Orchestration domain ─────────────────────────────────
 export { AuthManager } from "./src/orchestration/auth.ts";
@@ -51,6 +52,7 @@ export { SandboxManager } from "./src/orchestration/sandbox.ts";
 
 // ── LLM domain ───────────────────────────────────────────
 export { AnthropicProvider, BaseProvider, OpenAICompatProvider } from "./src/llm/base.ts";
+export { OllamaProvider } from "./src/llm/ollama.ts";
 export { CLIProvider } from "./src/llm/cli.ts";
 export { ProviderManager } from "./src/llm/manager.ts";
 export type { ProviderConfig, ProvidersConfig } from "./src/llm/types.ts";
@@ -65,7 +67,7 @@ export type { AgentMetrics } from "./src/telemetry/metrics.ts";
 
 // ── Shared kernel ────────────────────────────────────────
 export type {
-  AgentConfig, AgentEntry, AgentResponse, ChannelRouting,
+  AgentConfig, AgentEntry, ChannelRouting,
   LLMResponse, Message, MessageRole, SandboxConfig, SandboxPermission,
   StructuredError, ToolCall, ToolDefinition, ToolResult,
 } from "./src/shared/types.ts";

@@ -12,13 +12,7 @@ const ALLOWED_COMMANDS = [
   "echo",
 ];
 
-interface CreateAgentModalProps {
-  brokerUrl: string;
-}
-
-export default function CreateAgentModal(
-  { brokerUrl }: CreateAgentModalProps,
-) {
+export default function CreateAgentModal() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -43,13 +37,7 @@ export default function CreateAgentModal(
     setIsSubmitting(true);
 
     const formData = new FormData(form);
-    const token = globalThis.localStorage.getItem("denoclaw_token") || "";
-    const headers: HeadersInit = token
-      ? {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-      }
-      : { "Content-Type": "application/json" };
+    const headers: HeadersInit = { "Content-Type": "application/json" };
 
     const body = {
       agentId: formData.get("agentId"),
@@ -71,7 +59,7 @@ export default function CreateAgentModal(
     };
 
     try {
-      const response = await fetch(`${brokerUrl}/api/agents`, {
+      const response = await fetch("api/agents", {
         method: "POST",
         headers,
         body: JSON.stringify(body),

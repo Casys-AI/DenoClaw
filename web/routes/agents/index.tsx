@@ -5,6 +5,10 @@ import {
   getAllInstancesData,
   type InstanceData,
 } from "../../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../../lib/dashboard-auth.ts";
 import { formatCompact, formatCost, formatLatency } from "../../lib/format.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
 import { InstanceSelector } from "../../components/InstanceSelector.tsx";
@@ -12,12 +16,18 @@ import type { AgentMetrics, AgentStatusEntry } from "../../lib/types.ts";
 import {
   default as CreateAgentModal,
 } from "../../islands/CreateAgentModal.tsx";
-import { getBrokerUrl } from "../../lib/api-client.ts";
 
 export const handler = {
   async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
     const selectedInstance = ctx.url.searchParams.get("instance") || "all";
-    const instances = await getAllInstancesData();
+    const instances = await getAllInstancesData({
+      instances: dashboard.instances,
+      token: dashboard.token,
+    });
 
     const agents = selectedInstance === "all"
       ? instances.flatMap((i) => i.agents)
@@ -29,7 +39,10 @@ export const handler = {
     for (const inst of instances) {
       if (!inst.reachable) continue;
       try {
-        const metrics = await getAllAgentMetrics(inst.instance.url);
+        const metrics = await getAllAgentMetrics({
+          brokerUrl: inst.instance.url,
+          token: dashboard.token,
+        });
         allMetrics.push(...metrics);
       } catch { /* skip */ }
     }
@@ -56,7 +69,7 @@ export default function AgentsList(
     <div class="space-y-4">
       <div class="flex justify-between items-center">
         <h1 class="text-2xl font-display font-bold">Agents</h1>
-        <CreateAgentModal brokerUrl={getBrokerUrl()} />
+        <CreateAgentModal />
       </div>
 
       {/* Instance selector */}

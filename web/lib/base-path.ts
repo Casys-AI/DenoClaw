@@ -1,9 +1,16 @@
-const DASHBOARD_BASE_PATH = "/ui";
+function configuredDashboardBasePath(): string {
+  const rawBasePath = Deno.env.get("DENOCLAW_DASHBOARD_BASE_PATH") ?? "/ui";
+  if (!rawBasePath || rawBasePath === "/") return "";
+  return rawBasePath.endsWith("/") ? rawBasePath.slice(0, -1) : rawBasePath;
+}
 
 export function getDashboardBasePath(pathname: string): string {
-  return pathname === DASHBOARD_BASE_PATH ||
-      pathname.startsWith(`${DASHBOARD_BASE_PATH}/`)
-    ? DASHBOARD_BASE_PATH
+  const dashboardBasePath = configuredDashboardBasePath();
+  if (!dashboardBasePath) return "";
+
+  return pathname === dashboardBasePath ||
+      pathname.startsWith(`${dashboardBasePath}/`)
+    ? dashboardBasePath
     : "";
 }
 

@@ -198,7 +198,9 @@ async function gateway(config: Config): Promise<void> {
   const bus = new MessageBus(kv ?? undefined);
   const session = new SessionManager(kv ?? undefined);
   const channels = new ChannelManager(bus);
-  const freshHandler = createDashboardHandler("/ui");
+  const dashboardBasePath = Deno.env.get("DENOCLAW_DASHBOARD_BASE_PATH") ||
+    "/ui";
+  const freshHandler = createDashboardHandler(dashboardBasePath);
   const gw = new Gateway(config, {
     bus,
     session,
@@ -206,6 +208,7 @@ async function gateway(config: Config): Promise<void> {
     workerPool,
     metrics,
     kv: kv ?? undefined,
+    dashboardBasePath,
     freshHandler: async (req) => await freshHandler(req),
   });
   await gw.start();

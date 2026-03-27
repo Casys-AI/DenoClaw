@@ -1,6 +1,10 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, type InstanceData } from "../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { StatusDot } from "../components/StatusBadge.tsx";
 import type { AgentStatusEntry, HealthResponse } from "../lib/types.ts";
@@ -16,8 +20,15 @@ interface NetworkData {
 
 export const handler = {
   async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
     const selectedInstance = ctx.url.searchParams.get("instance") || "all";
-    const instances = await getAllInstancesData();
+    const instances = await getAllInstancesData({
+      instances: dashboard.instances,
+      token: dashboard.token,
+    });
 
     const filteredInstances = selectedInstance === "all"
       ? instances
@@ -36,7 +47,7 @@ export const handler = {
       agents,
       health: mergedHealth,
       selectedInstance,
-      brokerUrl: instances[0]?.instance.url ?? "http://localhost:3000",
+      brokerUrl: instances[0]?.instance.url ?? dashboard.brokerUrl,
     } as NetworkData);
   },
 };

@@ -1,7 +1,10 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
-import { getBrokerUrl } from "../../lib/api-client.ts";
 import { StatusBadge } from "../../components/StatusBadge.tsx";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../../lib/dashboard-auth.ts";
 import type { AgentTaskEntry } from "../../lib/types.ts";
 
 interface A2AData {
@@ -13,14 +16,17 @@ interface A2AData {
 
 export const handler = {
   async GET(ctx: FreshContext) {
-    const brokerUrl = getBrokerUrl();
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
+    const brokerUrl = dashboard.brokerUrl;
     const statusFilter = ctx.url.searchParams.get("status") || "all";
     const searchQuery = ctx.url.searchParams.get("q") || "";
     let tasks: AgentTaskEntry[] = [];
     try {
-      const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-      const headers: HeadersInit = token
-        ? { "Authorization": `Bearer ${token}` }
+      const headers: HeadersInit = dashboard.token
+        ? { "Authorization": `Bearer ${dashboard.token}` }
         : {};
       const res = await fetch(`${brokerUrl}/agents/tasks`, { headers });
       if (res.ok) tasks = await res.json();

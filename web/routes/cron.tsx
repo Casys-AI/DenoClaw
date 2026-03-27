@@ -1,12 +1,23 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import { getCronJobs } from "../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 import { formatRelative } from "../lib/format.ts";
 import type { CronJob } from "../lib/types.ts";
 
 export const handler = {
-  async GET(_ctx: FreshContext) {
-    const jobs = await getCronJobs();
+  async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
+    const jobs = await getCronJobs({
+      brokerUrl: dashboard.brokerUrl,
+      token: dashboard.token,
+    });
     return page(jobs);
   },
 };

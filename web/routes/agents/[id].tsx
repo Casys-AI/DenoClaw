@@ -3,8 +3,11 @@ import type { FreshContext } from "@fresh/core";
 import {
   getAgent,
   getAgentMetrics,
-  getBrokerUrl,
 } from "../../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../../lib/dashboard-auth.ts";
 import {
   formatCompact,
   formatCost,
@@ -57,16 +60,19 @@ interface AgentDetailData {
 
 export const handler = {
   async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
     const agentId = ctx.params.id ?? "unknown";
-    const brokerUrl = getBrokerUrl();
-    const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const headers: HeadersInit = token
-      ? { "Authorization": `Bearer ${token}` }
+    const brokerUrl = dashboard.brokerUrl;
+    const headers: HeadersInit = dashboard.token
+      ? { "Authorization": `Bearer ${dashboard.token}` }
       : {};
 
     const [agent, metrics] = await Promise.all([
-      getAgent(agentId),
-      getAgentMetrics(agentId),
+      getAgent(agentId, { brokerUrl, token: dashboard.token }),
+      getAgentMetrics(agentId, { brokerUrl, token: dashboard.token }),
     ]);
 
     // Fetch recent traces for this agent

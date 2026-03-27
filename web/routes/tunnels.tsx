@@ -1,11 +1,22 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import { getHealth } from "../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 import type { HealthResponse } from "../lib/types.ts";
 
 export const handler = {
-  async GET(_ctx: FreshContext) {
-    const health = await getHealth();
+  async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
+    const health = await getHealth({
+      brokerUrl: dashboard.brokerUrl,
+      token: dashboard.token,
+    });
     return page(health);
   },
 };

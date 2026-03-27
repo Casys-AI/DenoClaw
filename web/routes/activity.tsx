@@ -1,11 +1,18 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
-import { getBrokerUrl } from "../lib/api-client.ts";
 import ActivityFeed from "../islands/ActivityFeed.tsx";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 
 export const handler = {
-  GET(_ctx: FreshContext) {
-    return page({ brokerUrl: getBrokerUrl() });
+  GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const config = getDashboardRequestConfig(ctx.req);
+    return page({ brokerUrl: config.brokerUrl });
   },
 };
 

@@ -25,6 +25,10 @@ import { RateLimiter } from "./rate_limit.ts";
 import { GitHubOAuth } from "./github_oauth.ts";
 import { AgentStore } from "./agent_store.ts";
 import { log } from "../shared/log.ts";
+import {
+  getDashboardAllowedUsers,
+  getDashboardAuthMode,
+} from "../../web/lib/dashboard-auth.ts";
 
 export interface GatewayDeps {
   bus: MessageBus;
@@ -35,6 +39,7 @@ export interface GatewayDeps {
   metrics?: MetricsCollector;
   kv?: Deno.Kv;
   freshHandler?: (req: Request) => Promise<Response>;
+  dashboardBasePath?: string;
 }
 
 /**
@@ -52,6 +57,7 @@ export class Gateway {
   private metrics: MetricsCollector | null;
   private kv: Deno.Kv | null;
   private freshHandler: ((req: Request) => Promise<Response>) | null;
+  private dashboardBasePath: string;
   private rateLimiter: RateLimiter | null = null;
   private githubOAuth: GitHubOAuth | null = null;
   private agentStore: AgentStore | null = null;
@@ -69,9 +75,13 @@ export class Gateway {
     this.metrics = deps.metrics ?? null;
     this.kv = deps.kv ?? null;
     this.freshHandler = deps.freshHandler ?? null;
+    this.dashboardBasePath = deps.dashboardBasePath ?? "/ui";
     if (this.kv) {
       this.rateLimiter = new RateLimiter(this.kv, 100, 60_000);
-      this.githubOAuth = new GitHubOAuth(this.kv, ["superWorldSavior"]);
+      this.githubOAuth = new GitHubOAuth(this.kv, {
+        allowedUsers: getDashboardAllowedUsers(),
+        dashboardBasePath: this.dashboardBasePath,
+      });
       this.agentStore = new AgentStore(this.kv);
     }
   }
@@ -205,9 +215,9 @@ export class Gateway {
     const url = new URL(req.url);
 
     // GitHub OAuth routes — before auth (public endpoints)
-    if (this.githubOAuth?.isConfigured()) {
+    if (this.githubOAuth) {
       if (url.pathname === "/auth/github") {
-        return this.githubOAuth.handleAuthorize(req);
+        return await this.githubOAuth.handleAuthorize(req);
       }
       if (url.pathname === "/auth/github/callback") {
         return await this.githubOAuth.handleCallback(req);
@@ -220,8 +230,24 @@ export class Gateway {
     // Dashboard Fresh handler — avant auth (gère sa propre auth si besoin)
     if (
       this.freshHandler &&
-      (url.pathname.startsWith("/ui") || url.pathname === "/favicon.ico")
+      (url.pathname.startsWith(this.dashboardBasePath) ||
+        url.pathname === this.dashboardBasePath ||
+        url.pathname === "/favicon.ico")
     ) {
+      if (
+        getDashboardAuthMode() === "github-oauth" &&
+        url.pathname !== `${this.dashboardBasePath}/login`
+      ) {
+        const user = this.githubOAuth
+          ? await this.githubOAuth.verifySession(req)
+          : null;
+        if (!user) {
+          const loginUrl = new URL(`${this.dashboardBasePath}/login`, url.origin);
+          loginUrl.searchParams.set("next", `${url.pathname}${url.search}`);
+          return Response.redirect(loginUrl.toString(), 302);
+        }
+      }
+
       return await this.freshHandler(req);
     }
 

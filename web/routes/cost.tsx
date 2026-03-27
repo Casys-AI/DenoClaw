@@ -4,9 +4,12 @@ import {
   aggregateSummaries,
   getAllAgentMetrics,
   getAllInstancesData,
-  getBrokerUrl,
   type InstanceData,
 } from "../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 import { formatCompact, formatCost } from "../lib/format.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import type { AgentMetrics, MetricsSummary } from "../lib/types.ts";
@@ -29,8 +32,15 @@ interface CostData {
 
 export const handler = {
   async GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const dashboard = getDashboardRequestConfig(ctx.req);
     const selectedInstance = ctx.url.searchParams.get("instance") || "all";
-    const instances = await getAllInstancesData();
+    const instances = await getAllInstancesData({
+      instances: dashboard.instances,
+      token: dashboard.token,
+    });
     const filtered = selectedInstance === "all"
       ? instances
       : instances.filter((i) => i.instance.name === selectedInstance);
@@ -41,16 +51,18 @@ export const handler = {
     for (const inst of filtered) {
       if (!inst.reachable) continue;
       try {
-        const metrics = await getAllAgentMetrics(inst.instance.url);
+        const metrics = await getAllAgentMetrics({
+          brokerUrl: inst.instance.url,
+          token: dashboard.token,
+        });
         agents.push(...metrics);
       } catch { /* skip */ }
     }
 
     // Fetch hourly data for all agents
-    const baseUrl = filtered[0]?.instance.url ?? getBrokerUrl();
-    const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const authHeaders: HeadersInit = token
-      ? { "Authorization": `Bearer ${token}` }
+    const baseUrl = filtered[0]?.instance.url ?? dashboard.brokerUrl;
+    const authHeaders: HeadersInit = dashboard.token
+      ? { "Authorization": `Bearer ${dashboard.token}` }
       : {};
     const hourly: HourlyBucket[] = [];
     try {

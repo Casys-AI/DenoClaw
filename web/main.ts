@@ -19,7 +19,7 @@ export const app = createDashboardApp();
 
 /** Export handler for composition with Gateway (no Deno.serve). */
 export function createDashboardHandler(
-  basePath = "/ui",
+  basePath = Deno.env.get("DENOCLAW_DASHBOARD_BASE_PATH") ?? "/ui",
 ): (req: Request) => Response | Promise<Response> {
   return createDashboardApp(basePath).handler();
 }

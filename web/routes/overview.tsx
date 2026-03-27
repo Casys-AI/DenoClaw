@@ -4,9 +4,12 @@ import {
   aggregateSummaries,
   getAllAgentMetrics,
   getAllInstancesData,
-  getBrokerUrl,
   type InstanceData,
 } from "../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../lib/dashboard-auth.ts";
 import { formatCompact, formatCost, formatLatency } from "../lib/format.ts";
 import { StatusDot } from "../components/StatusBadge.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
@@ -31,9 +34,15 @@ interface OverviewData {
 
 export const handler = {
   async GET(ctx: FreshContext) {
-    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
 
-    const instances = await getAllInstancesData();
+    const dashboard = getDashboardRequestConfig(ctx.req);
+    const selectedInstance = ctx.url.searchParams.get("instance") || "all";
+    const instances = await getAllInstancesData({
+      instances: dashboard.instances,
+      token: dashboard.token,
+    });
     const filtered = selectedInstance === "all"
       ? instances
       : instances.filter((i) => i.instance.name === selectedInstance);
@@ -49,7 +58,10 @@ export const handler = {
     for (const inst of filtered) {
       if (!inst.reachable) continue;
       try {
-        const m = await getAllAgentMetrics(inst.instance.url);
+        const m = await getAllAgentMetrics({
+          brokerUrl: inst.instance.url,
+          token: dashboard.token,
+        });
         metrics.push(...m);
       } catch { /* skip */ }
     }
@@ -57,10 +69,9 @@ export const handler = {
     // Fetch recent A2A tasks
     let tasks: AgentTaskEntry[] = [];
     try {
-      const brokerUrl = filtered[0]?.instance.url ?? getBrokerUrl();
-      const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-      const headers: HeadersInit = token
-        ? { "Authorization": `Bearer ${token}` }
+      const brokerUrl = filtered[0]?.instance.url ?? dashboard.brokerUrl;
+      const headers: HeadersInit = dashboard.token
+        ? { "Authorization": `Bearer ${dashboard.token}` }
         : {};
       const res = await fetch(`${brokerUrl}/agents/tasks`, { headers });
       if (res.ok) {

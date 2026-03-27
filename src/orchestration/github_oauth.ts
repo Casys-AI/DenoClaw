@@ -31,12 +31,17 @@ export class GitHubOAuth {
   private clientSecret: string;
   private kv: Deno.Kv;
   private allowedUsers?: string[];
+  private dashboardBasePath: string;
 
-  constructor(kv: Deno.Kv, allowedUsers?: string[]) {
+  constructor(
+    kv: Deno.Kv,
+    options?: { allowedUsers?: string[]; dashboardBasePath?: string },
+  ) {
     this.clientId = Deno.env.get("GITHUB_CLIENT_ID") ?? "";
     this.clientSecret = Deno.env.get("GITHUB_CLIENT_SECRET") ?? "";
     this.kv = kv;
-    this.allowedUsers = allowedUsers;
+    this.allowedUsers = options?.allowedUsers;
+    this.dashboardBasePath = normalizeBasePath(options?.dashboardBasePath);
   }
 
   isConfigured(): boolean {
@@ -44,7 +49,7 @@ export class GitHubOAuth {
   }
 
   /** Start OAuth flow — redirect to GitHub. */
-  handleAuthorize(req: Request): Response {
+  async handleAuthorize(req: Request): Promise<Response> {
     if (!this.isConfigured()) {
       return Response.json(
         {
@@ -60,7 +65,7 @@ export class GitHubOAuth {
     const callbackUrl = `${url.origin}/auth/github/callback`;
 
     // Store state in KV for CSRF protection
-    this.kv.set(["oauth", "state", state], true, { expireIn: 300_000 }); // 5 min
+    await this.kv.set(["oauth", "state", state], true, { expireIn: 300_000 }); // 5 min
 
     const authUrl = new URL(GITHUB_AUTHORIZE_URL);
     authUrl.searchParams.set("client_id", this.clientId);
@@ -155,12 +160,14 @@ export class GitHubOAuth {
     log.info(`Dashboard login: ${user.login}`);
 
     // Redirect to dashboard with session cookie
-    const headers = new Headers({ "Location": "/ui/overview" });
+    const headers = new Headers({
+      "Location": dashboardPath(this.dashboardBasePath, "/overview"),
+    });
     headers.append(
       "Set-Cookie",
       `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${
         SESSION_TTL_MS / 1000
-      }; Secure`,
+      }${isSecureRequest(req) ? "; Secure" : ""}`,
     );
 
     return new Response(null, { status: 302, headers });
@@ -199,7 +206,9 @@ export class GitHubOAuth {
       await this.kv.delete(["dashboard", "session", match[1]]);
     }
 
-    const headers = new Headers({ "Location": "/ui/login" });
+    const headers = new Headers({
+      "Location": dashboardPath(this.dashboardBasePath, "/login"),
+    });
     headers.append(
       "Set-Cookie",
       `${SESSION_COOKIE}=; Path=/; HttpOnly; Max-Age=0`,
@@ -209,8 +218,27 @@ export class GitHubOAuth {
   }
 
   private errorRedirect(origin: string, message: string): Response {
-    const url = new URL("/ui/login", origin);
+    const url = new URL(
+      dashboardPath(this.dashboardBasePath, "/login"),
+      origin,
+    );
     url.searchParams.set("error", message);
     return Response.redirect(url.toString(), 302);
   }
+}
+
+function normalizeBasePath(basePath?: string): string {
+  if (!basePath || basePath === "/") return "";
+  return basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+}
+
+function dashboardPath(basePath: string, path: string): string {
+  if (!basePath) return path;
+  return `${basePath}${path}`;
+}
+
+function isSecureRequest(req: Request): boolean {
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  if (forwardedProto) return forwardedProto.split(",")[0]?.trim() === "https";
+  return new URL(req.url).protocol === "https:";
 }

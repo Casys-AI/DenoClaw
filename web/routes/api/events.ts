@@ -1,22 +1,27 @@
 import type { FreshContext } from "@fresh/core";
-import { getBrokerUrl } from "../../lib/api-client.ts";
+import {
+  getDashboardRequestConfig,
+  requireDashboardSession,
+} from "../../lib/dashboard-auth.ts";
 
 /**
  * SSE proxy — le browser se connecte ici (meme origine),
  * et on relaie le SSE de la gateway cote serveur. Zero CORS.
  */
 export const handler = {
-  GET(_ctx: FreshContext) {
-    const brokerUrl = getBrokerUrl();
-    const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
-    const headers: HeadersInit = token
-      ? { "Authorization": `Bearer ${token}` }
+  GET(ctx: FreshContext) {
+    const authErr = requireDashboardSession(ctx.req);
+    if (authErr) return authErr;
+
+    const config = getDashboardRequestConfig(ctx.req);
+    const headers: HeadersInit = config.token
+      ? { "Authorization": `Bearer ${config.token}` }
       : {};
 
     const body = new ReadableStream({
       async start(controller) {
         try {
-          const res = await fetch(`${brokerUrl}/events`, { headers });
+          const res = await fetch(`${config.brokerUrl}/events`, { headers });
           if (!res.ok || !res.body) {
             controller.enqueue(
               new TextEncoder().encode(

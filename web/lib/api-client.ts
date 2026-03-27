@@ -13,23 +13,43 @@ import type {
 } from "./types.ts";
 import {
   getDefaultInstance,
-  getInstances,
   type Instance,
+  getInstances,
 } from "./instances.ts";
 
 const API_TOKEN = Deno.env.get("DENOCLAW_API_TOKEN") || "";
 
-function headers(): HeadersInit {
-  if (!API_TOKEN) return {};
-  return { "Authorization": `Bearer ${API_TOKEN}` };
+export interface BrokerRequestOptions {
+  brokerUrl?: string;
+  token?: string;
+}
+
+function resolveRequestOptions(
+  options?: string | BrokerRequestOptions,
+): Required<BrokerRequestOptions> {
+  if (typeof options === "string") {
+    return { brokerUrl: options, token: API_TOKEN };
+  }
+
+  return {
+    brokerUrl: options?.brokerUrl ?? getDefaultInstance().url,
+    token: options?.token ?? API_TOKEN,
+  };
+}
+
+function headers(token: string): HeadersInit {
+  if (!token) return {};
+  return { "Authorization": `Bearer ${token}` };
 }
 
 async function fetchJSON<T>(
-  brokerUrl: string,
   path: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<T | null> {
+  const { brokerUrl, token } = resolveRequestOptions(options);
+
   try {
-    const res = await fetch(`${brokerUrl}${path}`, { headers: headers() });
+    const res = await fetch(`${brokerUrl}${path}`, { headers: headers(token) });
     if (!res.ok) return null;
     return await res.json() as T;
   } catch {
@@ -40,70 +60,57 @@ async function fetchJSON<T>(
 // ── Single-instance queries ────────────────────────
 
 export function getSummary(
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<MetricsSummary | null> {
-  return fetchJSON<MetricsSummary>(
-    brokerUrl ?? getDefaultInstance().url,
-    "/stats",
-  );
+  return fetchJSON<MetricsSummary>("/stats", options);
 }
 
 export async function getAllAgentMetrics(
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<AgentMetrics[]> {
-  return await fetchJSON<AgentMetrics[]>(
-    brokerUrl ?? getDefaultInstance().url,
-    "/stats/agents",
-  ) ?? [];
+  return await fetchJSON<AgentMetrics[]>("/stats/agents", options) ?? [];
 }
 
 export function getAgentMetrics(
   agentId: string,
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<AgentMetrics | null> {
   return fetchJSON<AgentMetrics>(
-    brokerUrl ?? getDefaultInstance().url,
     `/stats?agent=${encodeURIComponent(agentId)}`,
+    options,
   );
 }
 
 export async function getAgents(
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<AgentStatusEntry[]> {
-  return await fetchJSON<AgentStatusEntry[]>(
-    brokerUrl ?? getDefaultInstance().url,
-    "/agents",
-  ) ?? [];
+  return await fetchJSON<AgentStatusEntry[]>("/agents", options) ?? [];
 }
 
 export function getAgent(
   agentId: string,
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<AgentStatusEntry | null> {
   return fetchJSON<AgentStatusEntry>(
-    brokerUrl ?? getDefaultInstance().url,
     `/agents/${encodeURIComponent(agentId)}`,
+    options,
   );
 }
 
 export function getHealth(
-  brokerUrl?: string,
+  options?: string | BrokerRequestOptions,
 ): Promise<HealthResponse | null> {
-  return fetchJSON<HealthResponse>(
-    brokerUrl ?? getDefaultInstance().url,
-    "/health",
-  );
+  return fetchJSON<HealthResponse>("/health", options);
 }
 
-export async function getCronJobs(brokerUrl?: string): Promise<CronJob[]> {
-  return await fetchJSON<CronJob[]>(
-    brokerUrl ?? getDefaultInstance().url,
-    "/cron",
-  ) ?? [];
+export async function getCronJobs(
+  options?: string | BrokerRequestOptions,
+): Promise<CronJob[]> {
+  return await fetchJSON<CronJob[]>("/cron", options) ?? [];
 }
 
-export function getBrokerUrl(): string {
-  return getDefaultInstance().url;
+export function getBrokerUrl(options?: string | BrokerRequestOptions): string {
+  return resolveRequestOptions(options).brokerUrl;
 }
 
 // ── Multi-instance aggregation ─────────────────────
@@ -117,14 +124,20 @@ export interface InstanceData {
 }
 
 /** Fetch data from ALL configured instances in parallel. */
-export function getAllInstancesData(): Promise<InstanceData[]> {
-  const instances = getInstances();
+export function getAllInstancesData(
+  options?: {
+    instances?: Instance[];
+    token?: string;
+  },
+): Promise<InstanceData[]> {
+  const instances = options?.instances ?? getInstances();
+  const token = options?.token ?? API_TOKEN;
 
   return Promise.all(instances.map(async (instance): Promise<InstanceData> => {
     const [summary, agents, health] = await Promise.all([
-      getSummary(instance.url),
-      getAgents(instance.url),
-      getHealth(instance.url),
+      getSummary({ brokerUrl: instance.url, token }),
+      getAgents({ brokerUrl: instance.url, token }),
+      getHealth({ brokerUrl: instance.url, token }),
     ]);
 
     return {

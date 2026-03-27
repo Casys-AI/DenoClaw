@@ -432,6 +432,13 @@ try {
     }
 
     case undefined: {
+      // On Deno Deploy: auto-start gateway (no CLI, no interactive mode)
+      if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+        const config = await getConfigOrDefault();
+        await gateway(config);
+        break;
+      }
+
       const config2 = await getConfigOrDefault();
       const hasProvider2 = Object.values(config2.providers).some((p) =>
         p?.apiKey || p?.enabled

@@ -22,6 +22,7 @@ import {
   listAgentTraces,
 } from "../telemetry/traces.ts";
 import { RateLimiter } from "./rate_limit.ts";
+import { GitHubOAuth } from "./github_oauth.ts";
 import { log } from "../shared/log.ts";
 
 export interface GatewayDeps {
@@ -51,6 +52,7 @@ export class Gateway {
   private kv: Deno.Kv | null;
   private freshHandler: ((req: Request) => Promise<Response>) | null;
   private rateLimiter: RateLimiter | null = null;
+  private githubOAuth: GitHubOAuth | null = null;
   private httpServer?: Deno.HttpServer;
   private running = false;
   private wsClients = new Map<string, WebSocket>();
@@ -65,9 +67,9 @@ export class Gateway {
     this.metrics = deps.metrics ?? null;
     this.kv = deps.kv ?? null;
     this.freshHandler = deps.freshHandler ?? null;
-    // Rate limiter: 100 requests/minute per IP when KV is available
     if (this.kv) {
       this.rateLimiter = new RateLimiter(this.kv, 100, 60_000);
+      this.githubOAuth = new GitHubOAuth(this.kv, ["superWorldSavior"]);
     }
   }
 
@@ -198,6 +200,19 @@ export class Gateway {
 
   private async handleHttp(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
+    // GitHub OAuth routes — before auth (public endpoints)
+    if (this.githubOAuth?.isConfigured()) {
+      if (url.pathname === "/auth/github") {
+        return this.githubOAuth.handleAuthorize(req);
+      }
+      if (url.pathname === "/auth/github/callback") {
+        return await this.githubOAuth.handleCallback(req);
+      }
+      if (url.pathname === "/auth/logout") {
+        return await this.githubOAuth.handleLogout(req);
+      }
+    }
 
     // Dashboard Fresh handler — avant auth (gère sa propre auth si besoin)
     if (

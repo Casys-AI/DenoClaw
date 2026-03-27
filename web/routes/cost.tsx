@@ -128,7 +128,7 @@ export default function Cost({ data }: { data: CostData }) {
       />
 
       {/* KPIs */}
-      <div class="stats stats-horizontal w-full bg-base-200">
+      <div class="stats stats-vertical sm:stats-horizontal w-full bg-base-200">
         <div class="stat">
           <div class="stat-title">Today</div>
           <div class="stat-value text-warning font-data">
@@ -165,7 +165,7 @@ export default function Cost({ data }: { data: CostData }) {
           {/* Cost trend sparkline */}
           <div class="card bg-base-200">
             <div class="card-body">
-              <h2 class="card-title font-display text-sm">COST TREND</h2>
+              <h2 class="card-title font-display">Cost Trend</h2>
               {hourlyEntries.length === 0
                 ? (
                   <div class="text-sm text-neutral-content">
@@ -232,7 +232,7 @@ export default function Cost({ data }: { data: CostData }) {
           {/* Cost by provider */}
           <div class="card bg-base-200">
             <div class="card-body">
-              <h2 class="card-title font-display text-sm">COST BY PROVIDER</h2>
+              <h2 class="card-title font-display">Cost by Provider</h2>
               {providerList.length === 0
                 ? (
                   <div class="text-sm text-neutral-content">
@@ -272,9 +272,7 @@ export default function Cost({ data }: { data: CostData }) {
           {/* Agent cost ranking */}
           <div class="card bg-base-200">
             <div class="card-body">
-              <h2 class="card-title font-display text-sm">
-                AGENT COST RANKING
-              </h2>
+              <h2 class="card-title font-display">Agent Cost Ranking</h2>
               <div class="space-y-3">
                 {sortedByCost.map((agent) => {
                   const pct = maxCost > 0
@@ -313,7 +311,7 @@ export default function Cost({ data }: { data: CostData }) {
           {/* Token efficiency */}
           <div class="card bg-base-200">
             <div class="card-body">
-              <h2 class="card-title font-display text-sm">TOKEN EFFICIENCY</h2>
+              <h2 class="card-title font-display">Token Efficiency</h2>
               {agents.length === 0
                 ? <div class="text-neutral-content text-sm">No data yet.</div>
                 : (

@@ -18,9 +18,11 @@ export default function Activity({ data }: { data: { brokerUrl: string } }) {
           <ActivityFeed />
         </div>
       </div>
-      <div class="text-xs font-data text-neutral-content">
-        Streaming from: {data.brokerUrl} via /api/events proxy
-      </div>
+      {Deno.env.get("DENO_DEPLOYMENT_ID") ? null : (
+        <div class="text-xs font-data text-neutral-content">
+          Streaming from: {data.brokerUrl} via /api/events proxy
+        </div>
+      )}
     </div>
   );
 }

@@ -81,23 +81,49 @@ export default function Network({ data }: { data: NetworkData }) {
           </div>
           <div class="card bg-base-200">
             <div class="card-body p-4">
-              <h3 class="font-display text-sm text-neutral-content">AGENTS</h3>
-              <ul class="space-y-2">
-                {agents.map((agent) => (
-                  <li
-                    key={agent.agentId}
-                    class="flex items-center justify-between"
-                  >
-                    <a
-                      href={`/agents/${agent.agentId}`}
-                      class="link link-primary text-sm"
+              <h3 class="text-xs font-display text-neutral-content uppercase tracking-wider">
+                Agents
+              </h3>
+              {agents.length === 0
+                ? (
+                  <div role="alert" class="alert alert-info">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      class="stroke-current w-6 h-6 shrink-0"
                     >
-                      {agent.agentId}
-                    </a>
-                    <StatusDot status={agent.status} />
-                  </li>
-                ))}
-              </ul>
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span>
+                      No agents found. Configure agents with{" "}
+                      <code class="font-data">denoclaw agent create</code>.
+                    </span>
+                  </div>
+                )
+                : (
+                  <ul class="space-y-2">
+                    {agents.map((agent) => (
+                      <li
+                        key={agent.agentId}
+                        class="flex items-center justify-between"
+                      >
+                        <a
+                          href={`/agents/${agent.agentId}`}
+                          class="link link-primary text-sm"
+                        >
+                          {agent.agentId}
+                        </a>
+                        <StatusDot status={agent.status} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
             </div>
           </div>
         </div>

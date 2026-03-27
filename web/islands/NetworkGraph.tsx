@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { STATUS_COLORS } from "../components/StatusBadge.tsx";
 
 interface Agent {
   agentId: string;
@@ -16,7 +17,8 @@ interface NetworkGraphProps {
 // deno-lint-ignore no-explicit-any
 const getCytoscape = (): any => (globalThis as any).cytoscape;
 
-const STATUS_COLORS: Record<string, string> = {
+/** Hex colors for Cytoscape node styling (canvas rendering, not CSS classes). */
+const CY_STATUS_COLORS: Record<string, string> = {
   running: "#22c55e",
   alive: "#3b82f6",
   stopped: "#ef4444",
@@ -171,7 +173,10 @@ export default function NetworkGraph(
     for (const agent of agents) {
       const node = cyInstance.getElementById(agent.agentId);
       if (node) {
-        node.style("background-color", STATUS_COLORS[agent.status] || "#666");
+        node.style(
+          "background-color",
+          CY_STATUS_COLORS[agent.status] || "#666",
+        );
       }
     }
 
@@ -191,6 +196,14 @@ export default function NetworkGraph(
     return () => cyInstance.destroy();
   }, [cyLoaded, agents, tunnels]);
 
+  if (!cyLoaded) {
+    return (
+      <div class="flex items-center justify-center h-[460px]">
+        <span class="loading loading-spinner loading-lg" />
+      </div>
+    );
+  }
+
   return (
     <div class="flex gap-4">
       {/* Graph */}
@@ -202,15 +215,12 @@ export default function NetworkGraph(
         />
         {/* Legend */}
         <div class="flex gap-6 text-xs text-neutral-content mt-2">
-          <div class="flex items-center gap-1">
-            <span class="w-3 h-3 rounded-full bg-success" /> Running
-          </div>
-          <div class="flex items-center gap-1">
-            <span class="w-3 h-3 rounded-full bg-info" /> Alive
-          </div>
-          <div class="flex items-center gap-1">
-            <span class="w-3 h-3 rounded-full bg-error" /> Stopped
-          </div>
+          {(["running", "alive", "stopped"] as const).map((s) => (
+            <div key={s} class="flex items-center gap-1">
+              <span class={`w-3 h-3 rounded-full ${STATUS_COLORS[s]}`} />
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </div>
+          ))}
           <div class="flex items-center gap-1">
             <span
               class="w-3 h-3 gradient-deno"

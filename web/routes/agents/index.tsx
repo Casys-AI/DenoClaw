@@ -73,7 +73,27 @@ export default function AgentsList(
       </div>
 
       {agents.length === 0
-        ? <div role="alert" class="alert">No agents found.</div>
+        ? (
+          <div role="alert" class="alert alert-info">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              class="stroke-current w-6 h-6 shrink-0"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <span>
+              No agents found. Configure agents with{" "}
+              <code class="font-data">denoclaw agent create</code>.
+            </span>
+          </div>
+        )
         : (
           <div class="overflow-x-auto">
             <table class="table table-sm bg-base-200">
@@ -157,7 +177,10 @@ export default function AgentsList(
                       <td>
                         {agent.activeTask
                           ? (
-                            <span class="text-xs font-data text-primary truncate max-w-32 inline-block">
+                            <span
+                              class="text-xs font-data text-primary truncate max-w-32 inline-block"
+                              title={agent.activeTask.taskId}
+                            >
                               {agent.activeTask.taskId.slice(0, 12)}...
                             </span>
                           )

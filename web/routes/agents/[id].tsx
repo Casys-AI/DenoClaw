@@ -172,7 +172,10 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           )}
           {agent?.activeTask && (
             <div class="font-data text-xs text-primary">
-              Active: {agent.activeTask.taskId.slice(0, 16)}...
+              Active:{" "}
+              <span title={agent.activeTask.taskId}>
+                {agent.activeTask.taskId.slice(0, 16)}...
+              </span>
             </div>
           )}
         </div>
@@ -268,8 +271,8 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {/* Recent traces */}
           <div class="card bg-base-200">
             <div class="card-body p-4">
-              <h3 class="font-display text-sm text-neutral-content">
-                RECENT TRACES
+              <h3 class="text-xs font-display text-neutral-content uppercase tracking-wider">
+                Recent Traces
               </h3>
               {traces.length === 0
                 ? <div class="text-xs text-neutral-content">No traces yet.</div>
@@ -280,7 +283,7 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
                         key={t.traceId}
                         class="flex items-center justify-between text-xs"
                       >
-                        <span class="font-data text-primary">
+                        <span class="font-data text-primary" title={t.traceId}>
                           {t.traceId.slice(0, 12)}...
                         </span>
                         <span
@@ -305,8 +308,8 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {metrics && metrics.a2a.peersContacted.length > 0 && (
             <div class="card bg-base-200">
               <div class="card-body p-4">
-                <h3 class="font-display text-sm text-neutral-content">
-                  CONNECTED PEERS
+                <h3 class="text-xs font-display text-neutral-content uppercase tracking-wider">
+                  Connected Peers
                 </h3>
                 <ul class="space-y-1">
                   {metrics.a2a.peersContacted.map((peer) => (
@@ -328,8 +331,8 @@ export default function AgentDetail({ data }: { data: AgentDetailData }) {
           {toolBreakdown.length > 0 && (
             <div class="card bg-base-200">
               <div class="card-body p-4">
-                <h3 class="font-display text-sm text-neutral-content">
-                  TOOL BREAKDOWN
+                <h3 class="text-xs font-display text-neutral-content uppercase tracking-wider">
+                  Tool Breakdown
                 </h3>
                 <div class="space-y-2">
                   {toolBreakdown.map((t) => {

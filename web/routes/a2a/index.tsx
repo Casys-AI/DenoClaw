@@ -7,11 +7,15 @@ import type { AgentTaskEntry } from "../../lib/types.ts";
 interface A2AData {
   tasks: AgentTaskEntry[];
   brokerUrl: string;
+  statusFilter: string;
+  searchQuery: string;
 }
 
 export const handler = {
-  async GET(_ctx: FreshContext) {
+  async GET(ctx: FreshContext) {
     const brokerUrl = getBrokerUrl();
+    const statusFilter = ctx.url.searchParams.get("status") || "all";
+    const searchQuery = ctx.url.searchParams.get("q") || "";
     let tasks: AgentTaskEntry[] = [];
     try {
       const token = Deno.env.get("DENOCLAW_API_TOKEN") || "";
@@ -21,12 +25,37 @@ export const handler = {
       const res = await fetch(`${brokerUrl}/agents/tasks`, { headers });
       if (res.ok) tasks = await res.json();
     } catch { /* gateway not running */ }
-    return page({ tasks, brokerUrl } as A2AData);
+
+    // Filter by status
+    if (statusFilter !== "all") {
+      if (statusFilter === "running") {
+        tasks = tasks.filter((t) =>
+          t.status === "running" || t.status === "sent" ||
+          t.status === "received"
+        );
+      } else {
+        tasks = tasks.filter((t) => t.status === statusFilter);
+      }
+    }
+
+    // Filter by search query
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      tasks = tasks.filter((t) =>
+        t.message?.toLowerCase().includes(q) ||
+        t.taskId?.toLowerCase().includes(q) ||
+        t.from?.toLowerCase().includes(q) ||
+        t.to?.toLowerCase().includes(q)
+      );
+    }
+
+    return page({ tasks, brokerUrl, statusFilter, searchQuery } as A2AData);
   },
 };
 
 export default function A2AHub({ data }: { data: A2AData }) {
-  const { tasks } = data;
+  const { tasks, statusFilter, searchQuery } = data;
+  // Counts from unfiltered would be ideal but we use what we have
   const running = tasks.filter((t) =>
     t.status === "running" || t.status === "sent" || t.status === "received"
   );
@@ -38,7 +67,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
       <h1 class="text-2xl font-display font-bold">A2A Chain Hub</h1>
 
       {/* KPIs — DaisyUI stats */}
-      <div class="stats stats-horizontal w-full bg-base-200">
+      <div class="stats stats-vertical sm:stats-horizontal w-full bg-base-200">
         <div class="stat">
           <div class="stat-title">Total Tasks</div>
           <div class="stat-value font-data">{tasks.length}</div>
@@ -60,43 +89,78 @@ export default function A2AHub({ data }: { data: A2AData }) {
       </div>
 
       {/* Filters */}
-      <div class="flex items-center gap-4">
-        <input
-          type="text"
-          placeholder="Search tasks..."
-          class="input input-sm bg-base-200 font-data w-64"
-        />
+      <div class="flex flex-wrap items-center gap-4">
+        <form method="GET" class="flex items-center gap-2">
+          <input
+            type="text"
+            name="q"
+            value={searchQuery}
+            placeholder="Search tasks..."
+            class="input input-sm bg-base-200 font-data w-64"
+          />
+          {statusFilter !== "all" && (
+            <input type="hidden" name="status" value={statusFilter} />
+          )}
+        </form>
         <div class="join">
-          <button type="button" class="join-item btn btn-sm btn-primary">
+          <a
+            href="?status=all"
+            class={`join-item btn btn-sm ${
+              statusFilter === "all" ? "btn-primary" : "btn-ghost"
+            }`}
+          >
             All
-          </button>
-          <button
-            type="button"
-            class="join-item btn btn-sm btn-ghost text-info"
+          </a>
+          <a
+            href="?status=running"
+            class={`join-item btn btn-sm ${
+              statusFilter === "running" ? "btn-info" : "btn-ghost text-info"
+            }`}
           >
             Running
-          </button>
-          <button
-            type="button"
-            class="join-item btn btn-sm btn-ghost text-success"
+          </a>
+          <a
+            href="?status=completed"
+            class={`join-item btn btn-sm ${
+              statusFilter === "completed"
+                ? "btn-success"
+                : "btn-ghost text-success"
+            }`}
           >
             Completed
-          </button>
-          <button
-            type="button"
-            class="join-item btn btn-sm btn-ghost text-error"
+          </a>
+          <a
+            href="?status=failed"
+            class={`join-item btn btn-sm ${
+              statusFilter === "failed" ? "btn-error" : "btn-ghost text-error"
+            }`}
           >
             Failed
-          </button>
+          </a>
         </div>
       </div>
 
       {/* Chain Table */}
       {tasks.length === 0
         ? (
-          <div role="alert" class="alert">
-            No A2A tasks recorded yet. Agents communicate via the send_to_agent
-            tool.
+          <div role="alert" class="alert alert-info">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              class="stroke-current w-6 h-6 shrink-0"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <span>
+              No A2A tasks recorded yet. Agents communicate via the{" "}
+              <code class="font-data">send_to_agent</code> tool.
+            </span>
           </div>
         )
         : (
@@ -167,7 +231,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
                             <span class="text-neutral-content mr-1">
                               {treeChar}
                             </span>
-                            <span class="text-primary">
+                            <span class="text-primary" title={task.taskId}>
                               {task.taskId.slice(0, 10)}...
                             </span>
                           </td>
@@ -198,7 +262,9 @@ export default function A2AHub({ data }: { data: A2AData }) {
                           —
                         </td>
                         <td class="font-data text-xs text-primary">
-                          {task.taskId.slice(0, 10)}...
+                          <span title={task.taskId}>
+                            {task.taskId.slice(0, 10)}...
+                          </span>
                         </td>
                         <td>
                           <span class="font-medium">{task.from}</span>

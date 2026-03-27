@@ -68,7 +68,7 @@ export default function Overview({ data }: { data: OverviewData }) {
       <AlertStrip agents={agents} totalCostUsd={summary.totalCostUsd} />
 
       {/* KPIs — DaisyUI stats */}
-      <div class="stats stats-horizontal w-full bg-base-200">
+      <div class="stats stats-vertical sm:stats-horizontal w-full bg-base-200">
         <div class="stat">
           <div class="stat-title">Agents</div>
           <div class="stat-value text-primary font-data">
@@ -123,8 +123,24 @@ export default function Overview({ data }: { data: OverviewData }) {
               <h2 class="card-title font-display">Agents</h2>
               {agents.length === 0
                 ? (
-                  <div class="text-neutral-content text-sm">
-                    No agents found.
+                  <div role="alert" class="alert alert-info">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      class="stroke-current w-6 h-6 shrink-0"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span>
+                      No agents found. Configure agents with{" "}
+                      <code class="font-data">denoclaw agent create</code>.
+                    </span>
                   </div>
                 )
                 : (
@@ -155,7 +171,10 @@ export default function Overview({ data }: { data: OverviewData }) {
                           )}
                           {agent.activeTask
                             ? (
-                              <span class="text-xs text-primary font-data truncate">
+                              <span
+                                class="text-xs text-primary font-data truncate"
+                                title={agent.activeTask.taskId}
+                              >
                                 Processing:{" "}
                                 {agent.activeTask.taskId.slice(0, 12)}...
                               </span>
@@ -179,8 +198,11 @@ export default function Overview({ data }: { data: OverviewData }) {
             <div class="card-body">
               <h2 class="card-title font-display">Agent Communication</h2>
               <div class="text-sm text-neutral-content">
-                A2A activity feed will appear here when agents communicate.
+                Real-time agent communication events.
               </div>
+              <a href="/activity" class="btn btn-sm btn-ghost btn-primary mt-2">
+                Open Activity Feed →
+              </a>
             </div>
           </div>
         </div>

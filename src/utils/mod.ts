@@ -1,4 +1,8 @@
-export { log } from "./log.ts";
+/**
+ * BACKWARD-COMPAT SHIM — sera supprimé en Phase 9.
+ * Ré-exporte depuis src/shared/.
+ */
+export { log } from "../shared/log.ts";
 export {
   ensureDir,
   fileExists,
@@ -10,11 +14,11 @@ export {
   getMemoryDir,
   getSkillsDir,
   truncate,
-} from "./helpers.ts";
+} from "../shared/helpers.ts";
 export {
   ChannelError,
   ConfigError,
   DenoClawError,
   ProviderError,
   ToolError,
-} from "./errors.ts";
+} from "../shared/errors.ts";

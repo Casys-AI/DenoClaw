@@ -1,4 +1,5 @@
 import { join } from "@std/path";
+import { DenoClawError } from "./errors.ts";
 
 export function getHomeDir(): string {
   const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || ".";
@@ -21,38 +22,52 @@ export function getCronJobsPath(): string {
   return join(getHomeDir(), "cron.json");
 }
 
-export function getAgentsDir(): string {
-  return join(getHomeDir(), "agents");
+// ── Agent paths: definition (project-level, versionable) ──
+
+export function getProjectAgentsDir(): string {
+  const override = Deno.env.get("DENOCLAW_AGENTS_DIR");
+  if (override) return override;
+  return join(Deno.cwd(), "data", "agents");
 }
 
 export function validateAgentId(agentId: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(agentId)) {
-    throw new Error(
-      `Invalid agent ID "${agentId}" — must be alphanumeric with hyphens/underscores/dots`,
+    throw new DenoClawError(
+      "INVALID_AGENT_ID",
+      { agentId },
+      "Agent ID must be alphanumeric with hyphens/underscores/dots",
     );
   }
 }
 
-export function getAgentDir(agentId: string): string {
+export function getAgentDefDir(agentId: string): string {
   validateAgentId(agentId);
-  return join(getAgentsDir(), agentId);
+  return join(getProjectAgentsDir(), agentId);
 }
 
 export function getAgentConfigPath(agentId: string): string {
-  return join(getAgentDir(agentId), "agent.json");
+  return join(getAgentDefDir(agentId), "agent.json");
 }
 
 export function getAgentSoulPath(agentId: string): string {
-  return join(getAgentDir(agentId), "soul.md");
+  return join(getAgentDefDir(agentId), "soul.md");
 }
 
 export function getAgentSkillsDir(agentId: string): string {
-  return join(getAgentDir(agentId), "skills");
+  return join(getAgentDefDir(agentId), "skills");
+}
+
+// ── Agent paths: runtime (machine-level, not versioned) ──
+
+export function getAgentRuntimeDir(agentId: string): string {
+  validateAgentId(agentId);
+  return join(getHomeDir(), "agents", agentId);
 }
 
 export function getAgentMemoryPath(agentId: string): string {
-  return join(getAgentDir(agentId), "memory.db");
+  return join(getAgentRuntimeDir(agentId), "memory.db");
 }
+
 
 export function generateId(): string {
   return crypto.randomUUID();

@@ -18,4 +18,12 @@ Thumbs.db
 # Environment
 .env
 .env.*
-data/
+
+# Runtime databases (not versioned)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Agent definitions ARE versioned (data/agents/<id>/agent.json, soul.md, skills/)
+# Memory DBs inside agent dirs are not versioned
+data/agents/*/memory.db

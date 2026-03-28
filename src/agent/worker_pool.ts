@@ -7,7 +7,7 @@ import type {
 import { log } from "../shared/log.ts";
 import {
   generateId,
-  getAgentDir,
+  getAgentRuntimeDir,
   getAgentMemoryPath,
 } from "../shared/helpers.ts";
 import { ensureDir } from "../shared/helpers.ts";
@@ -90,7 +90,7 @@ export class WorkerPool {
     }
     await Deno.mkdir(DATA_DIR, { recursive: true });
     // Ensure each agent's workspace dir exists (for memory.db)
-    await Promise.all(agentIds.map((id) => ensureDir(getAgentDir(id))));
+    await Promise.all(agentIds.map((id) => ensureDir(getAgentRuntimeDir(id))));
 
     const readyPromises: Promise<void>[] = [];
     for (const agentId of agentIds) {
@@ -420,7 +420,7 @@ export class WorkerPool {
     this.config.agents.registry[agentId] = entry;
 
     await Deno.mkdir(DATA_DIR, { recursive: true });
-    await ensureDir(getAgentDir(agentId));
+    await ensureDir(getAgentRuntimeDir(agentId));
     await this.spawnWorker(agentId);
     log.info(`Agent ajouté à chaud : ${agentId}`);
   }

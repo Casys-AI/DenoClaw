@@ -3,11 +3,11 @@ import {
   ensureDir,
   fileExists,
   getAgentConfigPath,
-  getAgentDir,
+  getAgentDefDir,
   getAgentMemoryPath,
-  getAgentsDir,
   getAgentSkillsDir,
   getAgentSoulPath,
+  getProjectAgentsDir,
 } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
 
@@ -59,7 +59,7 @@ export class WorkspaceLoader {
     entry: AgentEntry,
     systemPrompt?: string,
   ): Promise<void> {
-    const dir = getAgentDir(agentId);
+    const dir = getAgentDefDir(agentId);
     await ensureDir(dir);
 
     await Deno.writeTextFile(
@@ -76,7 +76,7 @@ export class WorkspaceLoader {
   }
 
   static async delete(agentId: string): Promise<void> {
-    const dir = getAgentDir(agentId);
+    const dir = getAgentDefDir(agentId);
     if (await fileExists(dir)) {
       await Deno.remove(dir, { recursive: true });
       log.info(`Workspace supprimé : ${agentId}`);
@@ -84,7 +84,7 @@ export class WorkspaceLoader {
   }
 
   static async listAll(): Promise<string[]> {
-    const dir = getAgentsDir();
+    const dir = getProjectAgentsDir();
     if (!(await fileExists(dir))) return [];
 
     const agents: string[] = [];

@@ -26,9 +26,9 @@ import { GitHubOAuth } from "./github_oauth.ts";
 import { AgentStore } from "./agent_store.ts";
 import { log } from "../shared/log.ts";
 
-type DashboardAuthMode = "local-open" | "token" | "github-oauth";
+export type DashboardAuthMode = "local-open" | "token" | "github-oauth";
 
-function getDashboardAuthMode(): DashboardAuthMode {
+export function getDashboardAuthMode(): DashboardAuthMode {
   const raw = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
   if (raw) {
     const v = raw.trim().toLowerCase();
@@ -40,7 +40,7 @@ function getDashboardAuthMode(): DashboardAuthMode {
   return Deno.env.get("DENO_DEPLOYMENT_ID") ? "github-oauth" : "local-open";
 }
 
-function getDashboardAllowedUsers(): string[] | undefined {
+export function getDashboardAllowedUsers(): string[] | undefined {
   const raw = Deno.env.get("DENOCLAW_DASHBOARD_GITHUB_ALLOWED_USERS") ??
     Deno.env.get("GITHUB_ALLOWED_USERS");
   if (!raw) return undefined;

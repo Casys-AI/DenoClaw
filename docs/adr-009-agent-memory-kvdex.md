@@ -66,19 +66,21 @@ seul le storage change.
 **Sync au déploiement :** `deploy:agent` lit les .md locaux et les copie dans
 le KV de l'agent déployé. Soul.md et skills suivent le même pattern.
 
-**Tools exposés au LLM** (pattern Serena) :
+**Pas de tool spécial.** L'agent utilise les tools fichier existants (`read_file`,
+`write_file`) pour lire/écrire ses memories — exactement comme Claude Code.
 
-- `list_memories` — lister les mémoires disponibles
-- `read_memory(file)` — lire une mémoire
-- `write_memory(file, content)` — créer/réécrire une mémoire
-- `edit_memory(file, search, replace)` — éditer une section
-- `delete_memory(file)` — supprimer (décision explicite de l'agent uniquement)
+En local, les tools accèdent au filesystem réel. Sur Deploy, les tools détectent
+les chemins `memories/` et switchent sur un backend KV transparent. L'agent ne
+sait pas quel backend est utilisé.
 
-L'interface `LongTermMemoryPort` abstrait le backend. L'implémentation fichier
-et l'implémentation KV exposent la même API. Le tool ne sait pas où il stocke.
+```
+Agent: write_file("memories/user_prefs.md", "Préfère le français")
+→ Local:  Deno.writeTextFile("data/agents/alice/memories/user_prefs.md", ...)
+→ Deploy: kv.set(["workspace", "alice", "memories/user_prefs.md"], ...)
+```
 
-**Au démarrage** : la liste des mémoires est injectée dans le system prompt
-pour que l'agent sache ce qu'il a mémorisé.
+**Au démarrage** : la liste des fichiers mémoire est injectée dans le system
+prompt pour que l'agent sache ce qu'il a mémorisé.
 
 ## Pourquoi ce modèle dual
 
@@ -224,16 +226,14 @@ tard.
   `worker_pool.ts`)
 - 95 tests passent, type-check OK, lint clean
 
-### ⏳ À faire — Mémoire long-terme (dual backend)
+### ⏳ À faire — Mémoire long-terme via tools fichier
 
 1. `WorkspaceLoader.create()` crée `memories/` dans `data/agents/<id>/`
-2. Créer `LongTermMemoryPort` interface (list, read, write, edit, delete)
-3. Implémenter `FileMemoryBackend` (local — lit/écrit dans `memories/*.md`)
-4. Implémenter `KvMemoryBackend` (Deploy — lit/écrit sous `["memories", agentId, filename]`)
-5. Créer tool `knowledge` avec les 5 actions fichier, séparé du `MemoryTool` KV existant
-6. Adapter `loop.ts` et `context.ts` : injecter la liste des mémoires dans le prompt
-7. `deploy:agent` sync les .md locaux vers KV au moment du déploiement
-8. Tests des deux backends + du tool knowledge
+2. `read_file` / `write_file` tools : détecter les chemins `memories/` et router
+   vers le filesystem (local) ou KV (Deploy) transparently
+3. Adapter `context.ts` : injecter la liste des fichiers mémoire dans le prompt
+4. `deploy:agent` sync les .md locaux vers KV au moment du déploiement
+5. Tests du routing filesystem/KV dans les tools fichier
 
 ### 🔮 Futur (hors scope)
 
@@ -250,6 +250,7 @@ tard.
 - La mémoire long-terme est lisible, éditable, et git-friendly
 - Le modèle dual (KV + .md) couvre les deux usages sans sur-engineering
 - L'architecture est extensible vers le vector search sans refonte
-- Compatible local (filesystem) et Deploy (KV pour tout — conversations + memories)
+- Compatible local (filesystem) et Deploy (KV backend derrière les mêmes tools)
 - `deploy:agent` sync workspace local → KV distant (soul.md, skills, memories)
-- Même tool interface, backend switch automatique selon l'environnement
+- Pas de tool spécial pour les memories — `read_file`/`write_file` suffisent
+- Pattern Claude Code : l'agent gère ses memories comme des fichiers

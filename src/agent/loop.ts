@@ -30,10 +30,7 @@ import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
 import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
-import type {
-  TraceCorrelationIds,
-  TraceWriter,
-} from "../telemetry/traces.ts";
+import type { TraceCorrelationIds, TraceWriter } from "../telemetry/traces.ts";
 
 import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
 
@@ -138,10 +135,15 @@ export class AgentLoop implements AgentLoopLike {
     this.tools.register(new MemoryTool(this.memory));
     if (deps?.sandboxConfig) {
       const backend = createSandboxBackend(deps.sandboxConfig);
+      const toolsCfg = {
+        ...config.tools,
+        workspaceDir: deps.workspaceDir,
+        agentId: this.agentId,
+      };
       this.tools.setBackend(
         backend,
         deps.sandboxConfig.execPolicy,
-        config.tools,
+        toolsCfg,
         deps.sandboxConfig.networkAllow,
       );
       if (deps.askApproval) this.tools.setAskApproval(deps.askApproval);
@@ -189,7 +191,11 @@ export class AgentLoop implements AgentLoopLike {
       ...(this.contextId ? { contextId: this.contextId } : {}),
     };
     if (tw && !traceId) {
-      traceId = await tw.startTrace(this.agentId, this.sessionId, correlationIds);
+      traceId = await tw.startTrace(
+        this.agentId,
+        this.sessionId,
+        correlationIds,
+      );
     }
 
     let iteration = 0;

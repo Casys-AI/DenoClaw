@@ -20,17 +20,23 @@ interface ExecutorInput {
   args: Record<string, unknown>;
   config?: {
     restrictToWorkspace?: boolean;
+    workspaceDir?: string;
+    agentId?: string;
   };
 }
 
 function instantiateTool(name: string, config?: ExecutorInput["config"]) {
+  const wsCtx = config?.workspaceDir && config?.agentId
+    ? { workspaceDir: config.workspaceDir, agentId: config.agentId }
+    : undefined;
+
   switch (name) {
     case "shell":
       return new ShellTool(config?.restrictToWorkspace);
     case "read_file":
-      return new ReadFileTool();
+      return new ReadFileTool(wsCtx);
     case "write_file":
-      return new WriteFileTool();
+      return new WriteFileTool(wsCtx);
     case "web_fetch":
       return new WebFetchTool();
     default:

@@ -68,13 +68,16 @@ export interface LLMResponse {
 
 // ── Ports (interfaces pour DI cross-domain sans violation de boundary) ────
 
-/** Message enveloppe pour la communication inter-agent via le broker. */
-export interface BrokerEnvelope {
+/** Message envelope for broker-routed communication. */
+export interface BrokerEnvelope<
+  TType extends string = string,
+  TPayload = unknown,
+> {
   id: string;
   from: string;
   to: string;
-  type: string;
-  payload: unknown;
+  type: TType;
+  payload: TPayload;
   timestamp: string;
 }
 
@@ -167,7 +170,7 @@ export interface SandboxExecRequest {
   networkAllow?: string[];
   timeoutSec?: number;
   execPolicy: ExecPolicy;
-  toolsConfig?: { restrictToWorkspace?: boolean };
+  toolsConfig?: { restrictToWorkspace?: boolean; workspaceDir?: string; agentId?: string };
   onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
 }
 
@@ -241,8 +244,8 @@ export interface AgentStatusEntry {
   activeTask?: ActiveTaskEntry | null;
 }
 
-export interface AgentTaskEntry {
-  id: string;
+export interface TaskObservationEntry {
+  taskId: string;
   from: string;
   to: string;
   message: string;

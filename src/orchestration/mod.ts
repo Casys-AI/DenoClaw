@@ -5,7 +5,7 @@ export { BrokerServer } from "./broker.ts";
 export type { BrokerServerDeps } from "./broker.ts";
 export { BrokerClient } from "./client.ts";
 export type { BrokerTransport } from "./transport.ts";
-export { HttpBrokerTransport, KvQueueTransport } from "./transport.ts";
+export { KvQueueTransport } from "./transport.ts";
 export { LocalRelay } from "./relay.ts";
 export { Gateway } from "./gateway.ts";
 export type { GatewayDeps } from "./gateway.ts";

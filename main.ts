@@ -394,21 +394,9 @@ try {
       break;
 
     case "deploy":
-      if (subcommand === "agent") {
-        const agentName = args._[2] as string;
-        const brokerUrl = (args.broker as string) || Deno.env.get("DENOCLAW_BROKER_URL");
-        await publishAgent(agentName, { brokerUrl });
-      } else {
-        console.log("Usage: denoclaw deploy agent <name> --broker <url>");
-      }
-      break;
-
-    // Legacy alias
     case "publish":
       if (subcommand === "agent") {
-        const agentName = args._[2] as string;
-        const brokerUrl = (args.broker as string) || Deno.env.get("DENOCLAW_BROKER_URL");
-        await publishAgent(agentName, { brokerUrl });
+        await publishAgent();
       } else {
         console.log("Usage: denoclaw deploy agent <name> --broker <url>");
       }

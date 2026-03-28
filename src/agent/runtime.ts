@@ -1,7 +1,7 @@
 import type { AgentBrokerPort, BrokerEnvelope } from "../shared/types.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";
-import type { Task } from "../messaging/a2a/types.ts";
+import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import {
   createCanonicalTask,
   transitionTask,
@@ -29,9 +29,29 @@ import { log } from "../shared/log.ts";
  * No code executes here — all execution goes through Sandbox.
  * Depends on AgentBrokerPort interface (DI), not on BrokerClient concret.
  */
-type BrokerTaskReporter = AgentBrokerPort & {
+type BrokerCanonicalTaskPort = AgentBrokerPort & {
+  getTask(taskId: string): Promise<Task | null>;
   reportTaskResult(task: Task): Promise<Task>;
 };
+
+interface LegacyAgentMessagePayload {
+  instruction: string;
+  data?: unknown;
+  taskId?: string;
+  contextId?: string;
+}
+
+interface RuntimeTaskSubmitPayload {
+  taskId: string;
+  message: A2AMessage;
+  contextId?: string;
+}
+
+interface RuntimeTaskContinuePayload {
+  taskId: string;
+  message: A2AMessage;
+  metadata?: Record<string, unknown>;
+}
 
 export class AgentRuntime {
   private agentId: string;
@@ -87,7 +107,13 @@ export class AgentRuntime {
 
       switch (msg.type) {
         case "agent_message":
-          await this.handleUserMessage(msg);
+          await this.handleLegacyAgentMessage(msg);
+          break;
+        case "task_submit":
+          await this.handleTaskSubmitMessage(msg);
+          break;
+        case "task_continue":
+          await this.handleTaskContinueMessage(msg);
           break;
         default:
           log.debug(`Message type ignoré dans runtime : ${msg.type}`);
@@ -110,19 +136,12 @@ export class AgentRuntime {
     });
   }
 
-  private async handleUserMessage(msg: BrokerEnvelope): Promise<void> {
-    const payload = msg.payload as {
-      instruction: string;
-      data?: unknown;
-      taskId?: string;
-      contextId?: string;
-    };
+  private async handleLegacyAgentMessage(msg: BrokerEnvelope): Promise<void> {
+    const payload = msg.payload as LegacyAgentMessagePayload;
     log.info(
       `Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`,
     );
 
-    const sessionId = `agent:${msg.from}:${this.agentId}`;
-    const memory = await this.getMemory(sessionId);
     const canonicalTask = payload.taskId
       ? createCanonicalTask({
         id: payload.taskId,
@@ -135,13 +154,75 @@ export class AgentRuntime {
       })
       : null;
 
-    if (canonicalTask) {
-      await this.reportCanonicalTaskResult(
-        transitionTask(canonicalTask, "WORKING"),
+    await this.executeConversation({
+      fromAgentId: msg.from,
+      inputText: payload.instruction,
+      canonicalTask,
+      reportWorkingTransition: canonicalTask !== null,
+      legacyReplyTarget: canonicalTask ? undefined : msg.from,
+    });
+  }
+
+  private async handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void> {
+    const payload = msg.payload as RuntimeTaskSubmitPayload;
+    const inputText = this.extractTextFromMessage(payload.message);
+    log.info(`Tâche canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`);
+
+    await this.executeConversation({
+      fromAgentId: msg.from,
+      inputText,
+      canonicalTask: createCanonicalTask({
+        id: payload.taskId,
+        contextId: payload.contextId,
+        message: payload.message,
+      }),
+      reportWorkingTransition: true,
+    });
+  }
+
+  private async handleTaskContinueMessage(msg: BrokerEnvelope): Promise<void> {
+    const payload = msg.payload as RuntimeTaskContinuePayload;
+    const existing = await this.getCanonicalTaskPort().getTask(payload.taskId);
+    if (!existing) {
+      throw new Error(
+        `Broker-backed continuation received unknown task ${payload.taskId}`,
       );
     }
 
-    await memory.addMessage({ role: "user", content: payload.instruction });
+    const resumed = transitionTask(existing, "WORKING", {
+      message: payload.message,
+    });
+    resumed.history = [...existing.history, payload.message];
+    await this.reportCanonicalTaskResult(resumed);
+
+    const inputText = this.extractTextFromMessage(payload.message);
+    log.info(`Continuation canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`);
+
+    await this.executeConversation({
+      fromAgentId: msg.from,
+      inputText,
+      canonicalTask: resumed,
+      reportWorkingTransition: false,
+    });
+  }
+
+  private async executeConversation(options: {
+    fromAgentId: string;
+    inputText: string;
+    canonicalTask?: Task | null;
+    reportWorkingTransition: boolean;
+    legacyReplyTarget?: string;
+  }): Promise<void> {
+    const sessionId = `agent:${options.fromAgentId}:${this.agentId}`;
+    const memory = await this.getMemory(sessionId);
+    let canonicalTask = options.canonicalTask ?? null;
+
+    if (canonicalTask && options.reportWorkingTransition) {
+      canonicalTask = transitionTask(canonicalTask, "WORKING");
+      await this.reportCanonicalTaskResult(canonicalTask);
+    }
+
+    await memory.addMessage({ role: "user", content: options.inputText });
 
     try {
       let iteration = 0;
@@ -208,53 +289,79 @@ export class AgentRuntime {
 
         if (canonicalTask) {
           const completedTask = mapTaskResultToCompletion(
-            transitionTask(canonicalTask, "WORKING"),
+            canonicalTask,
             response.content,
           );
           await this.reportCanonicalTaskResult(completedTask);
           log.info(
-            `Tâche canonique terminée pour ${msg.from} (${iteration} itérations)`,
+            `Tâche canonique terminée pour ${options.fromAgentId} (${iteration} itérations)`,
           );
           return;
         }
 
-        await this.broker.sendToAgent(msg.from, response.content);
-        log.info(`Réponse envoyée à ${msg.from} (${iteration} itérations)`);
+        await this.broker.sendToAgent(
+          options.legacyReplyTarget ?? options.fromAgentId,
+          response.content,
+        );
+        log.info(
+          `Réponse envoyée à ${options.legacyReplyTarget ?? options.fromAgentId} (${iteration} itérations)`,
+        );
         return;
       }
 
       if (canonicalTask) {
         await this.reportCanonicalTaskResult(
           mapTaskErrorToTerminalStatus(
-            transitionTask(canonicalTask, "WORKING"),
+            canonicalTask,
             new Error("Max iterations reached."),
           ),
         );
         return;
       }
 
-      await this.broker.sendToAgent(msg.from, "Max iterations reached.");
+      await this.broker.sendToAgent(
+        options.legacyReplyTarget ?? options.fromAgentId,
+        "Max iterations reached.",
+      );
     } catch (error) {
       if (canonicalTask) {
         await this.reportCanonicalTaskResult(
-          mapTaskErrorToTerminalStatus(
-            transitionTask(canonicalTask, "WORKING"),
-            error,
-          ),
+          mapTaskErrorToTerminalStatus(canonicalTask, error),
         );
       }
       throw error;
     }
   }
 
-  private async reportCanonicalTaskResult(task: Task): Promise<void> {
-    const broker = this.broker as Partial<BrokerTaskReporter>;
+  private extractTextFromMessage(message: A2AMessage): string {
+    const text = message.parts
+      .filter((part): part is Extract<typeof part, { kind: "text" }> =>
+        part.kind === "text"
+      )
+      .map((part) => part.text)
+      .join("\n")
+      .trim();
+
+    return text || "[non-text task payload]";
+  }
+
+  private getCanonicalTaskPort(): BrokerCanonicalTaskPort {
+    const broker = this.broker as Partial<BrokerCanonicalTaskPort>;
+    if (typeof broker.getTask !== "function") {
+      throw new Error(
+        "AgentBrokerPort does not expose getTask(); broker-backed canonical continuation is unavailable",
+      );
+    }
     if (typeof broker.reportTaskResult !== "function") {
       throw new Error(
         "AgentBrokerPort does not expose reportTaskResult(); broker-backed canonical task updates are unavailable",
       );
     }
-    await broker.reportTaskResult(task);
+    return broker as BrokerCanonicalTaskPort;
+  }
+
+  private async reportCanonicalTaskResult(task: Task): Promise<void> {
+    await this.getCanonicalTaskPort().reportTaskResult(task);
   }
 
   async stop(): Promise<void> {

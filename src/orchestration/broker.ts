@@ -134,17 +134,19 @@ export class BrokerServer {
     // Initialiser AuthManager avec le KV partagé (une seule connexion)
     this.auth = new AuthManager(kv);
 
-    // Listen for agent requests via KV Queue
-    kv.listenQueue(async (raw: unknown) => {
-      const msg = raw as BrokerMessage;
-      if (msg.to !== "broker") return;
-      await this.handleMessage(msg);
-    });
-
-    // HTTP + WebSocket server
+    // HTTP + WebSocket server — all messages arrive via HTTP or WebSocket
     this.httpServer = Deno.serve({ port }, (req) => this.handleHttp(req));
 
     log.info(`Broker démarré sur port ${port}`);
+  }
+
+  /**
+   * Handle an incoming broker message (public entry point).
+   * Called from HTTP handler, WebSocket tunnel, or local KV Queue.
+   */
+  async handleIncomingMessage(msg: BrokerMessage): Promise<void> {
+    if (msg.to !== "broker") return;
+    await this.handleMessage(msg);
   }
 
   private async handleMessage(msg: BrokerMessage): Promise<void> {
@@ -180,7 +182,7 @@ export class BrokerServer {
       const err = e instanceof Error ? e : new Error(String(e));
       log.error(`Message handler failed for ${msg.type} from ${msg.from}`, err);
       try {
-        await this.sendStructuredError(msg.from, msg.id, {
+        this.sendStructuredError(msg.from, msg.id, {
           code: "BROKER_ERROR",
           context: {
             messageType: msg.type,
@@ -204,7 +206,6 @@ export class BrokerServer {
     msg: Extract<BrokerMessage, { type: "llm_request" }>,
   ): Promise<void> {
     const req = msg.payload;
-    const kv = await this.getKv();
 
     // Check if model is a CLI provider → route to tunnel
     const tunnel = this.findTunnelForProvider(req.model);
@@ -246,7 +247,7 @@ export class BrokerServer {
       timestamp: new Date().toISOString(),
     };
 
-    await kv.enqueue(reply);
+    this.sendReply(reply);
   }
 
   // ── Tool routing (ADR-005: permissions par intersection) ─
@@ -288,7 +289,7 @@ export class BrokerServer {
     if (denied.length > 0) {
       const toolPerms = this.resolveToolPermissions(req.tool);
       const agentAllowed = agentConfig.value?.sandbox?.allowedPermissions || [];
-      await this.sendStructuredError(msg.from, msg.id, {
+      this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_PERMISSION_DENIED",
         context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
         recovery: `Add ${
@@ -319,7 +320,7 @@ export class BrokerServer {
       this.config.agents?.defaults?.sandbox?.execPolicy,
     );
     if (approvalResult) {
-      await this.replyToolResult(msg.from, msg.id, approvalResult);
+      this.replyToolResult(msg.from, msg.id, approvalResult);
       await this.metrics.recordToolCall(
         msg.from,
         req.tool,
@@ -362,7 +363,7 @@ export class BrokerServer {
         performance.now() - toolStart,
       );
 
-      await this.replyToolResult(msg.from, msg.id, {
+      this.replyToolResult(msg.from, msg.id, {
         success: toolSuccess,
         output: result.stdout,
         error: !toolSuccess
@@ -374,7 +375,7 @@ export class BrokerServer {
           : undefined,
       });
     } catch (e) {
-      await this.sendStructuredError(msg.from, msg.id, {
+      this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_CREATE_FAILED",
         context: { tool: req.tool, message: (e as Error).message },
         recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
@@ -481,12 +482,11 @@ export class BrokerServer {
     return result.ok;
   }
 
-  private async replyToolResult(
+  private replyToolResult(
     to: string,
     replyToId: string,
     payload: ToolResult,
-  ): Promise<void> {
-    const kv = await this.getKv();
+  ): void {
     const reply: BrokerMessage = {
       id: replyToId,
       from: "broker",
@@ -495,7 +495,7 @@ export class BrokerServer {
       payload,
       timestamp: new Date().toISOString(),
     };
-    await kv.enqueue(reply);
+    this.sendReply(reply);
   }
 
   /**
@@ -593,35 +593,35 @@ console.log(await r.text());`;
     msg: Extract<BrokerMessage, { type: "task_submit" }>,
   ): Promise<void> {
     const task = await this.submitAgentTask(msg.from, msg.payload);
-    await this.sendTaskResult(msg.from, msg.id, task);
+    this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskGet(
     msg: Extract<BrokerMessage, { type: "task_get" }>,
   ): Promise<void> {
     const task = await this.getTask(msg.payload);
-    await this.sendTaskResult(msg.from, msg.id, task);
+    this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskContinue(
     msg: Extract<BrokerMessage, { type: "task_continue" }>,
   ): Promise<void> {
     const task = await this.continueAgentTask(msg.from, msg.payload);
-    await this.sendTaskResult(msg.from, msg.id, task);
+    this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskCancel(
     msg: Extract<BrokerMessage, { type: "task_cancel" }>,
   ): Promise<void> {
     const task = await this.cancelTask(msg.payload);
-    await this.sendTaskResult(msg.from, msg.id, task);
+    this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskResult(
     msg: Extract<BrokerMessage, { type: "task_result" }>,
   ): Promise<void> {
     const task = await this.recordTaskResult(msg.from, msg.payload);
-    await this.sendTaskResult(msg.from, msg.id, task);
+    this.sendTaskResult(msg.from, msg.id, task);
   }
 
   async submitAgentTask(
@@ -892,21 +892,19 @@ console.log(await r.text());`;
       type: "task_submit" | "task_continue"
     }>,
   ): Promise<void> {
-    const kv = await this.getKv();
-
     await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
-    const remoteTunnel = this.findTunnelForAgent(targetAgentId);
-    if (remoteTunnel) {
-      remoteTunnel.send(JSON.stringify(message));
-      log.info(
-        `A2A routé via tunnel instance : ${message.from} → ${targetAgentId} (${message.type})`,
+    const tunnel = this.findTunnelByAgentId(targetAgentId);
+    if (!tunnel) {
+      throw new DenoClawError(
+        "NO_TUNNEL_FOR_AGENT",
+        { targetAgentId, messageType: message.type },
+        `Agent "${targetAgentId}" has no active tunnel connection`,
       );
-      return;
     }
 
-    await kv.enqueue(message);
-    log.info(`A2A routé local : ${message.from} → ${targetAgentId} (${message.type})`);
+    this.routeToTunnel(tunnel, message);
+    log.info(`A2A routé : ${message.from} → ${targetAgentId} (${message.type})`);
   }
 
   // ── Tunnel management ───────────────────────────────
@@ -962,10 +960,9 @@ console.log(await r.text());`;
       return;
     }
     try {
-      const kv = await this.getKv();
-      await kv.enqueue(msg);
+      await this.handleMessage(msg);
     } catch (e) {
-      log.error(`Failed to enqueue tunnel message from ${tunnelId}`, e);
+      log.error(`Failed to handle tunnel message from ${tunnelId}`, e);
     }
   }
 
@@ -1181,12 +1178,38 @@ console.log(await r.text());`;
 
   // ── Helpers ─────────────────────────────────────────
 
-  private async sendTaskResult(
+  /**
+   * Send a reply to an agent via its WebSocket tunnel.
+   * All agents (local and remote) connect to the broker via WebSocket.
+   */
+  private sendReply(reply: BrokerMessage): void {
+    const tunnel = this.findTunnelByAgentId(reply.to);
+    if (!tunnel) {
+      log.warn(`No tunnel for agent ${reply.to} — reply dropped (${reply.type})`);
+      return;
+    }
+    this.routeToTunnel(tunnel, reply);
+  }
+
+  private findTunnelByAgentId(agentId: string): WebSocket | null {
+    // Check instance tunnels (deployed agents)
+    const instanceTunnel = this.findTunnelForAgent(agentId);
+    if (instanceTunnel) return instanceTunnel;
+
+    // Check local tunnels (agents connected locally)
+    for (const [_, t] of this.tunnels) {
+      if (t.capabilities.type === "local" && t.capabilities.allowedAgents.includes(agentId)) {
+        return t.ws;
+      }
+    }
+    return null;
+  }
+
+  private sendTaskResult(
     to: string,
     requestId: string,
     task: Task | null,
-  ): Promise<void> {
-    const kv = await this.getKv();
+  ): void {
     const reply: Extract<BrokerMessage, { type: "task_result" }> = {
       id: requestId,
       from: "broker",
@@ -1195,15 +1218,14 @@ console.log(await r.text());`;
       payload: { task },
       timestamp: new Date().toISOString(),
     };
-    await kv.enqueue(reply);
+    this.sendReply(reply);
   }
 
-  private async sendStructuredError(
+  private sendStructuredError(
     to: string,
     requestId: string,
     error: StructuredError,
-  ): Promise<void> {
-    const kv = await this.getKv();
+  ): void {
     const reply: Extract<BrokerMessage, { type: "error" }> = {
       id: requestId,
       from: "broker",
@@ -1212,7 +1234,7 @@ console.log(await r.text());`;
       payload: error,
       timestamp: new Date().toISOString(),
     };
-    await kv.enqueue(reply);
+    this.sendReply(reply);
   }
 
   async stop(): Promise<void> {

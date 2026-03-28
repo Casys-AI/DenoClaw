@@ -34,32 +34,51 @@ agent :
 structurées (session × seq × role) qui bénéficient de l'indexation secondaire et
 de la compression. kvdex ajoute peu de surface et beaucoup de valeur ici.
 
-### Long-terme : fichiers Markdown ⏳ À IMPLÉMENTER
+### Long-terme : dual backend (fichiers local, KV sur Deploy) ⏳ À IMPLÉMENTER
 
 Chaque agent a un dossier `memories/` dans son workspace :
 
 ```
-~/.denoclaw/agents/alice/
-  agent.json        ← config
-  soul.md           ← system prompt
-  skills/           ← skills .md
-  memory.db         ← KV conversations (kvdex)
-  memories/         ← connaissances long-terme (.md)
+./data/agents/alice/          ← project-level (ADR-012)
+  agent.json                  ← config
+  soul.md                     ← system prompt
+  skills/                     ← skills .md
+  memories/                   ← connaissances long-terme (.md)
     project.md
     user_preferences.md
     learned_patterns.md
+
+~/.denoclaw/agents/alice/     ← machine-level (runtime)
+  memory.db                   ← KV conversations (kvdex)
 ```
+
+**Dual backend selon l'environnement :**
+
+| Environnement | Backend | Source of truth |
+|---------------|---------|-----------------|
+| Local (dev/VPS) | Fichiers .md (`data/agents/<id>/memories/`) | Filesystem |
+| Deploy (agents déployés) | KV (`["memories", agentId, filename]`) | KV |
+
+En local, les .md sont git-friendly, éditables, reviewables en PR. Sur Deploy,
+pas de filesystem — tout est en KV. Le contenu est identique (du markdown),
+seul le storage change.
+
+**Sync au déploiement :** `deploy:agent` lit les .md locaux et les copie dans
+le KV de l'agent déployé. Soul.md et skills suivent le même pattern.
 
 **Tools exposés au LLM** (pattern Serena) :
 
-- `list_memories` — lister les fichiers mémoire disponibles
-- `read_memory(file)` — lire un fichier mémoire
-- `write_memory(file, content)` — créer/réécrire un fichier mémoire
+- `list_memories` — lister les mémoires disponibles
+- `read_memory(file)` — lire une mémoire
+- `write_memory(file, content)` — créer/réécrire une mémoire
 - `edit_memory(file, search, replace)` — éditer une section
 - `delete_memory(file)` — supprimer (décision explicite de l'agent uniquement)
 
-**Au démarrage** : la liste des fichiers mémoire est injectée dans le system
-prompt pour que l'agent sache ce qu'il a mémorisé.
+L'interface `LongTermMemoryPort` abstrait le backend. L'implémentation fichier
+et l'implémentation KV exposent la même API. Le tool ne sait pas où il stocke.
+
+**Au démarrage** : la liste des mémoires est injectée dans le system prompt
+pour que l'agent sache ce qu'il a mémorisé.
 
 ## Pourquoi ce modèle dual
 
@@ -181,7 +200,7 @@ tard.
 
 | Primitive                          | Usage potentiel                                          |
 | ---------------------------------- | -------------------------------------------------------- |
-| `kv.enqueue()` + `Deno.cron()`     | Sleep-time consolidation (background memory maintenance) |
+| `Deno.cron()`                      | Sleep-time consolidation (background memory maintenance). Note: `kv.enqueue()` is deprecated on new Deploy — use cron directly. |
 | `kv.watch()`                       | Cross-agent memory events (max 10 clés, sentinels)       |
 | `.sum()` / `.max()` (atomics CRDT) | Compteurs de facts sans lock                             |
 | `@jsz/swc` / `@deco/deno-ast-wasm` | Futur tool code_analyze (parse TS AST en WASM)           |
@@ -205,18 +224,16 @@ tard.
   `worker_pool.ts`)
 - 95 tests passent, type-check OK, lint clean
 
-### ⏳ À faire — Mémoire long-terme fichiers .md
+### ⏳ À faire — Mémoire long-terme (dual backend)
 
-1. `WorkspaceLoader.create()` crée `memories/`
-2. Réécrire `MemoryTool` : 5 actions fichier (list, read, write, edit, delete)
-   au lieu de 4 actions KV
-3. Adapter `MemoryPort` : séparer conversations (KV) et long-terme (fichier) ou
-   créer un `LongTermMemoryPort` séparé
-4. Adapter `loop.ts` : lister les .md au lieu des topics kvdex
-5. Adapter `context.ts` : injecter la liste des fichiers mémoire dans le prompt
-6. Retirer les méthodes `remember/recall/listTopics/forgetTopic` de KvdexMemory
-   (conversations only)
-7. Tests du MemoryTool fichier
+1. `WorkspaceLoader.create()` crée `memories/` dans `data/agents/<id>/`
+2. Créer `LongTermMemoryPort` interface (list, read, write, edit, delete)
+3. Implémenter `FileMemoryBackend` (local — lit/écrit dans `memories/*.md`)
+4. Implémenter `KvMemoryBackend` (Deploy — lit/écrit sous `["memories", agentId, filename]`)
+5. Créer tool `knowledge` avec les 5 actions fichier, séparé du `MemoryTool` KV existant
+6. Adapter `loop.ts` et `context.ts` : injecter la liste des mémoires dans le prompt
+7. `deploy:agent` sync les .md locaux vers KV au moment du déploiement
+8. Tests des deux backends + du tool knowledge
 
 ### 🔮 Futur (hors scope)
 
@@ -233,5 +250,6 @@ tard.
 - La mémoire long-terme est lisible, éditable, et git-friendly
 - Le modèle dual (KV + .md) couvre les deux usages sans sur-engineering
 - L'architecture est extensible vers le vector search sans refonte
-- Compatible local (filesystem) et Deploy (KV conversations toujours, .md via un
-  adapter blob KV si besoin)
+- Compatible local (filesystem) et Deploy (KV pour tout — conversations + memories)
+- `deploy:agent` sync workspace local → KV distant (soul.md, skills, memories)
+- Même tool interface, backend switch automatique selon l'environnement

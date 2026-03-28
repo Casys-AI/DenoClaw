@@ -1,4 +1,4 @@
-# ADR-013: Observability — Deploy Native OTEL + KV Traces
+# ADR-013: Observability — Deploy OTEL + KV + Prisma Postgres
 
 **Status:** Accepted
 **Date:** 2026-03-29
@@ -10,15 +10,15 @@ DenoClaw needs observability across broker, agents, and relay. Three concerns:
 
 1. **Real-time** — dashboard live, agent status, active tasks
 2. **Debug** — trace spans across agent chains (who called who, latency)
-3. **Historical** — metrics over time, error trends, token consumption
+3. **Historical** — metrics over time, error trends, token consumption, conversation history
 
 ## Decision
 
-Use two complementary systems, no external database required:
+Three complementary storage layers, all provisionable on Deno Deploy:
 
-### 1. Deno Deploy Native OTEL (production)
+### 1. Deno Deploy Native OTEL (auto-instrumented, zero config)
 
-Deploy auto-instruments and stores logs, traces, and metrics with zero configuration:
+Deploy auto-instruments and stores logs, traces, and metrics:
 
 | Signal | Auto-captured | Retention (free) | Retention (pro) |
 |--------|---------------|-------------------|-----------------|
@@ -26,16 +26,11 @@ Deploy auto-instruments and stores logs, traces, and metrics with zero configura
 | Traces | HTTP in/out, fetch, custom spans | 30 days | 3 months |
 | Metrics | Request count, errors, latency | 30 days | 3 months |
 
-Custom spans via `@opentelemetry/api` (already in `src/telemetry/mod.ts`) are automatically captured on Deploy. No `OTEL_DENO=1` needed on Deploy — instrumentation is always on.
+Custom spans via `@opentelemetry/api` (already in `src/telemetry/mod.ts`) are automatically captured on Deploy. No `OTEL_DENO=1` needed — instrumentation is always on.
 
-Accessible via:
-- Deploy dashboard (traces waterfall, metrics graphs, logs viewer)
-- REST API: `GET /v2/apps/{app}/logs` (logs only)
-- CLI: `deno deploy logs`
+### 2. Deno KV (real-time state, dashboard)
 
-### 2. KV Traces (local + custom dashboard)
-
-`TraceWriter` in `src/telemetry/traces.ts` writes spans to the shared KV (`data/shared.db`). Used by the custom dashboard for real-time visualization in local mode.
+`TraceWriter` writes spans to the shared KV. Used by the custom dashboard for live visualization.
 
 | Key pattern | Content |
 |-------------|---------|
@@ -45,32 +40,87 @@ Accessible via:
 | `["agent_tasks", taskId]` | A2A task record |
 | `["_dashboard", ...]` | SSE watch sentinels |
 
+KV is provisioned on Deploy via:
+```bash
+deno deploy database provision denoclaw-kv --kind denokv --org casys
+```
+
+Accessible from local via KV Connect:
+```typescript
+const kv = await Deno.openKv("https://api.deno.com/databases/<id>/connect");
+```
+
+### 3. Prisma Postgres (historical analytics, conversations)
+
+Postgres managed by Prisma, provisioned directly on Deploy:
+
+```bash
+deno deploy database provision denoclaw-db --kind prisma --region us-east-1 --org casys
+deno deploy database assign denoclaw-db --app denoclaw-broker --org casys
+```
+
+Used for data that needs querying, aggregation, and long-term retention:
+
+| Table | Content |
+|-------|---------|
+| `conversations` | Full conversation history per agent/session |
+| `llm_calls` | Token usage, model, latency, cost per call |
+| `tool_executions` | Tool name, args, success/failure, duration |
+| `agent_tasks` | A2A task lifecycle (submitted→working→completed/failed) |
+| `daily_metrics` | Aggregated daily stats per agent |
+
+ORM setup:
+- Prisma ORM 7 with `runtime = "deno"` in schema
+- `@prisma/adapter-pg` for Deploy compatibility
+- Same `DATABASE_URL` works locally (Docker Postgres) and on Deploy (Prisma Postgres)
+
 ### Storage responsibility split
 
-| Concern | Local mode | Deploy mode |
-|---------|-----------|-------------|
-| Real-time dashboard | KV shared (`data/shared.db`) | KV (platform) |
-| Debug traces | KV traces + console | Deploy traces dashboard |
-| Historical metrics | Not stored (dev only) | Deploy metrics (30d) |
-| Logs | Console + LOG_LEVEL | Deploy logs + REST API |
+| Concern | Storage | Why |
+|---------|---------|-----|
+| Agent status, active tasks | KV | Real-time, SSE-watchable |
+| Recent trace spans | KV (with 24h TTL) | Dashboard live view |
+| Dashboard SSE sentinels | KV | Watch key changes |
+| OTEL traces/metrics | Deploy native | Zero config, 30d retention |
+| Conversation history | Prisma Postgres | Queryable, durable |
+| Token/cost analytics | Prisma Postgres | Aggregation, GROUP BY |
+| Tool execution logs | Prisma Postgres | Searchable, filterable |
+| Task lifecycle history | Prisma Postgres | Long-term audit trail |
+
+## Infrastructure
+
+```
+Local dev:
+  KV  → ./data/shared.db (file)
+  SQL → Postgres via Docker (docker compose up)
+
+Deploy:
+  KV  → deno deploy database (--kind denokv)
+  SQL → deno deploy database (--kind prisma)
+
+Both accessible via:
+  KV  → Deno.openKv() or KV Connect URL
+  SQL → DATABASE_URL (same Prisma client)
+```
 
 ## Consequences
 
 **Positive:**
-- Zero infrastructure for observability in production (Deploy does it all)
-- Custom dashboard works locally with KV traces
-- OTEL spans already instrumented (`withSpan`, `spanAgentLoop`, `spanToolCall`, `spanLLMCall`)
-- No SQL database needed for observability
+- All storage provisionable via `deno deploy database` CLI
+- Same code runs locally (Docker Postgres) and on Deploy (Prisma Postgres)
+- KV for hot data, SQL for cold data — each used for what it's best at
+- Dashboard can show real-time (KV) and historical (SQL) in one UI
+- OTEL covers production debugging without any custom code
 
 **Negative:**
-- Traces/metrics not queryable via REST API on Deploy (dashboard only)
-- Free tier retention is limited (1 day logs, 30 days metrics)
-- No built-in aggregation (daily/weekly token costs, error rates by agent)
-- KV traces in local mode accumulate without TTL (needs `expireIn` parameter)
+- Two databases to manage (KV + Postgres)
+- Prisma adds a build step (`prisma generate`) to the Deploy pipeline
+- Prisma Postgres pricing is usage-based (no confirmed free tier)
+- Docker required for local Postgres development
 
 ## Future work
 
 - Add `expireIn: 86400000` (24h TTL) to KV trace writes
-- Aggregate token consumption metrics per agent per day in KV (hourly buckets)
-- If historical analytics becomes critical, export OTEL to Grafana Cloud (free tier: 50GB traces) or self-hosted Postgres on VPS
-- Consider libSQL (open source, Turso-compatible) as an edge-compatible SQL option if KV aggregation proves insufficient
+- Prisma schema and migrations for the tables above
+- Dashboard SQL views (token costs, error rates, conversation browser)
+- Consider connection pooling for high-traffic Deploy scenarios

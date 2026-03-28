@@ -64,6 +64,7 @@ export interface TaskStatus {
   state: TaskState;
   message?: A2AMessage;
   timestamp: string;
+  metadata?: Record<string, unknown>;
 }
 
 // ── Messages & Parts ─────────────────────────────────────

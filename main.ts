@@ -78,7 +78,16 @@ async function agent(config: Config): Promise<void> {
   const sessionId = args.session as string;
   const agentIds = Object.keys(registry);
 
-  const pool = new WorkerPool(config);
+  // Shared KV for agent command path — same as gateway, enables observability
+  await Deno.mkdir("./data", { recursive: true });
+  const agentKv = await Deno.openKv("./data/shared.db");
+
+  const pool = new WorkerPool(config, {
+    onAgentMessage: (from, to, message) => {
+      log.debug(`Agent message: ${from} → ${to} (${message.slice(0, 50)}...)`);
+    },
+  });
+  pool.setSharedKv(agentKv);
   await pool.start(agentIds);
 
   if (args.message) {
@@ -94,14 +103,15 @@ async function agent(config: Config): Promise<void> {
       console.log(result.content);
     } finally {
       pool.shutdown();
+      agentKv.close();
     }
     return;
   }
 
   // DI : wiring explicite
-  const bus = new MessageBus();
+  const bus = new MessageBus(agentKv);
   await bus.init();
-  const session = new SessionManager();
+  const session = new SessionManager(agentKv);
   const channels = new ChannelManager(bus);
   const consoleCh = new ConsoleChannel();
 
@@ -154,30 +164,24 @@ async function gateway(config: Config): Promise<void> {
 
   // Shared KV — single instance for metrics, agent status, dashboard.
   // On Deploy use the platform KV; locally keep the file-backed DB for dev.
-  let kv: Deno.Kv | null = null;
-  try {
-    if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
-      kv = await Deno.openKv();
-    } else {
-      await Deno.mkdir("./data", { recursive: true });
-      kv = await Deno.openKv("./data/shared.db");
-    }
-  } catch (e) {
-    log.warn("KV partagé indisponible — gateway en mode dégradé.", e);
+  let kv: Deno.Kv;
+  if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+    kv = await Deno.openKv();
+  } else {
+    await Deno.mkdir("./data", { recursive: true });
+    kv = await Deno.openKv("./data/shared.db");
   }
-  const metrics = new MetricsCollector(kv ?? undefined);
+  const metrics = new MetricsCollector(kv);
 
   // WorkerPool with lifecycle callbacks → writes agent status to shared KV
   const workerPool = new WorkerPool(config, {
     onWorkerReady: (id) => {
-      if (!kv) return;
       void writeAgentStatus(kv, id, {
         status: "running",
         startedAt: new Date().toISOString(),
       });
     },
     onWorkerStopped: (id) => {
-      if (!kv) return;
       void writeAgentStatus(kv, id, {
         status: "stopped",
         stoppedAt: new Date().toISOString(),
@@ -190,13 +194,12 @@ async function gateway(config: Config): Promise<void> {
       );
     },
   });
-  if (kv) workerPool.setSharedKv(kv);
+  workerPool.setSharedKv(kv);
   await workerPool.start(agentIds);
-  // Write complete agents list once all workers are ready
-  if (kv) await updateAgentsList(kv, workerPool.getAgentIds());
+  await updateAgentsList(kv, workerPool.getAgentIds());
 
-  const bus = new MessageBus(kv ?? undefined);
-  const session = new SessionManager(kv ?? undefined);
+  const bus = new MessageBus(kv);
+  const session = new SessionManager(kv);
   const channels = new ChannelManager(bus);
   const dashboardBasePath = Deno.env.get("DENOCLAW_DASHBOARD_BASE_PATH") ||
     "/ui";

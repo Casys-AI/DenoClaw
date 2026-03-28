@@ -69,9 +69,9 @@ File watchers emit multiple events for a single save. Debounce with a 500ms wind
 - `model` — baked into AgentLoop config
 - `sandbox.allowedPermissions` — baked into subprocess spawn flags
 
-**Immutable per session** (edit → takes effect on next gateway start):
-- `soul.md` — system prompt, loaded once into AgentLoop
-- `skills/` — loaded once by SkillsLoader
+**Agent-initiated reload** (not auto-watched, reloaded on demand):
+- `soul.md` — the agent can re-read its own soul via tool/instruction
+- `skills/` — the agent can reload skills via SkillsLoader.loadSkills()
 
 ## Consequences
 

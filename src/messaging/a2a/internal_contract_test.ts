@@ -4,9 +4,9 @@ import {
   canTransitionTaskState,
   classifyRefusalTerminalState,
   createCanonicalTask,
-  createInputRequiredTaskMetadata,
   isTerminalTaskState,
   resolveTaskContextId,
+  transitionTask,
 } from "./internal_contract.ts";
 import { assertEquals, assertFalse, assertThrows } from "@std/assert";
 import type { A2AMessage, Artifact, Task } from "./types.ts";
@@ -59,25 +59,36 @@ Deno.test("assertValidTaskTransition protects terminal states", () => {
   assertThrows(() => assertValidTaskTransition("COMPLETED", "WORKING"));
 });
 
+Deno.test("transitionTask applies canonical status changes without leaking stale metadata", () => {
+  const waiting: Task = {
+    ...createTask("INPUT_REQUIRED"),
+    status: {
+      state: "INPUT_REQUIRED",
+      timestamp: "2026-03-28T00:00:00.000Z",
+      metadata: {
+        awaitedInput: {
+          kind: "approval",
+          command: "git push origin main",
+        },
+      },
+      message: {
+        messageId: "msg-1",
+        role: "agent",
+        parts: [{ kind: "text", text: "Need approval" }],
+      },
+    },
+  };
+
+  const resumed = transitionTask(waiting, "WORKING");
+  assertEquals(resumed.status.state, "WORKING");
+  assertEquals(resumed.status.metadata, undefined);
+  assertEquals(resumed.status.message, undefined);
+});
+
 Deno.test("isTerminalTaskState marks only terminal states", () => {
   assertEquals(isTerminalTaskState("COMPLETED"), true);
   assertEquals(isTerminalTaskState("REJECTED"), true);
   assertFalse(isTerminalTaskState("WORKING"));
-});
-
-Deno.test("createInputRequiredTaskMetadata keeps awaited-input details structured", () => {
-  assertEquals(
-    createInputRequiredTaskMetadata("approval", {
-      command: "git status",
-      binary: "git",
-    }),
-    {
-      awaitingInput: true,
-      kind: "approval",
-      command: "git status",
-      binary: "git",
-    },
-  );
 });
 
 Deno.test("classifyRefusalTerminalState maps refusal to REJECTED when applicable", () => {

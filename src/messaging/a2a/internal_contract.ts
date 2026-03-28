@@ -21,6 +21,12 @@ export interface CanonicalTaskInit {
   timestamp?: string;
 }
 
+export interface TaskTransitionOptions {
+  message?: A2AMessage;
+  metadata?: Record<string, unknown>;
+  timestamp?: string;
+}
+
 export function resolveTaskContextId(taskId: string, contextId?: string): string {
   return contextId ?? taskId;
 }
@@ -53,14 +59,21 @@ export function assertValidTaskTransition(from: TaskState, to: TaskState): void 
   }
 }
 
-export function createInputRequiredTaskMetadata(
-  kind: string,
-  details: Record<string, unknown> = {},
-): Record<string, unknown> {
+export function transitionTask(
+  task: Task,
+  state: TaskState,
+  options: TaskTransitionOptions = {},
+): Task {
+  assertValidTaskTransition(task.status.state, state);
+
   return {
-    awaitingInput: true,
-    kind,
-    ...details,
+    ...task,
+    status: {
+      state,
+      timestamp: options.timestamp ?? new Date().toISOString(),
+      ...(options.message ? { message: options.message } : {}),
+      ...(options.metadata ? { metadata: options.metadata } : {}),
+    },
   };
 }
 

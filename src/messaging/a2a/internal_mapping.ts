@@ -1,3 +1,10 @@
+/**
+ * Internal local-runtime → canonical A2A mapping helpers.
+ *
+ * This module is intentionally a narrow compatibility bridge. It maps worker
+ * protocol inputs and local runtime outcomes into canonical A2A task shapes,
+ * but lifecycle rules remain centralized in `internal_contract.ts`.
+ */
 import type { WorkerRequest } from "../../agent/worker_protocol.ts";
 import { AgentError, DenoClawError } from "../../shared/errors.ts";
 import {

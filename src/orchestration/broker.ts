@@ -19,7 +19,7 @@ import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
 import { checkExecPolicy } from "../agent/tools/shell.ts";
 import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";
-import { SandboxManager } from "./sandbox.ts";
+import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
@@ -58,7 +58,7 @@ import {
  */
 export interface BrokerServerDeps {
   providers?: ProviderManager;
-  sandbox?: SandboxManager;
+  sandbox?: DenoSandboxBackend;
   metrics?: MetricsCollector;
   kv?: Deno.Kv;
   taskStore?: TaskStore;
@@ -104,7 +104,7 @@ export class BrokerServer {
   private config: Config;
   private auth!: AuthManager;
   private providers: ProviderManager;
-  private sandbox: SandboxManager;
+  private sandbox: DenoSandboxBackend | null;
   private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
@@ -118,7 +118,11 @@ export class BrokerServer {
   constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
-    this.sandbox = deps?.sandbox ?? new SandboxManager();
+    const sandboxToken = Deno.env.get("DENO_SANDBOX_API_TOKEN") ?? "";
+    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? { allowedPermissions: [] };
+    this.sandbox = sandboxToken
+      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken)
+      : deps?.sandbox ?? null;
     this.metrics = deps?.metrics ?? new MetricsCollector();
     this.kv = deps?.kv ?? null;
     this.ownsKv = !deps?.kv;
@@ -353,53 +357,41 @@ export class BrokerServer {
       return;
     }
 
-    // 4. Execute in Sandbox (éphémère)
+    // 4. Execute via @deno/sandbox cloud backend (same tool_executor as local)
+    if (!this.sandbox) {
+      this.sendStructuredError(msg.from, msg.id, {
+        code: "NO_SANDBOX_BACKEND",
+        context: { tool: req.tool },
+        recovery: "Set DENO_SANDBOX_API_TOKEN or connect a relay for local tool execution",
+      });
+      return;
+    }
+
     try {
-      const code = this.buildSandboxCode(req.tool, req.args);
-
-      // networkAllow : agent-specific > defaults > [] (ADR-005)
       const agentNetwork = agentConfig.value?.sandbox?.networkAllow;
-      const defaultNetwork = this.config.agents?.defaults?.sandbox
-        ?.networkAllow;
-      const networkAllow = agentNetwork || defaultNetwork || [];
-
+      const defaultNetwork = this.config.agents?.defaults?.sandbox?.networkAllow;
       const maxDuration = agentConfig.value?.sandbox?.maxDurationSec ||
         this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
+      const execPolicy = agentConfig.value?.sandbox?.execPolicy ??
+        this.config.agents?.defaults?.sandbox?.execPolicy ?? DEFAULT_EXEC_POLICY;
 
-      log.info(
-        `Sandbox: ${req.tool} avec permissions ${
-          JSON.stringify(granted)
-        }, network: ${JSON.stringify(networkAllow)}`,
-      );
+      log.info(`Sandbox: ${req.tool} permissions=${JSON.stringify(granted)}`);
 
-      const result = await this.sandbox.run(code, {
-        memoryMb: 256,
+      const result = await this.sandbox.execute({
+        tool: req.tool,
+        args: req.args,
+        permissions: granted,
+        networkAllow: agentNetwork || defaultNetwork,
         timeoutSec: maxDuration,
-        networkAllow,
+        execPolicy,
+        toolsConfig: { agentId: msg.from },
       });
 
-      const toolSuccess = result.exitCode === 0;
-      await this.metrics.recordToolCall(
-        msg.from,
-        req.tool,
-        toolSuccess,
-        performance.now() - toolStart,
-      );
-
-      await this.replyToolResult(msg.from, msg.id, {
-        success: toolSuccess,
-        output: result.stdout,
-        error: !toolSuccess
-          ? {
-            code: "SANDBOX_EXEC_FAILED",
-            context: { stderr: result.stderr, exitCode: result.exitCode },
-            recovery: "Check tool arguments",
-          }
-          : undefined,
-      });
+      this.metrics.recordToolCall(msg.from, req.tool, result.success, performance.now() - toolStart);
+      this.replyToolResult(msg.from, msg.id, result);
     } catch (e) {
-      await this.sendStructuredError(msg.from, msg.id, {
-        code: "SANDBOX_CREATE_FAILED",
+      this.sendStructuredError(msg.from, msg.id, {
+        code: "SANDBOX_EXEC_FAILED",
         context: { tool: req.tool, message: (e as Error).message },
         recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
       });
@@ -547,78 +539,6 @@ export class BrokerServer {
     return [];
   }
 
-  /**
-   * Build self-contained Deno code to execute a tool inside a cloud Sandbox.
-   *
-   * Mirrors the same safety conventions as the local tool_executor.ts:
-   * - shell: dry_run=true by default (AX-2), direct binary execution (no sh -c)
-   * - write_file: dry_run=true by default (AX-2)
-   * - Structured output on stdout, errors on stderr
-   */
-  private buildSandboxCode(
-    tool: string,
-    args: Record<string, unknown>,
-  ): string {
-    switch (tool) {
-      case "shell": {
-        const command = String(args.command || "");
-        const dryRun = args.dry_run !== false;
-        if (dryRun) {
-          return `console.log(${
-            JSON.stringify(
-              `[dry_run] Would execute: ${command}\nSet dry_run=false to execute.`,
-            )
-          });`;
-        }
-        const parts = command.trim().split(/\s+/);
-        const binary = parts[0] || "";
-        const cmdArgs = parts.slice(1);
-        return `
-const cmd = new Deno.Command(${JSON.stringify(binary)}, {
-  args: ${JSON.stringify(cmdArgs)},
-  stdout: "piped", stderr: "piped",
-});
-const { stdout, stderr } = await cmd.output();
-console.log(new TextDecoder().decode(stdout));
-if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
-`;
-      }
-      case "read_file":
-        return `console.log(await Deno.readTextFile(${
-          JSON.stringify(args.path || "")
-        }));`;
-      case "write_file": {
-        const writeDryRun = args.dry_run !== false;
-        if (writeDryRun) {
-          return `console.log(${
-            JSON.stringify(
-              `[dry_run] Would write ${
-                String(args.content || "").length
-              } bytes to ${
-                String(args.path || "")
-              }\nSet dry_run=false to write.`,
-            )
-          });`;
-        }
-        return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${
-          JSON.stringify(args.content || "")
-        });
-console.log("Written: " + ${JSON.stringify(String(args.path || ""))});`;
-      }
-      case "web_fetch": {
-        const method = (args.method as string) || "GET";
-        return `const r = await fetch(${
-          JSON.stringify(args.url || "")
-        }, { method: ${JSON.stringify(method)} });
-console.log("HTTP " + r.status);
-console.log(await r.text());`;
-      }
-      default:
-        return `console.error("Unknown tool: " + ${
-          JSON.stringify(tool)
-        }); Deno.exit(1);`;
-    }
-  }
 
   // ── Canonical task message handlers ─────────────────
 

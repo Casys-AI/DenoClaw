@@ -1,0 +1,28 @@
+{
+  "$schema": "../../../schemas/agent.schema.json",
+  "description": "Agent exécuteur — lecture, écriture, exécution",
+  "sandbox": {
+    "allowedPermissions": [
+      "read",
+      "write",
+      "run"
+    ],
+    "execPolicy": {
+      "security": "allowlist",
+      "allowedCommands": [
+        "echo",
+        "ls",
+        "cat",
+        "date",
+        "uname"
+      ],
+      "ask": "on-miss"
+    }
+  },
+  "peers": [
+    "alice"
+  ],
+  "acceptFrom": [
+    "alice"
+  ]
+}

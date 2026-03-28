@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../schemas/agent.schema.json",
+  "description": "Agent de recherche — lecture et réseau",
+  "sandbox": {
+    "allowedPermissions": [
+      "read",
+      "net"
+    ]
+  },
+  "peers": [
+    "bob"
+  ],
+  "acceptFrom": [
+    "bob"
+  ]
+}

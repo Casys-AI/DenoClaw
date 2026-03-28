@@ -9,6 +9,7 @@ import {
   getAgentSoulPath,
   getProjectAgentsDir,
 } from "../shared/helpers.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 
 export interface AgentWorkspace {
@@ -26,7 +27,8 @@ export class WorkspaceLoader {
 
     try {
       const raw = await Deno.readTextFile(configPath);
-      const entry = JSON.parse(raw) as AgentEntry;
+      const parsed = JSON.parse(raw);
+      const entry = WorkspaceLoader.validateEntry(agentId, parsed);
 
       let systemPrompt: string | undefined;
       const soulPath = getAgentSoulPath(agentId);
@@ -111,5 +113,31 @@ export class WorkspaceLoader {
       }
     }
     return registry;
+  }
+
+  private static validateEntry(
+    agentId: string,
+    parsed: unknown,
+  ): AgentEntry {
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new DenoClawError(
+        "INVALID_AGENT_CONFIG",
+        { agentId },
+        "agent.json must be a JSON object",
+      );
+    }
+    const obj = parsed as Record<string, unknown>;
+    const sandbox = obj.sandbox;
+    if (
+      !sandbox || typeof sandbox !== "object" || Array.isArray(sandbox) ||
+      !Array.isArray((sandbox as Record<string, unknown>).allowedPermissions)
+    ) {
+      throw new DenoClawError(
+        "INVALID_AGENT_CONFIG",
+        { agentId, field: "sandbox.allowedPermissions" },
+        "agent.json requires sandbox.allowedPermissions array",
+      );
+    }
+    return obj as unknown as AgentEntry;
   }
 }

@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://denoclaw.dev/schemas/agent.schema.json",
+  "title": "DenoClaw Agent Configuration",
+  "description": "Defines an agent's identity, permissions, peers, and execution policy. Lives in data/agents/<id>/agent.json.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (ignored at runtime)"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this agent does"
+    },
+    "model": {
+      "type": "string",
+      "description": "LLM model override (e.g. 'ollama/nemotron-3-super'). Inherits from global defaults if omitted.",
+      "examples": ["ollama/nemotron-3-super", "anthropic/claude-sonnet-4-6", "openai/gpt-4o"]
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2,
+      "description": "LLM temperature override. Inherits from global defaults if omitted."
+    },
+    "maxTokens": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Max tokens override. Inherits from global defaults if omitted."
+    },
+    "systemPrompt": {
+      "type": "string",
+      "description": "Inline system prompt. Prefer soul.md file instead for longer prompts."
+    },
+    "sandbox": {
+      "$ref": "#/$defs/SandboxConfig"
+    },
+    "peers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Agent IDs this agent can send tasks to (ADR-006). Empty = cannot send to anyone. Closed by default."
+    },
+    "acceptFrom": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Agent IDs this agent accepts tasks from. Use '*' to accept from all. Empty = accepts from no one. Closed by default."
+    },
+    "channels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Channel names this agent is assigned to (e.g. 'telegram', 'webhook')"
+    },
+    "channelRouting": {
+      "type": "string",
+      "enum": ["direct", "round-robin", "by-intent", "broadcast"],
+      "description": "How messages from assigned channels are routed to this agent"
+    }
+  },
+  "required": ["sandbox"],
+  "additionalProperties": false,
+  "$defs": {
+    "SandboxPermission": {
+      "type": "string",
+      "enum": ["read", "write", "run", "net", "env", "ffi"],
+      "description": "Deno permission flag for the sandbox subprocess"
+    },
+    "SandboxConfig": {
+      "type": "object",
+      "description": "Sandbox execution environment configuration (ADR-005)",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["local", "cloud"],
+          "default": "local",
+          "description": "Sandbox backend: 'local' = Deno.Command subprocess, 'cloud' = Deno Sandbox API"
+        },
+        "allowedPermissions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SandboxPermission" },
+          "uniqueItems": true,
+          "description": "Maximum permissions the agent can use. Actual sandbox permissions = intersection of tool needs and agent allows (ADR-005)."
+        },
+        "networkAllow": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Network hostnames/patterns the sandbox can access",
+          "examples": [["api.example.com", "*.github.com"]]
+        },
+        "maxDurationSec": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Maximum execution time per tool call in seconds"
+        },
+        "execPolicy": {
+          "$ref": "#/$defs/ExecPolicy"
+        },
+        "approvalTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Timeout for human approval requests in seconds"
+        }
+      },
+      "required": ["allowedPermissions"],
+      "additionalProperties": false
+    },
+    "ExecPolicy": {
+      "description": "Shell command execution policy (ADR-010). Discriminated union on 'security' field.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Deny all shell execution",
+          "properties": {
+            "security": { "const": "deny" },
+            "ask": { "$ref": "#/$defs/AskMode" },
+            "askFallback": { "$ref": "#/$defs/AskFallback" }
+          },
+          "required": ["security", "ask"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Allow all shell commands (dangerous — use only for trusted agents)",
+          "properties": {
+            "security": { "const": "full" },
+            "ask": { "$ref": "#/$defs/AskMode" },
+            "askFallback": { "$ref": "#/$defs/AskFallback" },
+            "envFilter": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Additional env prefixes to strip (on top of LD_*, DYLD_*)"
+            }
+          },
+          "required": ["security", "ask"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Allow only commands whose binary is in allowedCommands (recommended)",
+          "properties": {
+            "security": { "const": "allowlist" },
+            "ask": { "$ref": "#/$defs/AskMode" },
+            "askFallback": { "$ref": "#/$defs/AskFallback" },
+            "allowedCommands": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Binary names the agent is allowed to execute (e.g. 'git', 'deno', 'npm')"
+            },
+            "deniedCommands": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Keywords blocked anywhere in command string (aggressive match)"
+            },
+            "envFilter": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Additional env prefixes to strip (on top of LD_*, DYLD_*)"
+            },
+            "allowInlineEval": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow -c/-e flags on interpreters (node -e, python -c). Default false = blocked."
+            }
+          },
+          "required": ["security", "ask"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AskMode": {
+      "type": "string",
+      "enum": ["off", "on-miss", "always"],
+      "description": "'off' = never ask, 'on-miss' = ask when command not in allowlist, 'always' = always ask even for allowlisted commands"
+    },
+    "AskFallback": {
+      "type": "string",
+      "enum": ["deny", "allowlist"],
+      "description": "What to do when approval times out or is unavailable"
+    }
+  }
+}

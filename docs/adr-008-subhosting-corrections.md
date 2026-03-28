@@ -67,6 +67,8 @@ fait ses calculs (y compris LLM multi-step), et soit retourne un résultat
 synchrone (tâche rapide), soit retourne un taskId + stream SSE (tâche longue).
 Le Broker est le message store durable et le cron dispatcher.
 
+> **A2A over transport X, persisted in KV, correlated by task/context ids.**
+
 ### Trois couches — Deploy et Local
 
 | Rôle           | Deploy                              | Local                           |
@@ -82,9 +84,11 @@ Multi-agent est le mode par défaut, même en dev. Chaque agent a un nom — pas
 
 | Couche               | Rôle                                      | Local                              | Deploy                                     |
 | -------------------- | ----------------------------------------- | ---------------------------------- | ------------------------------------------ |
-| **HTTP POST**        | Réveiller un agent dormant                | Pas nécessaire (Workers always-on) | Seul moyen de wake Subhosting              |
-| **WebSocket**        | Communication continue (perf)             | `postMessage` (≈ WS local)         | WS persistant tant que l'agent est éveillé |
+| **HTTP POST**        | Transport de travail A2A au réveil        | Pas nécessaire (Workers always-on) | Seul moyen de wake Subhosting              |
+| **WebSocket**        | Communication continue / optimisation     | `postMessage` (≈ WS local)         | WS persistant tant que l'agent est éveillé |
 | **BroadcastChannel** | Infra seulement (shutdown, config reload) | ✅ entre Workers                   | N/A (ne marche pas cross-deployment)       |
+
+En d'autres termes : **A2A over transport X, persisted in KV, correlated by task/context ids.**
 
 Flux deploy : HTTP POST réveille l'agent → agent ouvre WS vers Broker →
 communication bidirectionnelle → agent idle → WS meurt → retour à HTTP POST.

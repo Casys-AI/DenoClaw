@@ -4,6 +4,8 @@
 
 **Le Broker orchestre. L'agent réagit. Le code s'exécute en Sandbox.**
 
+**A2A over transport X, persisted in KV, correlated by task/context ids.**
+
 Trois couches, chacune avec son rôle (ADR-001) :
 
 - **Broker** (Deno Deploy) = orchestrateur central (LLM proxy, cron, message
@@ -72,8 +74,9 @@ plan de contrôle. Il fait :
     CLI / Codex CLI), stocké sur le Broker
   - L'agent ne sait pas quel mode est utilisé — interface uniforme
     `broker.complete()`
-- **Message Router** — Route les messages vers les agents via HTTP POST. KV
-  Queues utilisées en interne (durabilité Broker). Contrôle qui parle à qui
+- **Message Router** — Route les tâches et messages A2A vers les agents via HTTP
+  POST. KV persiste l'état durable et les traces ; les KV Queues éventuelles ne
+  sont qu'un détail interne d'optimisation Broker. Contrôle qui parle à qui
   (permissions A2A).
 - **Tunnel Hub** — Mesh réseau à la Tailscale. Maintient les connexions
   WebSocket vers les noeuds (machines, VPS, GPU) et les autres Brokers
@@ -304,6 +307,8 @@ flow d'auth.
 
 Les agents ne se parlent JAMAIS directement (network isolation). Tout passe par
 le Broker qui route via HTTP.
+
+Autrement dit : **A2A over HTTP + SSE, persisted in KV, correlated by task/context ids.**
 
 ```typescript
 // Agent A veut déléguer une tâche à Agent B — il demande au Broker

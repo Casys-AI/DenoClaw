@@ -16,13 +16,16 @@ protocole pour cette communication ?
 
 ## Décision
 
-**A2A pour l'inter-agents. MCP pour les outils.**
+**A2A pour l'inter-agents, et plus largement pour le contrat canonique de tâche. MCP pour les outils.**
 
-- A2A = horizontal (agent ↔ agent) — délégation de tâches entre pairs
+- A2A = horizontal (agent ↔ agent) — délégation de tâches entre pairs, en local comme sur le réseau
 - MCP = vertical (agent → tools) — accès aux outils et données
 
 Les deux coexistent. Un agent DenoClaw utilise MCP pour ses outils internes et
-A2A pour parler à d'autres agents.
+A2A pour décrire le travail agentique, y compris quand l'exécution passe par un
+transport interne.
+
+> **A2A over transport X, persisted in KV, correlated by task/context ids.**
 
 ## A2A en bref
 
@@ -199,8 +202,9 @@ const result = await fetch(card.url, {
 
 - Chaque agent DenoClaw est interopérable avec tout agent A2A (LangChain,
   Bedrock, etc.)
-- Le format custom `BrokerMessage` reste pour le transport interne (HTTP) mais
-  les payloads s'alignent sur A2A
+- Les transports internes peuvent conserver des messages de runtime, mais ils ne
+  constituent plus un contrat parallèle de tâche : la sémantique canonique du
+  travail reste A2A
 - L'AgentCard est générée automatiquement depuis la config agent (registry)
 - Le streaming SSE est natif Deno, pas besoin de lib
 - Compatible avec le routing channel → agent(s) : le broker est un routeur A2A

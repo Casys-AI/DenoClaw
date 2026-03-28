@@ -28,7 +28,10 @@ import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
 import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
-import type { TraceWriter } from "../telemetry/traces.ts";
+import type {
+  TraceCorrelationIds,
+  TraceWriter,
+} from "../telemetry/traces.ts";
 
 import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
 
@@ -44,6 +47,8 @@ export interface AgentLoopDeps {
   askApproval?: AskApprovalFn;
   traceWriter?: TraceWriter;
   traceId?: string;
+  taskId?: string;
+  contextId?: string;
   agentId?: string;
 }
 
@@ -57,6 +62,8 @@ export class AgentLoop {
   private maxIterations: number;
   private traceWriter: TraceWriter | null;
   private traceId: string | undefined;
+  private taskId: string | undefined;
+  private contextId: string | undefined;
   private agentId: string;
   private sessionId: string;
 
@@ -83,6 +90,8 @@ export class AgentLoop {
     this.maxIterations = maxIterations;
     this.traceWriter = deps?.traceWriter ?? null;
     this.traceId = deps?.traceId;
+    this.taskId = deps?.taskId;
+    this.contextId = deps?.contextId ?? deps?.taskId;
     this.agentId = deps?.agentId ?? sessionId;
     this.sessionId = sessionId;
 
@@ -128,8 +137,12 @@ export class AgentLoop {
     // Start KV trace if writer available
     const tw = this.traceWriter;
     let traceId = this.traceId;
+    const correlationIds: TraceCorrelationIds = {
+      ...(this.taskId ? { taskId: this.taskId } : {}),
+      ...(this.contextId ? { contextId: this.contextId } : {}),
+    };
     if (tw && !traceId) {
-      traceId = await tw.startTrace(this.agentId, this.sessionId);
+      traceId = await tw.startTrace(this.agentId, this.sessionId, correlationIds);
     }
 
     let iteration = 0;
@@ -141,7 +154,13 @@ export class AgentLoop {
 
         // KV trace: iteration span
         const iterSpanId = tw && traceId
-          ? await tw.writeIterationSpan(traceId, this.agentId, iteration)
+          ? await tw.writeIterationSpan(
+            traceId,
+            this.agentId,
+            iteration,
+            undefined,
+            correlationIds,
+          )
           : null;
         const iterStart = performance.now();
 
@@ -196,6 +215,7 @@ export class AgentLoop {
                   completion: response.usage?.completionTokens ?? 0,
                 },
                 llmLatency,
+                correlationIds,
               );
             }
 
@@ -246,6 +266,7 @@ export class AgentLoop {
                     result.success,
                     toolLatency,
                     args,
+                    correlationIds,
                   );
                 }
 

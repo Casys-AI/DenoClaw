@@ -54,6 +54,9 @@ const DATA_DIR = "./data";
 interface AgentMessagePending {
   fromAgent: string;
   sourceRequestId: string;
+  taskId?: string;
+  contextId?: string;
+  traceId?: string;
   timer: number;
 }
 
@@ -207,6 +210,9 @@ export class WorkerPool {
           msg.toAgent,
           msg.message,
           msg.requestId,
+          msg.taskId,
+          msg.contextId,
+          msg.traceId,
         );
         break;
       }
@@ -233,9 +239,10 @@ export class WorkerPool {
       case "task_started": {
         this.writeActiveTask(
           fromAgentId,
-          msg.requestId,
+          msg.taskId ?? msg.requestId,
           msg.sessionId,
           msg.traceId,
+          msg.contextId,
         );
         break;
       }
@@ -312,7 +319,13 @@ export class WorkerPool {
     agentId: string,
     sessionId: string,
     message: string,
-    options?: { model?: string; timeoutMs?: number },
+    options?: {
+      model?: string;
+      timeoutMs?: number;
+      taskId?: string;
+      contextId?: string;
+      traceId?: string;
+    },
   ): Promise<AgentResponse> {
     const entry = this.agents.get(agentId);
     if (!entry) {
@@ -351,6 +364,9 @@ export class WorkerPool {
         sessionId,
         message,
         model: options?.model,
+        traceId: options?.traceId,
+        taskId: options?.taskId,
+        contextId: options?.contextId,
       };
       entry.worker.postMessage(msg);
     });
@@ -431,12 +447,14 @@ export class WorkerPool {
     taskId: string,
     sessionId: string,
     traceId?: string,
+    contextId?: string,
   ): void {
     if (!this.sharedKv) return;
     this.sharedKv.set(["agents", agentId, "active_task"], {
       taskId,
       sessionId,
       traceId,
+      contextId,
       startedAt: new Date().toISOString(),
     }).catch(() => {/* best-effort */});
   }
@@ -457,6 +475,7 @@ export class WorkerPool {
       status: string;
       result?: string;
       traceId?: string;
+      contextId?: string;
     },
   ): void {
     if (!this.sharedKv) return;
@@ -475,6 +494,9 @@ export class WorkerPool {
     toAgent: string,
     message: string,
     sourceRequestId: string,
+    taskId?: string,
+    contextId?: string,
+    traceId?: string,
   ): void {
     // Peer check
     const registry = this.config.agents.registry;
@@ -534,6 +556,9 @@ export class WorkerPool {
     this.agentPending.set(deliverRequestId, {
       fromAgent,
       sourceRequestId,
+      taskId,
+      contextId,
+      traceId,
       timer,
     });
 
@@ -542,6 +567,9 @@ export class WorkerPool {
       requestId: deliverRequestId,
       fromAgent,
       message,
+      traceId,
+      taskId,
+      contextId,
     };
     targetEntry.worker.postMessage(deliverMsg);
 

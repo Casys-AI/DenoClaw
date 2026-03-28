@@ -32,8 +32,10 @@ function emitTaskStarted(
   requestId: string,
   sessionId: string,
   traceId?: string,
+  taskId?: string,
+  contextId?: string,
 ): void {
-  respond({ type: "task_started", requestId, sessionId, traceId });
+  respond({ type: "task_started", requestId, sessionId, traceId, taskId, contextId });
 }
 
 function emitTaskCompleted(requestId: string): void {
@@ -48,6 +50,7 @@ function emitAgentTask(
   status: string,
   result?: string,
   traceId?: string,
+  contextId?: string,
 ): void {
   respond({
     type: "agent_task",
@@ -58,6 +61,7 @@ function emitAgentTask(
     status,
     result: result?.slice(0, 500),
     traceId,
+    contextId,
   });
 }
 
@@ -128,43 +132,62 @@ const agentPending = new Map<string, {
   reject: (err: Error) => void;
 }>();
 
-function sendToAgent(toAgent: string, message: string): Promise<string> {
-  const requestId = generateId();
+function createSendToAgent(
+  taskId?: string,
+  contextId?: string,
+  traceId?: string,
+): (toAgent: string, message: string) => Promise<string> {
+  return (toAgent: string, message: string): Promise<string> => {
+    const requestId = generateId();
+    const delegatedTaskId = taskId ?? requestId;
+    const delegatedContextId = contextId ?? taskId ?? requestId;
 
-  return new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      agentPending.delete(requestId);
-      reject(
-        new AgentError(
-          "AGENT_MSG_TIMEOUT",
-          { toAgent },
-          `No response from "${toAgent}" within 120s`,
-        ),
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        agentPending.delete(requestId);
+        reject(
+          new AgentError(
+            "AGENT_MSG_TIMEOUT",
+            { toAgent },
+            `No response from "${toAgent}" within 120s`,
+          ),
+        );
+      }, 120_000);
+
+      agentPending.set(requestId, {
+        resolve: (content: string) => {
+          clearTimeout(timer);
+          agentPending.delete(requestId);
+          resolve(content);
+        },
+        reject: (err: Error) => {
+          clearTimeout(timer);
+          agentPending.delete(requestId);
+          reject(err);
+        },
+      });
+
+      respond({
+        type: "agent_send",
+        requestId,
+        toAgent,
+        message,
+        traceId,
+        taskId: delegatedTaskId,
+        contextId: delegatedContextId,
+      });
+      emitAgentTask(
+        delegatedTaskId,
+        agentId,
+        toAgent,
+        message,
+        "sent",
+        undefined,
+        traceId,
+        delegatedContextId,
       );
-    }, 120_000);
-
-    agentPending.set(requestId, {
-      resolve: (content: string) => {
-        clearTimeout(timer);
-        agentPending.delete(requestId);
-        resolve(content);
-      },
-      reject: (err: Error) => {
-        clearTimeout(timer);
-        agentPending.delete(requestId);
-        reject(err);
-      },
     });
-
-    respond({
-      type: "agent_send",
-      requestId,
-      toAgent,
-      message,
-      traceId: undefined,
-    });
-    emitAgentTask(requestId, agentId, toAgent, message, "sent");
-  });
+  };
 }
 
 // ── BroadcastChannel — shutdown global ───────────────────
@@ -184,6 +207,8 @@ function createAgentLoop(
   sessionId: string,
   model?: string,
   traceId?: string,
+  taskId?: string,
+  contextId?: string,
 ): AgentLoop {
   if (!config) {
     throw new AgentError(
@@ -204,12 +229,14 @@ function createAgentLoop(
     10,
     {
       memory,
-      sendToAgent,
+      sendToAgent: createSendToAgent(taskId, contextId, traceId),
       availablePeers: peers,
       sandboxConfig,
       askApproval,
       traceWriter: traceWriter ?? undefined,
       traceId,
+      taskId,
+      contextId,
       agentId,
     },
   );
@@ -246,10 +273,18 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
 
       const traceId = msg.traceId;
-      emitTaskStarted(msg.requestId, msg.sessionId, traceId);
+      const taskId = msg.taskId ?? msg.requestId;
+      const contextId = msg.contextId ?? taskId;
+      emitTaskStarted(msg.requestId, msg.sessionId, traceId, taskId, contextId);
 
       try {
-        const loop = createAgentLoop(msg.sessionId, msg.model, msg.traceId);
+        const loop = createAgentLoop(
+          msg.sessionId,
+          msg.model,
+          msg.traceId,
+          taskId,
+          contextId,
+        );
         try {
           const result = await loop.processMessage(msg.message);
           respond({
@@ -277,30 +312,36 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
     case "agent_deliver": {
       const traceId = msg.traceId;
+      const taskId = msg.taskId ?? msg.requestId;
+      const contextId = msg.contextId ?? taskId;
       emitTaskStarted(
         msg.requestId,
         `agent:${msg.fromAgent}:${agentId}`,
         traceId,
+        taskId,
+        contextId,
       );
       emitAgentTask(
-        msg.requestId,
+        taskId,
         msg.fromAgent,
         agentId,
         msg.message,
         "received",
         undefined,
         traceId,
+        contextId,
       );
 
       if (!config) {
         emitAgentTask(
-          msg.requestId,
+          taskId,
           msg.fromAgent,
           agentId,
           msg.message,
           "failed",
           "Worker not initialized",
           traceId,
+          contextId,
         );
         emitTaskCompleted(msg.requestId);
         respond({
@@ -314,19 +355,26 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
       try {
         const sessionId = `agent:${msg.fromAgent}:${agentId}`;
-        const loop = createAgentLoop(sessionId, undefined, msg.traceId);
+        const loop = createAgentLoop(
+          sessionId,
+          undefined,
+          msg.traceId,
+          taskId,
+          contextId,
+        );
         try {
           const result = await loop.processMessage(
             `[Message from agent "${msg.fromAgent}"]: ${msg.message}`,
           );
           emitAgentTask(
-            msg.requestId,
+            taskId,
             msg.fromAgent,
             agentId,
             msg.message,
             "completed",
             result.content,
             traceId,
+            contextId,
           );
           respond({
             type: "agent_result",
@@ -339,13 +387,14 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         emitAgentTask(
-          msg.requestId,
+          taskId,
           msg.fromAgent,
           agentId,
           msg.message,
           "failed",
           errMsg,
           traceId,
+          contextId,
         );
         respond({
           type: "agent_result",

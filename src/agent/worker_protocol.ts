@@ -34,6 +34,8 @@ export type WorkerRequest =
     message: string;
     model?: string;
     traceId?: string;
+    taskId?: string;
+    contextId?: string;
   }
   | {
     type: "agent_deliver";
@@ -41,6 +43,8 @@ export type WorkerRequest =
     fromAgent: string;
     message: string;
     traceId?: string;
+    taskId?: string;
+    contextId?: string;
   }
   | {
     type: "agent_response";
@@ -73,6 +77,8 @@ export type WorkerResponse =
     toAgent: string;
     message: string;
     traceId?: string;
+    taskId?: string;
+    contextId?: string;
   }
   | {
     type: "agent_result";
@@ -85,6 +91,8 @@ export type WorkerResponse =
     requestId: string;
     sessionId: string;
     traceId?: string;
+    taskId?: string;
+    contextId?: string;
   }
   | { type: "task_completed"; requestId: string }
   | {
@@ -96,6 +104,7 @@ export type WorkerResponse =
     status: string;
     result?: string;
     traceId?: string;
+    contextId?: string;
   }
   | {
     type: "ask_approval";

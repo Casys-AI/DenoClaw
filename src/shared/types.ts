@@ -228,6 +228,7 @@ export interface ActiveTaskEntry {
   taskId: string;
   sessionId: string;
   traceId?: string;
+  contextId?: string;
   startedAt: string;
 }
 
@@ -249,5 +250,6 @@ export interface AgentTaskEntry {
   status: string;
   result?: string;
   traceId?: string;
+  contextId?: string;
   timestamp: string;
 }

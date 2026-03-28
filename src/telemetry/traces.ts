@@ -15,7 +15,12 @@ import { generateId } from "../shared/helpers.ts";
 
 export type SpanType = "iteration" | "llm_call" | "tool_call" | "a2a_send";
 
-export interface TraceRoot {
+export interface TraceCorrelationIds {
+  taskId?: string;
+  contextId?: string;
+}
+
+export interface TraceRoot extends TraceCorrelationIds {
   traceId: string;
   rootAgentId: string;
   sessionId: string;
@@ -25,7 +30,7 @@ export interface TraceRoot {
   totalIterations: number;
 }
 
-export interface Span {
+export interface Span extends TraceCorrelationIds {
   spanId: string;
   traceId: string;
   parentSpanId?: string;
@@ -58,6 +63,18 @@ export type SpanData =
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+export function resolveTraceCorrelationIds(
+  sessionId: string,
+  ids: TraceCorrelationIds = {},
+): TraceCorrelationIds {
+  const taskId = ids.taskId;
+  const contextId = ids.contextId ?? taskId ?? sessionId;
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(contextId ? { contextId } : {}),
+  };
+}
+
 // ── Writer ─────────────────────────────────────────────
 
 export class TraceWriter {
@@ -70,12 +87,17 @@ export class TraceWriter {
   }
 
   /** Start a new trace. Returns the traceId. */
-  async startTrace(agentId: string, sessionId: string): Promise<string> {
+  async startTrace(
+    agentId: string,
+    sessionId: string,
+    ids: TraceCorrelationIds = {},
+  ): Promise<string> {
     const traceId = generateId();
     const root: TraceRoot = {
       traceId,
       rootAgentId: agentId,
       sessionId,
+      ...resolveTraceCorrelationIds(sessionId, ids),
       startedAt: new Date().toISOString(),
       status: "running",
       totalIterations: 0,
@@ -140,11 +162,13 @@ export class TraceWriter {
     agentId: string,
     iteration: number,
     parentSpanId?: string,
+    ids: TraceCorrelationIds = {},
   ): Promise<string> {
     return this.writeSpan({
       traceId,
       parentSpanId,
       agentId,
+      ...ids,
       type: "iteration",
       startedAt: new Date().toISOString(),
       data: { type: "iteration", iteration },
@@ -159,11 +183,13 @@ export class TraceWriter {
     provider: string,
     tokens: { prompt: number; completion: number },
     latencyMs: number,
+    ids: TraceCorrelationIds = {},
   ): Promise<string> {
     return this.writeSpan({
       traceId,
       parentSpanId,
       agentId,
+      ...ids,
       type: "llm_call",
       startedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
@@ -186,11 +212,13 @@ export class TraceWriter {
     success: boolean,
     latencyMs: number,
     args?: Record<string, unknown>,
+    ids: TraceCorrelationIds = {},
   ): Promise<string> {
     return this.writeSpan({
       traceId,
       parentSpanId,
       agentId,
+      ...ids,
       type: "tool_call",
       startedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
@@ -205,11 +233,13 @@ export class TraceWriter {
     parentSpanId: string,
     toAgent: string,
     taskId: string,
+    ids: TraceCorrelationIds = {},
   ): Promise<string> {
     return this.writeSpan({
       traceId,
       parentSpanId,
       agentId,
+      ...ids,
       type: "a2a_send",
       startedAt: new Date().toISOString(),
       data: { type: "a2a_send", toAgent, taskId },

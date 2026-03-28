@@ -208,7 +208,10 @@ export async function createAgent(
   success(`Agent "${agentName}" créé (workspace + config).`);
 }
 
-export async function deleteAgent(name?: string): Promise<void> {
+export async function deleteAgent(
+  name?: string,
+  opts?: { yes?: boolean },
+): Promise<void> {
   const config = await getConfigOrDefault();
   const wsAgents = await WorkspaceLoader.listAll();
   const registryAgents = Object.keys(config.agents.registry || {});
@@ -221,7 +224,7 @@ export async function deleteAgent(name?: string): Promise<void> {
     return;
   }
 
-  if (!await confirm(`Supprimer l'agent "${agentName}" ?`, false)) return;
+  if (!opts?.yes && !await confirm(`Supprimer l'agent "${agentName}" ?`, false)) return;
 
   // Delete workspace
   await WorkspaceLoader.delete(agentName);

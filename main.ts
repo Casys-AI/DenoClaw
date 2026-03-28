@@ -428,7 +428,7 @@ try {
         break;
       }
       if (subcommand === "delete") {
-        await deleteAgent(args._[2] as string);
+        await deleteAgent(args._[2] as string, { yes: !!args.yes || !!args.y });
         break;
       }
 

@@ -18,9 +18,7 @@ Use `Deno.watchFs()` to monitor `data/agents/` for changes and reload affected a
 
 | Change | Effect |
 |--------|--------|
-| `agent.json` modified | Reload agent config (permissions, peers, exec policy) |
-| `soul.md` modified | Reload system prompt |
-| `skills/` modified | Reload custom skills |
+| `agent.json` modified | Reload runtime config (peers, acceptFrom, execPolicy, channels) |
 | New agent directory | Spawn new worker via `WorkerPool.addAgent()` |
 | Agent directory deleted | Graceful shutdown of worker |
 
@@ -28,6 +26,8 @@ Use `Deno.watchFs()` to monitor `data/agents/` for changes and reload affected a
 
 | Change | Reason |
 |--------|--------|
+| `soul.md` modified | Loaded once at worker start — immutable per session |
+| `skills/` modified | Loaded once at worker start — immutable per session |
 | `~/.denoclaw/config.json` | Global config (providers, API keys) — requires restart |
 | `memory.db` | Runtime data, not config |
 | `.env` changes | Process-level, requires restart |
@@ -58,13 +58,20 @@ Reload strategy:
 
 File watchers emit multiple events for a single save. Debounce with a 500ms window per agent to avoid redundant reloads.
 
-### Config-only vs full restart
+### What is reloadable vs what requires restart
 
-Some changes can be applied without restarting the worker:
-- **Config-only** (no worker restart): peers, acceptFrom, channels, description
-- **Full restart** (worker must be recreated): model, systemPrompt, sandbox permissions, execPolicy
+**Reloadable at runtime** (WorkerPool re-reads agent.json, no worker restart):
+- `peers`, `acceptFrom` — checked at routing time, not cached in worker
+- `execPolicy` — checked at tool execution time
+- `channels`, `channelRouting` — reassigned in ChannelManager
 
-The distinction matters because a full restart loses the worker's in-memory conversation state (though KV-backed memory persists).
+**Requires worker restart** (identity change — destroy + recreate worker):
+- `model` — baked into AgentLoop config
+- `sandbox.allowedPermissions` — baked into subprocess spawn flags
+
+**Immutable per session** (edit → takes effect on next gateway start):
+- `soul.md` — system prompt, loaded once into AgentLoop
+- `skills/` — loaded once by SkillsLoader
 
 ## Consequences
 

@@ -1,16 +1,15 @@
 /**
  * Worker entrypoint — chargé par new Worker().
- * Reçoit config via postMessage "init" et conserve quelques messages bridge
- * pendant la migration, mais l'exécution locale réelle passe désormais par
- * la sémantique canonique de tâche A2A.
+ * Reçoit la config via `init` et exécute le travail local via un protocole
+ * runtime interne strict, pendant que la sémantique canonique de tâche reste
+ * portée par A2A.
  * Supporte la communication inter-agents via le main process (Broker local).
  *
  * Le Worker n'écrit JAMAIS dans le shared KV — il émet des messages au main process
  * qui se charge des écritures. Cela rend le Worker transport-agnostic (deploy-compatible).
  *
- * Task 3.2: All local worker execution now routes through canonical A2A task semantics
- * via executeCanonicalWorkerTask(). The legacy "process" message is only a narrow
- * compatibility bridge into that canonical path.
+ * All local worker execution routes through canonical A2A task semantics via
+ * executeCanonicalWorkerTask(). The worker protocol remains runtime plumbing only.
  */
 
 import { AgentLoop } from "./loop.ts";
@@ -18,7 +17,7 @@ import type { AgentLoopLike, AgentLoopFactoryContext, AskApprovalFn } from "./lo
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
-import { generateId } from "../shared/helpers.ts";
+import { generateId, getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
@@ -32,6 +31,7 @@ import {
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
+  WorkerRunRequest,
   WorkerRequest,
   WorkerResponse,
 } from "./worker_protocol.ts";
@@ -40,12 +40,9 @@ import type {
 
 /**
  * Minimal request shape for canonical task execution.
- * Maps directly from the worker protocol "process" message.
+ * Maps directly from the worker protocol `run` message.
  */
-export type CanonicalWorkerTaskRequest = Extract<
-  WorkerRequest,
-  { type: "process" }
->;
+export type CanonicalWorkerTaskRequest = WorkerRunRequest;
 
 /**
  * Dependencies injected into executeCanonicalWorkerTask.
@@ -58,8 +55,8 @@ export interface CanonicalWorkerTaskDeps {
 }
 
 /**
- * Result of canonical task execution — carries both the A2A task
- * and the original AgentResponse for backward compatibility.
+ * Result of canonical task execution — carries the canonical A2A task
+ * plus the caller-facing AgentResponse projection.
  */
 export interface CanonicalWorkerTaskResult {
   task: Task;
@@ -161,6 +158,7 @@ let agentId = "default";
 let config: WorkerConfig | null = null;
 let kvPrivatePath: string | undefined;
 let traceWriter: TraceWriter | null = null;
+let sharedKv: Deno.Kv | null = null;
 function respond(msg: WorkerResponse): void {
   workerGlobal.postMessage(msg);
 }
@@ -181,7 +179,7 @@ function emitTaskCompleted(requestId: string): void {
   respond({ type: "task_completed", requestId });
 }
 
-function emitAgentTask(
+function emitTaskObservation(
   taskId: string,
   from: string,
   to: string,
@@ -192,7 +190,7 @@ function emitAgentTask(
   contextId?: string,
 ): void {
   respond({
-    type: "agent_task",
+    type: "task_observe",
     taskId,
     from,
     to,
@@ -307,7 +305,7 @@ function createSendToAgent(
       });
 
       respond({
-        type: "agent_send",
+        type: "peer_send",
         requestId,
         toAgent,
         message,
@@ -315,7 +313,7 @@ function createSendToAgent(
         taskId: delegatedTaskId,
         contextId: delegatedContextId,
       });
-      emitAgentTask(
+      emitTaskObservation(
         delegatedTaskId,
         agentId,
         toAgent,
@@ -335,6 +333,7 @@ const broadcast = new BroadcastChannel("denoclaw");
 broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
     drainAskPending();
+    if (sharedKv) { sharedKv.close(); sharedKv = null; }
     broadcast.close();
     workerGlobal.close();
   }
@@ -362,6 +361,7 @@ function createAgentLoop(
   const peers = config.agents.registry?.[agentId]?.peers ?? [];
   const sandboxConfig = config.agents.registry?.[agentId]?.sandbox ??
     config.agents.defaults?.sandbox;
+  const workspaceDir = getAgentDefDir(agentId);
   return new AgentLoop(
     sessionId,
     config,
@@ -378,6 +378,7 @@ function createAgentLoop(
       taskId,
       contextId,
       agentId,
+      workspaceDir,
     },
   );
 }
@@ -394,7 +395,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       kvPrivatePath = msg.kvPaths.private;
       // Open shared KV for trace writing (best-effort observability)
       try {
-        const sharedKv = await Deno.openKv(msg.kvPaths.shared);
+        sharedKv = await Deno.openKv(msg.kvPaths.shared);
         traceWriter = new TraceWriter(sharedKv);
       } catch (e) {
         log.warn("Shared KV unavailable — tracing disabled", e instanceof Error ? e.message : String(e));
@@ -403,10 +404,10 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       break;
     }
 
-    case "process": {
+    case "run": {
       if (!config) {
         respond({
-          type: "error",
+          type: "run_error",
           requestId: msg.requestId,
           code: "WORKER_NOT_INITIALIZED",
           message: "Worker has not received init message",
@@ -414,9 +415,6 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break;
       }
 
-      // Task 3.2: Route through canonical A2A task execution path.
-      // The legacy observability hooks (emitTaskStarted/Completed) are preserved
-      // as a compatibility bridge; they will be replaced by task lifecycle events.
       const traceId = msg.traceId;
       const taskId = msg.taskId ?? msg.requestId;
       const contextId = msg.contextId ?? taskId;
@@ -425,7 +423,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       try {
         const result = await executeCanonicalWorkerTask(
           {
-            type: "process",
+            type: "run",
             requestId: msg.requestId,
             sessionId: msg.sessionId,
             message: msg.message,
@@ -445,7 +443,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             ),
             askApproval,
             onTaskUpdate: (task) => {
-              emitAgentTask(
+              emitTaskObservation(
                 task.id,
                 agentId,
                 agentId,
@@ -461,14 +459,14 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
         if (result.response) {
           respond({
-            type: "result",
+            type: "run_result",
             requestId: msg.requestId,
             content: result.response.content,
             finishReason: result.response.finishReason,
           });
         } else {
           respond({
-            type: "error",
+            type: "run_error",
             requestId: msg.requestId,
             code: result.error?.code ?? "AGENT_ERROR",
             message: result.error?.message ?? "Unknown error",
@@ -477,7 +475,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         respond({
-          type: "error",
+          type: "run_error",
           requestId: msg.requestId,
           code: "AGENT_ERROR",
           message,
@@ -488,7 +486,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       break;
     }
 
-    case "agent_deliver": {
+    case "peer_deliver": {
       const traceId = msg.traceId;
       const taskId = msg.taskId ?? msg.requestId;
       const contextId = msg.contextId ?? taskId;
@@ -499,7 +497,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         taskId,
         contextId,
       );
-      emitAgentTask(
+      emitTaskObservation(
         taskId,
         msg.fromAgent,
         agentId,
@@ -511,7 +509,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       );
 
       if (!config) {
-        emitAgentTask(
+        emitTaskObservation(
           taskId,
           msg.fromAgent,
           agentId,
@@ -523,7 +521,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         );
         emitTaskCompleted(msg.requestId);
         respond({
-          type: "agent_result",
+          type: "peer_result",
           requestId: msg.requestId,
           content: "Worker not initialized",
           error: true,
@@ -544,7 +542,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           const result = await loop.processMessage(
             `[Message from agent "${msg.fromAgent}"]: ${msg.message}`,
           );
-          emitAgentTask(
+          emitTaskObservation(
             taskId,
             msg.fromAgent,
             agentId,
@@ -555,7 +553,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             contextId,
           );
           respond({
-            type: "agent_result",
+            type: "peer_result",
             requestId: msg.requestId,
             content: result.content,
           });
@@ -564,7 +562,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        emitAgentTask(
+        emitTaskObservation(
           taskId,
           msg.fromAgent,
           agentId,
@@ -575,7 +573,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           contextId,
         );
         respond({
-          type: "agent_result",
+          type: "peer_result",
           requestId: msg.requestId,
           content: errMsg,
           error: true,
@@ -586,7 +584,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       break;
     }
 
-    case "agent_response": {
+    case "peer_response": {
       const pending = agentPending.get(msg.requestId);
       if (pending) {
         if (msg.error) {
@@ -617,6 +615,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
     case "shutdown": {
       drainAskPending();
+      if (sharedKv) { sharedKv.close(); sharedKv = null; }
       broadcast.close();
       workerGlobal.close();
       break;

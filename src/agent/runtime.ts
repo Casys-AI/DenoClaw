@@ -22,6 +22,12 @@ import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
+import {
+  assertRuntimeTaskMessage,
+  isRuntimeTaskMessage,
+  type RuntimeTaskContinueMessage,
+  type RuntimeTaskSubmitMessage,
+} from "./runtime_transport.ts";
 
 /**
  * AgentRuntime — runs inside a Deno Subhosting deployment or local worker.
@@ -41,18 +47,6 @@ type BrokerCanonicalTaskPort = AgentBrokerPort & {
   reportTaskResult(task: Task): Promise<Task>;
 };
 
-interface RuntimeTaskSubmitPayload {
-  taskId: string;
-  message: A2AMessage;
-  contextId?: string;
-}
-
-interface RuntimeTaskContinuePayload {
-  taskId: string;
-  message: A2AMessage;
-  metadata?: Record<string, unknown>;
-}
-
 export class AgentRuntime {
   private agentId: string;
   private config: AgentConfig;
@@ -60,7 +54,7 @@ export class AgentRuntime {
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
   private skills: SkillsLoader;
-  private cron: CronManager;
+  private cron!: CronManager;
   private maxIterations: number;
   private memories: Map<string, MemoryPort> = new Map();
 
@@ -75,7 +69,6 @@ export class AgentRuntime {
     this.broker = broker;
     this.context = new ContextBuilder(config);
     this.skills = new SkillsLoader();
-    this.cron = new CronManager();
     this.maxIterations = maxIterations;
   }
 
@@ -100,6 +93,9 @@ export class AgentRuntime {
     await this.skills.loadSkills();
     await this.broker.startListening();
 
+    const kv = await this.getKv();
+    this.cron = new CronManager(kv);
+
     await this.cron.heartbeat(async () => {
       log.debug(`Heartbeat: ${this.agentId}`);
       const kv = await this.getKv();
@@ -109,7 +105,6 @@ export class AgentRuntime {
       });
     }, 5);
 
-    const kv = await this.getKv();
     await kv.set(["agents", this.agentId, "status"], {
       status: "running",
       startedAt: new Date().toISOString(),
@@ -126,6 +121,7 @@ export class AgentRuntime {
     kv.listenQueue(async (raw: unknown) => {
       const msg = raw as BrokerEnvelope;
       if (msg.to !== this.agentId) return;
+      if (!isRuntimeTaskMessage(msg)) return;
       await this.handleIncomingMessage(msg);
     });
     log.info(`AgentRuntime: KV Queue intake démarrée (${this.agentId})`);
@@ -136,6 +132,8 @@ export class AgentRuntime {
    * Called by KV Queue listener locally, or HTTP handler in Subhosting.
    */
   async handleIncomingMessage(msg: BrokerEnvelope): Promise<void> {
+    assertRuntimeTaskMessage(msg);
+
     try {
       switch (msg.type) {
         case "task_submit":
@@ -144,8 +142,6 @@ export class AgentRuntime {
         case "task_continue":
           await this.handleTaskContinueMessage(msg);
           break;
-        default:
-          log.warn(`Message type ignoré dans runtime : ${msg.type}`);
       }
     } catch (e) {
       log.error("handleIncomingMessage failed", e);
@@ -168,8 +164,10 @@ export class AgentRuntime {
     }
   }
 
-  private async handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void> {
-    const payload = msg.payload as RuntimeTaskSubmitPayload;
+  private async handleTaskSubmitMessage(
+    msg: RuntimeTaskSubmitMessage,
+  ): Promise<void> {
+    const payload = msg.payload;
     const inputText = this.extractTextFromMessage(payload.message);
     log.info(`Tâche canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`);
 
@@ -185,8 +183,10 @@ export class AgentRuntime {
     });
   }
 
-  private async handleTaskContinueMessage(msg: BrokerEnvelope): Promise<void> {
-    const payload = msg.payload as RuntimeTaskContinuePayload;
+  private async handleTaskContinueMessage(
+    msg: RuntimeTaskContinueMessage,
+  ): Promise<void> {
+    const payload = msg.payload;
     const existing = await this.getCanonicalTaskPort().getTask(payload.taskId);
     if (!existing) {
       throw new DenoClawError(

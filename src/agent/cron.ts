@@ -11,6 +11,16 @@ import { generateId } from "../shared/helpers.ts";
 export class CronManager {
   private jobs = new Map<string, CronJob>();
   private kv: Deno.Kv | null = null;
+  private ownsKv: boolean;
+
+  constructor(kv?: Deno.Kv) {
+    if (kv) {
+      this.kv = kv;
+      this.ownsKv = false;
+    } else {
+      this.ownsKv = true;
+    }
+  }
 
   private async getKv(): Promise<Deno.Kv> {
     if (!this.kv) this.kv = await Deno.openKv();
@@ -89,7 +99,7 @@ export class CronManager {
   }
 
   close(): void {
-    if (this.kv) {
+    if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
     }

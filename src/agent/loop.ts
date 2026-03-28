@@ -22,6 +22,8 @@ import { SkillsLoader } from "./skills.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
+import type { WorkspaceContext } from "./tools/file.ts";
+import { join } from "@std/path";
 import { WebFetchTool } from "./tools/web.ts";
 import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
@@ -64,6 +66,21 @@ export interface AgentLoopDeps {
   taskId?: string;
   contextId?: string;
   agentId?: string;
+  workspaceDir?: string;
+  workspaceKv?: Deno.Kv;
+}
+
+async function listMemoryFiles(workspaceDir: string): Promise<string[]> {
+  const memoriesDir = join(workspaceDir, "memories");
+  try {
+    const files: string[] = [];
+    for await (const entry of Deno.readDir(memoriesDir)) {
+      if (entry.isFile && entry.name.endsWith(".md")) files.push(entry.name);
+    }
+    return files.sort();
+  } catch {
+    return [];
+  }
 }
 
 export class AgentLoop implements AgentLoopLike {
@@ -80,6 +97,8 @@ export class AgentLoop implements AgentLoopLike {
   private contextId: string | undefined;
   private agentId: string;
   private sessionId: string;
+  private workspaceDir: string | undefined;
+  private memoryFiles: string[] = [];
 
   constructor(
     sessionId: string,
@@ -108,8 +127,9 @@ export class AgentLoop implements AgentLoopLike {
     this.contextId = deps?.contextId ?? deps?.taskId;
     this.agentId = deps?.agentId ?? sessionId;
     this.sessionId = sessionId;
+    this.workspaceDir = deps?.workspaceDir;
 
-    if (!deps?.tools) this.registerBuiltInTools(config);
+    if (!deps?.tools) this.registerBuiltInTools(config, deps);
     if (deps?.sendToAgent) {
       this.tools.register(
         new SendToAgentTool(deps.sendToAgent, deps.availablePeers),
@@ -128,11 +148,21 @@ export class AgentLoop implements AgentLoopLike {
     }
   }
 
-  private registerBuiltInTools(config: AgentLoopConfig): void {
+  private registerBuiltInTools(
+    config: AgentLoopConfig,
+    deps?: AgentLoopDeps,
+  ): void {
     const t = config.tools;
     this.tools.register(new ShellTool(t?.restrictToWorkspace));
-    this.tools.register(new ReadFileTool());
-    this.tools.register(new WriteFileTool());
+    const wsCtx: WorkspaceContext | undefined = deps?.workspaceDir
+      ? {
+        workspaceDir: deps.workspaceDir,
+        agentId: this.agentId,
+        kv: deps.workspaceKv,
+      }
+      : undefined;
+    this.tools.register(new ReadFileTool(wsCtx));
+    this.tools.register(new WriteFileTool(wsCtx));
     this.tools.register(new WebFetchTool());
   }
 
@@ -142,6 +172,9 @@ export class AgentLoop implements AgentLoopLike {
     await this.memory.load();
     await this.skills.loadSkills();
     this.memoryTopics = await this.memory.listTopics();
+    if (this.workspaceDir) {
+      this.memoryFiles = await listMemoryFiles(this.workspaceDir);
+    }
   }
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
@@ -194,6 +227,7 @@ export class AgentLoop implements AgentLoopLike {
               skillsList,
               toolDefs,
               this.memoryTopics,
+              this.memoryFiles,
             );
 
             const CHARS_PER_TOKEN = 4;

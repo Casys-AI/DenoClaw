@@ -12,12 +12,14 @@ export class ContextBuilder {
   /**
    * @param now — explicit timestamp for AX-6 determinism. Defaults to current time.
    * @param memoryTopics — topics in long-term memory, injected so the agent knows what it remembers.
+   * @param memoryFiles — workspace memory .md files the agent can read/write.
    */
   buildSystemPrompt(
     skills: Skill[],
     tools: ToolDefinition[],
     now: Date = new Date(),
     memoryTopics?: string[],
+    memoryFiles?: string[],
   ): string {
     const parts: string[] = [];
 
@@ -33,6 +35,18 @@ export class ContextBuilder {
       );
       parts.push(
         "Use the memory tool with action 'recall' to retrieve facts, or 'remember' to store new ones.",
+      );
+    }
+
+    if (memoryFiles && memoryFiles.length > 0) {
+      parts.push("\n## Memory Files");
+      parts.push(
+        `You have ${memoryFiles.length} memory file(s): ${
+          memoryFiles.join(", ")
+        }`,
+      );
+      parts.push(
+        "Use read_file/write_file to access them (e.g., read_file({path: \"memories/project.md\"})).",
       );
     }
 
@@ -73,6 +87,7 @@ Guidelines:
     skills: Skill[],
     tools: ToolDefinition[],
     memoryTopics?: string[],
+    memoryFiles?: string[],
   ): Message[] {
     return [
       {
@@ -82,6 +97,7 @@ Guidelines:
           tools,
           new Date(),
           memoryTopics,
+          memoryFiles,
         ),
       },
       ...conversation,

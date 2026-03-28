@@ -4,6 +4,7 @@ import {
   fileExists,
   getAgentConfigPath,
   getAgentDefDir,
+  getAgentMemoriesDir,
   getAgentMemoryPath,
   getAgentSkillsDir,
   getAgentSoulPath,
@@ -74,6 +75,7 @@ export class WorkspaceLoader {
     }
 
     await ensureDir(getAgentSkillsDir(agentId));
+    await ensureDir(getAgentMemoriesDir(agentId));
     log.info(`Workspace créé : ${agentId}`);
   }
 

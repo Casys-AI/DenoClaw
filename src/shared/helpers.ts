@@ -57,6 +57,10 @@ export function getAgentSkillsDir(agentId: string): string {
   return join(getAgentDefDir(agentId), "skills");
 }
 
+export function getAgentMemoriesDir(agentId: string): string {
+  return join(getAgentDefDir(agentId), "memories");
+}
+
 // ── Agent paths: runtime (machine-level, not versioned) ──
 
 export function getAgentRuntimeDir(agentId: string): string {

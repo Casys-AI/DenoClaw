@@ -3,26 +3,18 @@
  * These envelopes describe broker-level routing metadata; transport remains environment-dependent.
  */
 
-import type { SandboxPermission } from "../shared/types.ts";
+import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import type {
+  SandboxPermission,
+  StructuredError,
+} from "../shared/types.ts";
 
-// ── Message envelope ─────────────────────────────────────
-
-export type BrokerMessageType =
-  | "llm_request"
-  | "llm_response"
-  | "tool_request"
-  | "tool_response"
-  | "agent_message"
-  | "agent_response"
-  | "heartbeat"
-  | "error";
-
-export interface BrokerMessage {
+interface BrokerEnvelopeBase<TType extends string, TPayload> {
   id: string;
   from: string;
   to: string;
-  type: BrokerMessageType;
-  payload: unknown;
+  type: TType;
+  payload: TPayload;
   timestamp: string;
 }
 
@@ -63,18 +55,112 @@ export interface ToolRequest {
 export interface ToolResponsePayload {
   success: boolean;
   output: string;
-  error?: {
-    code: string;
-    context?: Record<string, unknown>;
-    recovery?: string;
-  };
+  error?: StructuredError;
 }
 
-// ── Inter-agent ──────────────────────────────────────────
+// ── Inter-agent bridge metadata ──────────────────────────
 
 export interface AgentMessagePayload {
+  targetAgent?: string;
   instruction: string;
   data?: unknown;
+  taskId?: string;
+  contextId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentResponsePayload {
+  accepted: true;
+  targetAgent: string;
+  taskId?: string;
+  contextId?: string;
+}
+
+// ── Canonical task operations ────────────────────────────
+
+export interface BrokerTaskSubmitPayload {
+  targetAgent: string;
+  taskId: string;
+  message: A2AMessage;
+  contextId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrokerTaskContinuePayload {
+  taskId: string;
+  message: A2AMessage;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrokerTaskQueryPayload {
+  taskId: string;
+}
+
+export interface BrokerTaskResultPayload {
+  task: Task | null;
+}
+
+// ── Message envelope union ───────────────────────────────
+
+export type BrokerLLMRequestMessage = BrokerEnvelopeBase<"llm_request", LLMRequest>;
+export type BrokerLLMResponseMessage = BrokerEnvelopeBase<
+  "llm_response",
+  LLMResponsePayload
+>;
+export type BrokerToolRequestMessage = BrokerEnvelopeBase<"tool_request", ToolRequest>;
+export type BrokerToolResponseMessage = BrokerEnvelopeBase<
+  "tool_response",
+  ToolResponsePayload
+>;
+export type BrokerAgentMessage = BrokerEnvelopeBase<"agent_message", AgentMessagePayload>;
+export type BrokerAgentResponseMessage = BrokerEnvelopeBase<
+  "agent_response",
+  AgentResponsePayload
+>;
+export type BrokerTaskSubmitMessage = BrokerEnvelopeBase<
+  "task_submit",
+  BrokerTaskSubmitPayload
+>;
+export type BrokerTaskContinueMessage = BrokerEnvelopeBase<
+  "task_continue",
+  BrokerTaskContinuePayload
+>;
+export type BrokerTaskGetMessage = BrokerEnvelopeBase<"task_get", BrokerTaskQueryPayload>;
+export type BrokerTaskCancelMessage = BrokerEnvelopeBase<
+  "task_cancel",
+  BrokerTaskQueryPayload
+>;
+export type BrokerTaskResultMessage = BrokerEnvelopeBase<
+  "task_result",
+  BrokerTaskResultPayload
+>;
+export type BrokerHeartbeatMessage = BrokerEnvelopeBase<
+  "heartbeat",
+  Record<string, never>
+>;
+export type BrokerErrorMessage = BrokerEnvelopeBase<"error", StructuredError>;
+
+export type BrokerMessage =
+  | BrokerLLMRequestMessage
+  | BrokerLLMResponseMessage
+  | BrokerToolRequestMessage
+  | BrokerToolResponseMessage
+  | BrokerAgentMessage
+  | BrokerAgentResponseMessage
+  | BrokerTaskSubmitMessage
+  | BrokerTaskContinueMessage
+  | BrokerTaskGetMessage
+  | BrokerTaskCancelMessage
+  | BrokerTaskResultMessage
+  | BrokerHeartbeatMessage
+  | BrokerErrorMessage;
+
+export type BrokerMessageType = BrokerMessage["type"];
+
+export function isBrokerErrorMessage(
+  message: BrokerMessage,
+): message is BrokerErrorMessage {
+  return message.type === "error";
 }
 
 // ── Tunnel capabilities ──────────────────────────────────

@@ -13,6 +13,12 @@ import {
  */
 export class TaskStore {
   private kv: Deno.Kv | null = null;
+  private ownsKv: boolean;
+
+  constructor(kv?: Deno.Kv) {
+    this.kv = kv ?? null;
+    this.ownsKv = !kv;
+  }
 
   private async getKv(): Promise<Deno.Kv> {
     if (!this.kv) this.kv = await Deno.openKv();
@@ -106,7 +112,7 @@ export class TaskStore {
   }
 
   close(): void {
-    if (this.kv) {
+    if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
     }

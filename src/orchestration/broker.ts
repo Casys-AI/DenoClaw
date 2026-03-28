@@ -1,10 +1,16 @@
 import type {
+  AgentMessagePayload,
   BrokerMessage,
-  LLMRequest,
-  ToolRequest,
+  BrokerTaskContinuePayload,
+  BrokerTaskQueryPayload,
+  BrokerTaskSubmitPayload,
   TunnelCapabilities,
 } from "./types.ts";
-import type { AgentEntry, SandboxPermission } from "../shared/types.ts";
+import type {
+  AgentEntry,
+  SandboxPermission,
+  StructuredError,
+} from "../shared/types.ts";
 import type { Config } from "../config/types.ts";
 import type { BuiltinToolName } from "../agent/tools/types.ts";
 import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
@@ -16,6 +22,10 @@ import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { createSSEResponse } from "./monitoring.ts";
 import { log } from "../shared/log.ts";
+import { TaskStore } from "../messaging/a2a/tasks.ts";
+import { transitionTask } from "../messaging/a2a/internal_contract.ts";
+import { getResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
+import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -30,6 +40,8 @@ export interface BrokerServerDeps {
   providers?: ProviderManager;
   sandbox?: SandboxManager;
   metrics?: MetricsCollector;
+  kv?: Deno.Kv;
+  taskStore?: TaskStore;
 }
 
 export class BrokerServer {
@@ -39,6 +51,8 @@ export class BrokerServer {
   private sandbox: SandboxManager;
   private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
+  private ownsKv: boolean;
+  private taskStore: TaskStore;
   private tunnels = new Map<
     string,
     { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }
@@ -50,6 +64,9 @@ export class BrokerServer {
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
     this.sandbox = deps?.sandbox ?? new SandboxManager();
     this.metrics = deps?.metrics ?? new MetricsCollector();
+    this.kv = deps?.kv ?? null;
+    this.ownsKv = !deps?.kv;
+    this.taskStore = deps?.taskStore ?? new TaskStore(deps?.kv);
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -107,6 +124,18 @@ export class BrokerServer {
         case "agent_message":
           await this.handleAgentMessage(msg);
           break;
+        case "task_submit":
+          await this.handleTaskSubmit(msg);
+          break;
+        case "task_get":
+          await this.handleTaskGet(msg);
+          break;
+        case "task_continue":
+          await this.handleTaskContinue(msg);
+          break;
+        case "task_cancel":
+          await this.handleTaskCancel(msg);
+          break;
         default:
           log.warn(`Type de message inconnu : ${msg.type}`);
       }
@@ -134,8 +163,10 @@ export class BrokerServer {
 
   // ── LLM Proxy ───────────────────────────────────────
 
-  private async handleLLMRequest(msg: BrokerMessage): Promise<void> {
-    const req = msg.payload as LLMRequest;
+  private async handleLLMRequest(
+    msg: Extract<BrokerMessage, { type: "llm_request" }>,
+  ): Promise<void> {
+    const req = msg.payload;
     const kv = await this.getKv();
 
     // Check if model is a CLI provider → route to tunnel
@@ -206,8 +237,10 @@ export class BrokerServer {
     };
   }
 
-  private async handleToolRequest(msg: BrokerMessage): Promise<void> {
-    const req = msg.payload as ToolRequest;
+  private async handleToolRequest(
+    msg: Extract<BrokerMessage, { type: "tool_request" }>,
+  ): Promise<void> {
+    const req = msg.payload;
 
     // 1. Check permissions (intersection tool × agent) — deny by default (ADR-005)
     const { granted, denied, agentConfig } = await this.checkToolPermissions(
@@ -373,79 +406,240 @@ console.log(await r.text());`;
 
   // ── Inter-agent routing (ADR-006: A2A + peers check) ─
 
-  private async handleAgentMessage(msg: BrokerMessage): Promise<void> {
-    const payload = msg.payload as {
-      targetAgent: string;
-      instruction: string;
-      data?: unknown;
+  private async handleAgentMessage(
+    msg: Extract<BrokerMessage, { type: "agent_message" }>,
+  ): Promise<void> {
+    const payload = msg.payload;
+    if (!payload.targetAgent) {
+      throw new DenoClawError(
+        "INVALID_AGENT_MESSAGE",
+        { from: msg.from, payload },
+        "Provide targetAgent when routing via broker",
+      );
+    }
+    await this.routeAgentMessage(msg.from, payload.targetAgent, payload);
+    await this.sendAgentAck(msg.from, msg.id, payload.targetAgent, {
+      taskId: payload.taskId,
+      contextId: payload.contextId,
+    });
+  }
+
+  private async handleTaskSubmit(
+    msg: Extract<BrokerMessage, { type: "task_submit" }>,
+  ): Promise<void> {
+    const task = await this.submitAgentTask(msg.from, msg.payload);
+    await this.sendTaskResult(msg.from, msg.id, task);
+  }
+
+  private async handleTaskGet(
+    msg: Extract<BrokerMessage, { type: "task_get" }>,
+  ): Promise<void> {
+    const task = await this.getTask(msg.payload);
+    await this.sendTaskResult(msg.from, msg.id, task);
+  }
+
+  private async handleTaskContinue(
+    msg: Extract<BrokerMessage, { type: "task_continue" }>,
+  ): Promise<void> {
+    const task = await this.continueAgentTask(msg.from, msg.payload);
+    await this.sendTaskResult(msg.from, msg.id, task);
+  }
+
+  private async handleTaskCancel(
+    msg: Extract<BrokerMessage, { type: "task_cancel" }>,
+  ): Promise<void> {
+    const task = await this.cancelTask(msg.payload);
+    await this.sendTaskResult(msg.from, msg.id, task);
+  }
+
+  async submitAgentTask(
+    fromAgentId: string,
+    payload: BrokerTaskSubmitPayload,
+  ): Promise<Task> {
+    await this.assertPeerAccess(fromAgentId, payload.targetAgent);
+
+    const task = await this.taskStore.create(
+      payload.taskId,
+      payload.message,
+      payload.contextId,
+    );
+
+    const persistedTask = await this.persistTaskMetadata(task, {
+      submittedBy: fromAgentId,
+      targetAgent: payload.targetAgent,
+      ...(payload.metadata ? { request: payload.metadata } : {}),
+    });
+
+    await this.routeAgentMessage(fromAgentId, payload.targetAgent, {
+      instruction: this.extractInstruction(payload.message),
+      data: payload.metadata,
+      taskId: persistedTask.id,
+      contextId: persistedTask.contextId,
+      metadata: {
+        bridge: "legacy-agent_message",
+      },
+    });
+
+    return persistedTask;
+  }
+
+  async getTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
+    return await this.taskStore.get(payload.taskId);
+  }
+
+  async continueAgentTask(
+    fromAgentId: string,
+    payload: BrokerTaskContinuePayload,
+  ): Promise<Task | null> {
+    const existing = await this.taskStore.get(payload.taskId);
+    if (!existing) return null;
+
+    const brokerMetadata = this.getTaskBrokerMetadata(existing);
+    const targetAgentId = typeof brokerMetadata.targetAgent === "string"
+      ? brokerMetadata.targetAgent
+      : undefined;
+    if (targetAgentId) {
+      await this.assertPeerAccess(fromAgentId, targetAgentId);
+    }
+
+    const resume = getResumePayloadMetadata({ metadata: payload.metadata });
+    if (resume?.approved === false) {
+      const rejected = transitionTask(existing, "REJECTED", {
+        message: payload.message,
+        metadata: payload.metadata,
+      });
+      await this.writeTask(rejected);
+      return rejected;
+    }
+
+    const resumed = transitionTask(existing, "WORKING", {
+      message: payload.message,
+      metadata: payload.metadata,
+    });
+    resumed.history = [...existing.history, payload.message];
+    await this.writeTask(resumed);
+    return resumed;
+  }
+
+  async cancelTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
+    return await this.taskStore.cancel(payload.taskId);
+  }
+
+  private async persistTaskMetadata(
+    task: Task,
+    brokerMetadata: Record<string, unknown>,
+  ): Promise<Task> {
+    const nextTask: Task = {
+      ...task,
+      metadata: {
+        ...(task.metadata ?? {}),
+        broker: brokerMetadata,
+      },
     };
+    await this.writeTask(nextTask);
+    return nextTask;
+  }
+
+  private async writeTask(task: Task): Promise<void> {
+    const kv = await this.getKv();
+    await kv.set(["a2a_tasks", task.id], task);
+  }
+
+  private getTaskBrokerMetadata(task: Task): Record<string, unknown> {
+    const metadata = task.metadata?.broker;
+    return typeof metadata === "object" && metadata !== null
+      ? metadata as Record<string, unknown>
+      : {};
+  }
+
+  private async assertPeerAccess(
+    fromAgentId: string,
+    targetAgentId: string,
+  ): Promise<void> {
     const kv = await this.getKv();
 
-    // Vérifier les peers (fermé par défaut)
     const senderConfig = await kv.get<AgentEntry>([
       "agents",
-      msg.from,
+      fromAgentId,
       "config",
     ]);
     const targetConfig = await kv.get<AgentEntry>([
       "agents",
-      payload.targetAgent,
+      targetAgentId,
       "config",
     ]);
 
-    // Sender doit avoir target dans ses peers
     const senderPeers = senderConfig.value?.peers || [];
-    if (
-      !senderPeers.includes(payload.targetAgent) && !senderPeers.includes("*")
-    ) {
-      await this.sendStructuredError(msg.from, msg.id, {
-        code: "PEER_NOT_ALLOWED",
-        context: { from: msg.from, to: payload.targetAgent, senderPeers },
-        recovery: `Add "${payload.targetAgent}" to ${msg.from}.peers`,
-      });
-      return;
+    if (!senderPeers.includes(targetAgentId) && !senderPeers.includes("*")) {
+      throw new DenoClawError(
+        "PEER_NOT_ALLOWED",
+        { from: fromAgentId, to: targetAgentId, senderPeers },
+        `Add "${targetAgentId}" to ${fromAgentId}.peers`,
+      );
     }
 
-    // Target doit accepter de sender
     const targetAccept = targetConfig.value?.acceptFrom || [];
-    if (!targetAccept.includes(msg.from) && !targetAccept.includes("*")) {
-      await this.sendStructuredError(msg.from, msg.id, {
-        code: "PEER_REJECTED",
-        context: {
-          from: msg.from,
-          to: payload.targetAgent,
+    if (!targetAccept.includes(fromAgentId) && !targetAccept.includes("*")) {
+      throw new DenoClawError(
+        "PEER_REJECTED",
+        {
+          from: fromAgentId,
+          to: targetAgentId,
           targetAcceptFrom: targetAccept,
         },
-        recovery: `Add "${msg.from}" to ${payload.targetAgent}.acceptFrom`,
-      });
-      return;
+        `Add "${fromAgentId}" to ${targetAgentId}.acceptFrom`,
+      );
     }
+  }
 
-    const forwarded: BrokerMessage = {
+  private async routeAgentMessage(
+    fromAgentId: string,
+    targetAgentId: string,
+    payload: AgentMessagePayload,
+  ): Promise<void> {
+    const kv = await this.getKv();
+    await this.assertPeerAccess(fromAgentId, targetAgentId);
+
+    const forwarded: Extract<BrokerMessage, { type: "agent_message" }> = {
       id: generateId(),
-      from: msg.from,
-      to: payload.targetAgent,
+      from: fromAgentId,
+      to: targetAgentId,
       type: "agent_message",
-      payload: { instruction: payload.instruction, data: payload.data },
+      payload: {
+        instruction: payload.instruction,
+        data: payload.data,
+        taskId: payload.taskId,
+        contextId: payload.contextId,
+        metadata: payload.metadata,
+      },
       timestamp: new Date().toISOString(),
     };
 
-    // Record agent-to-agent metrics
-    await this.metrics.recordAgentMessage(msg.from, payload.targetAgent);
+    await this.metrics.recordAgentMessage(fromAgentId, targetAgentId);
 
-    // Check if target agent is on a remote instance (via instance tunnel)
-    const remoteTunnel = this.findTunnelForAgent(payload.targetAgent);
+    const remoteTunnel = this.findTunnelForAgent(targetAgentId);
     if (remoteTunnel) {
       remoteTunnel.send(JSON.stringify(forwarded));
       log.info(
-        `A2A routé via tunnel instance : ${msg.from} → ${payload.targetAgent}`,
+        `A2A routé via tunnel instance : ${fromAgentId} → ${targetAgentId}`,
       );
       return;
     }
 
-    // Local agent — route via KV Queue
     await kv.enqueue(forwarded);
-    log.info(`A2A routé local : ${msg.from} → ${payload.targetAgent}`);
+    log.info(`A2A routé local : ${fromAgentId} → ${targetAgentId}`);
+  }
+
+  private extractInstruction(message: A2AMessage): string {
+    const text = message.parts
+      .filter((part): part is Extract<typeof part, { kind: "text" }> =>
+        part.kind === "text"
+      )
+      .map((part) => part.text)
+      .join("\n")
+      .trim();
+
+    return text || "[non-text task payload]";
   }
 
   // ── Tunnel management ───────────────────────────────
@@ -720,17 +914,53 @@ console.log(await r.text());`;
 
   // ── Helpers ─────────────────────────────────────────
 
+  private async sendTaskResult(
+    to: string,
+    requestId: string,
+    task: Task | null,
+  ): Promise<void> {
+    const kv = await this.getKv();
+    const reply: Extract<BrokerMessage, { type: "task_result" }> = {
+      id: requestId,
+      from: "broker",
+      to,
+      type: "task_result",
+      payload: { task },
+      timestamp: new Date().toISOString(),
+    };
+    await kv.enqueue(reply);
+  }
+
+  private async sendAgentAck(
+    to: string,
+    requestId: string,
+    targetAgent: string,
+    options: { taskId?: string; contextId?: string } = {},
+  ): Promise<void> {
+    const kv = await this.getKv();
+    const reply: Extract<BrokerMessage, { type: "agent_response" }> = {
+      id: requestId,
+      from: "broker",
+      to,
+      type: "agent_response",
+      payload: {
+        accepted: true,
+        targetAgent,
+        taskId: options.taskId,
+        contextId: options.contextId,
+      },
+      timestamp: new Date().toISOString(),
+    };
+    await kv.enqueue(reply);
+  }
+
   private async sendStructuredError(
     to: string,
     requestId: string,
-    error: {
-      code: string;
-      context?: Record<string, unknown>;
-      recovery?: string;
-    },
+    error: StructuredError,
   ): Promise<void> {
     const kv = await this.getKv();
-    const reply: BrokerMessage = {
+    const reply: Extract<BrokerMessage, { type: "error" }> = {
       id: requestId,
       from: "broker",
       to,
@@ -751,7 +981,8 @@ console.log(await r.text());`;
       }
     }
     this.tunnels.clear();
-    if (this.kv) {
+    this.taskStore.close();
+    if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
     }

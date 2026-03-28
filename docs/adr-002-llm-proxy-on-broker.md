@@ -178,5 +178,5 @@ Chaque tunnel déclare ses capabilities :
 - Le broker stocke les tokens OAuth en KV (ou Secret Manager) — rotation
   automatique possible
 - Les agents ont une interface unique : `broker.complete()` pour le LLM,
-  `broker.toolExec()` pour les outils, `broker.sendToAgent()` pour
+  `broker.toolExec()` pour les outils, `broker.submitTask()` / `broker.sendTextTask()` pour
   l'inter-agents

@@ -54,7 +54,7 @@ Plan written against repository state:
   - `legacyReplyTarget` removed — all execution paths are canonical task flows
   - `executeConversation` now requires `canonicalTask` (no more nullable)
 
-- **internal_mapping.ts → task_mapping.ts**
+- **task_mapping.ts → task_mapping.ts**
   - renamed to `task_mapping.ts` (honest name)
   - removed boundary violation (`worker_protocol.ts` import)
   - `LocalTextInput` → standalone `TaskTextInput` (no agent/ dependency)
@@ -354,7 +354,7 @@ git commit -m "feat: propagate a2a task correlation ids through runtime"
 ### Task 3.1: Add local A2A execution mapping helpers
 
 **Files:**
-- Create: `src/messaging/a2a/internal_mapping.ts`
+- Create: `src/messaging/a2a/task_mapping.ts`
 - Create: `src/messaging/a2a/internal_mapping_test.ts`
 - Reference: `src/agent/worker_protocol.ts`
 - Reference: `src/orchestration/types.ts`
@@ -381,7 +381,7 @@ Expected: PASS.
 
 **Step 4: Commit**
 ```bash
-git add src/messaging/a2a/internal_mapping.ts src/messaging/a2a/internal_mapping_test.ts
+git add src/messaging/a2a/task_mapping.ts src/messaging/a2a/internal_mapping_test.ts
 git commit -m "feat: add deterministic local-to-a2a mapping helpers"
 ```
 

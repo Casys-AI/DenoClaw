@@ -26,22 +26,34 @@ Inspiré du modèle OpenClaw, le shell n'est plus "libre par défaut". Chaque ag
 déclare une **exec policy** :
 
 ```typescript
-interface ExecPolicy {
-  /** Niveau de sécurité */
-  security: "deny" | "allowlist" | "full";
+interface ExecPolicyBase {
+  ask: "off" | "on-miss" | "always";
+  askFallback?: "deny" | "allowlist";
+}
+
+interface ExecPolicyDeny extends ExecPolicyBase {
+  security: "deny";
+}
+
+interface ExecPolicyFull extends ExecPolicyBase {
+  security: "full";
+  /** Prefixes d'env supplémentaires à filtrer (en plus de LD_*, DYLD_*) */
+  envFilter?: string[];
+}
+
+interface ExecPolicyAllowlist extends ExecPolicyBase {
+  security: "allowlist";
   /** Commandes autorisées (binaires, premier mot) */
   allowedCommands?: string[];
-  /** Commandes explicitement interdites */
+  /** Blocklist par mot-clé — match n'importe où dans la commande */
   deniedCommands?: string[];
-  /** Comportement quand une commande n'est pas dans l'allowlist */
-  ask: "off" | "on-miss" | "always";
-  /** Comportement quand le canal d'approbation est indisponible */
-  askFallback: "deny" | "allowlist";
-  /** Variables d'environnement filtrées du subprocess */
+  /** Prefixes d'env supplémentaires à filtrer (en plus de LD_*, DYLD_*) */
   envFilter?: string[];
-  /** Bloquer les flags d'eval inline (-c, -e) sur les interpréteurs connus */
-  strictInlineEval?: boolean;
+  /** Autoriser les flags d'eval inline (-c, -e) sur les interpréteurs connus (défaut : false = bloqué) */
+  allowInlineEval?: boolean;
 }
+
+type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
 ```
 
 #### Niveaux de sécurité
@@ -94,10 +106,10 @@ Opérateurs détectés :
 
 `sh`, `bash`, `zsh` ne sont **jamais** dans l'allowlist par défaut.
 
-#### `strictInlineEval` — interpréteurs connus
+#### `allowInlineEval` — interpréteurs connus
 
-Quand activé (défaut : `true`), les flags d'évaluation inline sont bloqués même
-si le binaire est dans l'allowlist :
+Quand désactivé (défaut : `false`), les flags d'évaluation inline sont bloqués
+même si le binaire est dans l'allowlist :
 
 ```
 python -c 'import os; ...'    → "-c" détecté sur interpréteur → ❌ REJETÉ (ask si on-miss)
@@ -114,10 +126,11 @@ Interpréteurs surveillés : `python`, `python3`, `node`, `ruby`, `perl`, `deno`
 Le subprocess local filtre ces variables avant exécution :
 
 ```typescript
-const DENIED_ENV_PREFIXES = ["LD_", "DYLD_", "PATH"];
+const DENIED_ENV_PREFIXES = ["LD_", "DYLD_"];
 ```
 
-Empêche l'injection de librairies dynamiques ou le détournement de PATH.
+Empêche l'injection de librairies dynamiques. PATH est conservé pour que les
+binaires (`git`, `deno`, etc.) restent trouvables via `Deno.Command`.
 Variable marqueur `DENOCLAW_EXEC=1` injectée pour que les profils shell
 détectent le contexte.
 
@@ -200,7 +213,7 @@ interface SandboxExecResult {
 - Spawn `Deno.Command("deno", ["run", ...flags, "tool_executor.ts", input])`
   (ADR-005 intersection)
 - Exec policy **enforced avant le spawn** : allowlist + opérateurs shell +
-  `strictInlineEval` + ask + env filter
+  `allowInlineEval` + ask + env filter
 - `supportsFullShell: false`
 - Sécurité : isolation crash + timeout + policy. Pas d'isolation OS.
 - `close()` : no-op (pas de ressource persistante)
@@ -213,6 +226,8 @@ interface SandboxExecResult {
 - Exec policy **optionnelle** : peut être `security: "full"` car la VM isole
 - Nécessite `DENO_DEPLOY_TOKEN` + internet
 - `close()` : appelle `sandbox.kill()` pour détruire la VM
+
+**`buildSandboxCode`** — le broker génère le code Deno à exécuter dans la VM via `buildSandboxCode()`. Cette fonction applique les mêmes principes que le `tool_executor.ts` local : `dry_run: true` par défaut (AX #2), exécution directe du binaire sans `sh -c`, sortie structurée sur stdout. Les mêmes garanties de sécurité s'appliquent au code généré pour le cloud qu'au path local.
 
 **Exécution** : identique au local, dans la VM :
 
@@ -316,7 +331,7 @@ vers le backend.
       "allowedCommands": ["git", "deno", "npm", "ls", "cat", "grep"],
       "ask": "on-miss",
       "askFallback": "deny",
-      "strictInlineEval": true
+      "allowInlineEval": false
     }
   }
 }
@@ -452,7 +467,7 @@ Les deux sont indépendants. L'un n'inclut pas l'autre.
 
 - Le `ShellTool` actuel (`sh -c`) est remplacé par une exécution directe du
   binaire en mode local
-- La détection d'opérateurs shell et de `strictInlineEval` ajoute ~50 lignes de
+- La détection d'opérateurs shell et de `allowInlineEval` ajoute ~50 lignes de
   validation
 - Le champ `ExecPolicy` s'ajoute à `SandboxConfig` dans les types partagés
 - Le `ToolRegistry` gagne `close()` pour le lifecycle du backend, cascadé depuis
@@ -471,7 +486,7 @@ Les deux sont indépendants. L'un n'inclut pas l'autre.
 | #  | Principe                 | Application dans cet ADR                                                                                                                 |
 | -- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | 1  | No Verb Overlap          | `security` ≠ `ask` ≠ `askFallback` — champs distincts, sémantiques non ambiguës                                                          |
-| 2  | Safe Defaults            | `security: "allowlist"`, `ask: "on-miss"`, `askFallback: "deny"`, `strictInlineEval: true`, `backend: "local"`                           |
+| 2  | Safe Defaults            | `security: "allowlist"`, `ask: "on-miss"`, `askFallback: "deny"`, `allowInlineEval: false` (bloqué par défaut), `backend: "local"`                           |
 | 3  | Structured Outputs       | `SandboxExecResult` avec `StructuredError` (`code` + `context` + `recovery`)                                                             |
 | 4  | Machine-Readable Errors  | `SANDBOX_UNAVAILABLE`, `EXEC_DENIED`, `SANDBOX_PERMISSION_DENIED` — codes enum                                                           |
 | 5  | Fast Fail Early          | Exec policy vérifié **avant** le spawn, pas dans le subprocess                                                                           |

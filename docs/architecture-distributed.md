@@ -283,6 +283,8 @@ Chaque tunnel déclare au broker ce qu'il expose :
 Le broker maintient un registre des tunnels actifs. Quand un agent demande un
 outil, le broker cherche un tunnel qui a la capability.
 
+BrokerClient délègue à une interface pluggable `BrokerTransport` (`KvQueueTransport` en local, HTTP/SSE sur le réseau).
+
 ## Auth OAuth LLM via tunnel
 
 Quand le Broker utilise le mode OAuth (même flow que Claude CLI / Codex CLI), il
@@ -311,18 +313,17 @@ le Broker qui route via HTTP.
 Autrement dit : **A2A over HTTP + SSE, persisted in KV, correlated by task/context ids.**
 
 ```typescript
-// Agent A veut déléguer une tâche à Agent B — il demande au Broker
-await broker.sendToAgent({
+// Agent A veut déléguer une tâche à Agent B — il soumet une tâche au Broker
+await broker.submitTask({
   to: "agent-b",
-  type: "task",
   payload: { instruction: "Analyse ce fichier", data: "..." },
 });
-// → Le Broker fait HTTP POST vers agent-b.deno.dev avec le message
+// → Le Broker route un message task_submit vers agent-b.deno.dev via HTTP POST
 
-// Agent B reçoit via HTTP (pas listenQueue), traite, répond via le Broker
-await broker.sendToAgent({
+// Agent B reçoit via HTTP (pas listenQueue), traite, continue ou répond via le Broker
+await broker.sendTextTask({
   to: "agent-a",
-  type: "task_result",
+  text: "Analyse terminée",
   payload: { analysis: "..." },
 });
 ```

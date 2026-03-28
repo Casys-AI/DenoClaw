@@ -112,6 +112,12 @@ Un fast path synchrone reste une optimisation, pas le contrat central.
 | network transport | **HTTP + SSE** | A2A over transport réseau, persisted in KV, correlated by task/context ids |
 | observability correlation ids | **`taskId` + `contextId`** | Corrèlent broker, worker, agent, artifacts et traces |
 
+## Notes d'implémentation
+
+### Approbation atomique TOCTOU-safe
+
+Les grants d'approbation humaine sont scopés à la commande exacte + binaire exact, stockés dans le record `pendingResumes` de la métadonnée broker de la tâche. Chaque grant est consommé atomiquement via `kv.atomic().check().set()` — une seule exécution peut consommer un grant donné. Cela empêche les races entre deux demandes d'approbation simultanées sur la même tâche (le wildcard `"*"` couvre le cas d'un grant global, le grant exact par commande est vérifié en premier).
+
 ## Conséquences
 
 ### Positives

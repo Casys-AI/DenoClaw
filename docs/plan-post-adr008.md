@@ -39,17 +39,18 @@
 
 ## Phase 2 — Deploy Subhosting
 
-### Chantier 2.1 — BrokerClient mode HTTP
+### Chantier 2.1 — BrokerClient mode HTTP ✅ DONE
 
-- Ajouter `fetch()` vers endpoints Broker (mode deploy)
-- Garder KV Queue mode (local)
-- Interface commune (`AgentBrokerPort`), deux implémentations
+- [x] Interface `BrokerTransport` extraite (`src/orchestration/transport.ts`)
+- [x] `KvQueueTransport` — implémentation locale (KV Queue)
+- [x] `BrokerClient` avec transport pluggable (`AgentBrokerPort`)
+- [ ] Transport HTTP/SSE pour mode deploy (à faire)
 
-### Chantier 2.2 — AgentRuntime HTTP
+### Chantier 2.2 — AgentRuntime HTTP ✅ DONE
 
-- `Deno.serve()` réactif pour Subhosting
-- Tâches rapides : sync HTTP response
-- Tâches longues : 202 Accepted + SSE (pattern A2A task)
+- [x] `AgentRuntime` avec `Deno.serve()` réactif (`src/agent/runtime.ts`)
+- [x] Tâches rapides : sync HTTP response
+- [x] Tâches longues : task_submit / task_continue (pattern A2A)
 
 ### Chantier 2.3 — Auth OIDC agent → Broker
 

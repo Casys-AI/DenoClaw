@@ -113,7 +113,7 @@ src/
 └── telemetry/      # OpenTelemetry
 docs/
 ├── architecture-distributed.md
-├── adr-001 → adr-008
+├── adr-001 → adr-012
 └── refactor-ddd.md
 ```
 

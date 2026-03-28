@@ -55,7 +55,7 @@ src/agent/           ← shared/, llm/, telemetry/ (NEVER config/, NEVER orchest
 src/messaging/       ← shared/, agent/ (a2a/card only), telemetry/
 src/config/          ← shared/, agent/, llm/, messaging/ (Config aggregate)
 src/orchestration/   ← shared/, agent/, llm/, messaging/, config/, telemetry/
-src/cli/             ← shared/, config/, messaging/ (dynamic import in setup.ts)
+src/cli/             ← shared/, config/, messaging/, orchestration/ (dynamic import in main.ts agent path)
 main.ts              ← everything (entrypoint)
 ```
 
@@ -71,32 +71,37 @@ Hard rules:
 
 ## Build, Test & Development Commands
 
-| Command             | Purpose                         |
-| ------------------- | ------------------------------- |
-| `deno task dev`     | Dev with watch                  |
-| `deno task start`   | Run agent CLI                   |
-| `deno task gateway` | Run gateway server              |
-| `deno task test`    | Run all tests                   |
-| `deno task check`   | Type-check `main.ts` + `mod.ts` |
-| `deno task lint`    | Lint                            |
-| `deno task fmt`     | Format                          |
+| Command                  | Purpose                         |
+| ------------------------ | ------------------------------- |
+| `deno task dev`          | Dev with watch                  |
+| `deno task start`        | Run agent CLI                   |
+| `deno task gateway`      | Run gateway server              |
+| `deno task test`         | Run all tests                   |
+| `deno task check`        | Type-check `main.ts` + `mod.ts` |
+| `deno task lint`         | Lint                            |
+| `deno task fmt`          | Format                          |
+| `deno task dashboard`    | Vite dashboard dev              |
+| `deno task sync-agents`  | Sync agent configs to Deploy    |
 
 All commands require `--unstable-kv --unstable-cron`. Already configured in
 `deno.json` tasks.
 
 ## CLI Flags / Config
 
-| Flag / Var           | Purpose                                |
-| -------------------- | -------------------------------------- |
-| `-m, --message`      | Send a single message                  |
-| `-s, --session`      | Session ID (default: "default")        |
-| `--model`            | Override LLM model                     |
-| `ANTHROPIC_API_KEY`  | Anthropic API key                      |
-| `OPENAI_API_KEY`     | OpenAI API key                         |
-| `OLLAMA_API_KEY`     | Ollama Cloud API key                   |
-| `DENOCLAW_API_TOKEN` | Gateway auth token                     |
-| `LOG_LEVEL`          | Logger level: debug, info, warn, error |
-| `OTEL_DENO`          | Enable OpenTelemetry (`1` to activate) |
+| Flag / Var                       | Purpose                                         |
+| -------------------------------- | ----------------------------------------------- |
+| `-m, --message`                  | Send a single message                           |
+| `-s, --session`                  | Session ID (default: "default")                 |
+| `--model`                        | Override LLM model                              |
+| `ANTHROPIC_API_KEY`              | Anthropic API key                               |
+| `OPENAI_API_KEY`                 | OpenAI API key                                  |
+| `OLLAMA_API_KEY`                 | Ollama Cloud API key                            |
+| `DENOCLAW_API_TOKEN`             | Gateway auth token                              |
+| `LOG_LEVEL`                      | Logger level: debug, info, warn, error          |
+| `OTEL_DENO`                      | Enable OpenTelemetry (`1` to activate)          |
+| `GITHUB_CLIENT_ID`               | GitHub OAuth app client ID (dashboard auth)     |
+| `GITHUB_CLIENT_SECRET`           | GitHub OAuth app client secret (dashboard auth) |
+| `DENOCLAW_DASHBOARD_AUTH_MODE`   | Dashboard auth mode: `github`, `token`, `none`  |
 
 ## Git & CI/CD
 
@@ -158,7 +163,8 @@ All commands require `--unstable-kv --unstable-cron`. Already configured in
 User → Channel (Telegram/Webhook) → Broker → HTTP POST → Agent (Subhosting)
 Agent → Broker (llm_request) → LLM API or CLI on VPS → Broker → Agent
 Agent → Broker (tool_request) → Sandbox or Tunnel → Broker → Agent
-Agent → Broker (agent_message) → peer check → HTTP POST or Tunnel → Target Agent
+Agent → Broker (task_submit) → peer check → HTTP POST or Tunnel → Target Agent
+Agent → Broker (task_continue) → peer check → HTTP POST or Tunnel → Target Agent
 Broker → Deno.cron() → HTTP POST /cron/:job → Agent (Subhosting)  [scheduled tasks]
 ```
 
@@ -271,26 +277,35 @@ All tests must pass before pushing (`deno task test` + `deno task lint` +
 
 See CLI Flags / Config section. Key variables:
 
-| Variable                 | Purpose           | Default                      |
-| ------------------------ | ----------------- | ---------------------------- |
-| `ANTHROPIC_API_KEY`      | Anthropic LLM API | none                         |
-| `OPENAI_API_KEY`         | OpenAI LLM API    | none                         |
-| `OLLAMA_API_KEY`         | Ollama Cloud API  | none                         |
-| `DENOCLAW_API_TOKEN`     | Gateway auth      | none (no auth in local mode) |
-| `LOG_LEVEL`              | Logger verbosity  | `info`                       |
-| `OTEL_DENO`              | Enable OTEL       | disabled                     |
-| `DENO_SANDBOX_API_TOKEN` | Sandbox API       | none                         |
+| Variable                         | Purpose                          | Default                      |
+| -------------------------------- | -------------------------------- | ---------------------------- |
+| `ANTHROPIC_API_KEY`              | Anthropic LLM API                | none                         |
+| `OPENAI_API_KEY`                 | OpenAI LLM API                   | none                         |
+| `OLLAMA_API_KEY`                 | Ollama Cloud API                 | none                         |
+| `DENOCLAW_API_TOKEN`             | Gateway auth                     | none (no auth in local mode) |
+| `LOG_LEVEL`                      | Logger verbosity                 | `info`                       |
+| `OTEL_DENO`                      | Enable OTEL                      | disabled                     |
+| `DENO_SANDBOX_API_TOKEN`         | Sandbox API                      | none                         |
+| `GITHUB_CLIENT_ID`               | GitHub OAuth app client ID       | none                         |
+| `GITHUB_CLIENT_SECRET`           | GitHub OAuth app client secret   | none                         |
+| `DENOCLAW_DASHBOARD_AUTH_MODE`   | Dashboard auth mode (`github`, `token`, `none`) | `none`    |
 
 ## ADRs
 
-| ADR | Decision                                          |
-| --- | ------------------------------------------------- |
-| 001 | Agents in Subhosting, code execution in Sandbox   |
-| 002 | LLM Proxy dual: API + CLI on VPS, auth via tunnel |
-| 003 | OIDC + credentials materialization                |
-| 004 | GCP Secret Manager via OIDC (optional)            |
-| 005 | Sandbox permissions by intersection               |
-| 006 | A2A protocol for inter-agent communication        |
+| ADR | Decision                                                      |
+| --- | ------------------------------------------------------------- |
+| 001 | Agents in Subhosting, code execution in Sandbox               |
+| 002 | LLM Proxy dual: API + CLI on VPS, auth via tunnel             |
+| 003 | OIDC + credentials materialization                            |
+| 004 | GCP Secret Manager via OIDC (optional)                        |
+| 005 | Sandbox permissions by intersection                           |
+| 006 | A2A protocol for inter-agent communication                    |
+| 007 | Real-time dashboard observability                             |
+| 008 | Subhosting architecture corrections                           |
+| 009 | Agent memory (kvdex dual: KV + .md)                           |
+| 010 | Exec policy and sandbox backend                               |
+| 011 | A2A canonical internal protocol                               |
+| 012 | Agent workspace structure (definition vs runtime)             |
 
 ## Collaboration & Safety Notes
 

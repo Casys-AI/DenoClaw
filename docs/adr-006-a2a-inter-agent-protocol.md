@@ -67,7 +67,7 @@ submitted → working → completed
 | `BrokerMessage` (custom) | JSON-RPC 2.0 `message/send`               |
 | `ChannelMessage`         | A2A `Message` avec `Parts`                |
 | `Skill` type             | A2A `AgentSkill` (+ id, tags, examples)   |
-| KV Queue routing         | Broker route les Tasks A2A entre agents   |
+| KV Queue routing         | Broker route canoniquement via `task_submit`/`task_continue`. KV Queue est un transport local optionnel, pas le mécanisme de routage. |
 | WebSocket streaming      | SSE via `Deno.serve()` + `ReadableStream` |
 
 ## Architecture

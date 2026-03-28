@@ -132,9 +132,10 @@ isole), mais documenter explicitement. Ou appliquer les flags dans la VM aussi.
 ### Design 6 — `filterEnv` strip PATH → les binaires ne sont plus trouvables
 
 Sans PATH, `Deno.Command("git", [...])` ne trouve pas `git`. Les commandes
-échouent avec `COMMAND_EXEC_ERROR` sans explication claire. **Options :** Ne pas
-strip PATH (strip seulement LD__/DYLD__), ou utiliser un PATH restreint
-explicite.
+échouent avec `COMMAND_EXEC_ERROR` sans explication claire. **Fix appliqué :**
+PATH retiré de la liste de refus. `DENIED_ENV_PREFIXES` est désormais
+`["LD_", "DYLD_"]` — seules les variables d'injection de librairies dynamiques
+sont bloquées. PATH est conservé pour que les binaires restent trouvables.
 
 ### Design 7 — `ExecPolicy` devrait être une union discriminée
 

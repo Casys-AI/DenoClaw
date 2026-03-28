@@ -9,6 +9,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../shared/types.ts";
+import type { AgentResponse } from "./types.ts";
 import { BaseTool } from "./tools/registry.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { TraceWriter, type TraceCorrelationIds } from "../telemetry/traces.ts";
@@ -248,6 +249,25 @@ Deno.test({
     }]);
 
     await loop.close();
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "AgentLoop implements the canonical worker task interface shape",
+  fn() {
+    const loop = new AgentLoop("session-interface", minimalConfig);
+
+    const processMessage: (message: string) => Promise<AgentResponse> = loop.processMessage.bind(loop);
+    const maybeAskApproval = (loop as AgentLoop & {
+      askApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
+    }).askApproval;
+
+    assertEquals(typeof processMessage, "function");
+    assertEquals(maybeAskApproval, undefined);
+
+    loop.close();
   },
   sanitizeResources: false,
   sanitizeOps: false,

@@ -5,18 +5,165 @@
  *
  * Le Worker n'écrit JAMAIS dans le shared KV — il émet des messages au main process
  * qui se charge des écritures. Cela rend le Worker transport-agnostic (deploy-compatible).
+ *
+ * Task 3.2: All local worker execution now routes through canonical A2A task semantics
+ * via executeCanonicalWorkerTask(). The "process" handler delegates to this function,
+ * which wraps AgentLoop in a canonical task lifecycle (SUBMITTED → WORKING → terminal).
  */
 
 import { AgentLoop } from "./loop.ts";
+import type { AgentLoopLike, AgentLoopFactoryContext, AskApprovalFn } from "./loop.ts";
+import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
+import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
+import type { Task } from "../messaging/a2a/types.ts";
+import {
+  mapLocalTextInputToTask,
+  mapTaskResultToCompletion,
+  mapTaskErrorToTerminalStatus,
+  mapApprovalPauseToInputRequiredTask,
+} from "../messaging/a2a/internal_mapping.ts";
+import { assertValidTaskTransition } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
   WorkerRequest,
   WorkerResponse,
 } from "./worker_protocol.ts";
+
+// ── Canonical A2A task execution (Task 3.2) ──────────────
+
+/**
+ * Minimal request shape for canonical task execution.
+ * Maps directly from the worker protocol "process" message.
+ */
+export interface CanonicalWorkerTaskRequest {
+  requestId: string;
+  sessionId: string;
+  message: string;
+  model?: string;
+  traceId?: string;
+  taskId?: string;
+  contextId?: string;
+}
+
+/**
+ * Dependencies injected into executeCanonicalWorkerTask.
+ * Decoupled from Worker globals for testability.
+ */
+export interface CanonicalWorkerTaskDeps {
+  createLoop: (ctx: AgentLoopFactoryContext) => AgentLoopLike;
+  onTaskUpdate?: (task: Task) => void;
+  askApproval?: AskApprovalFn;
+}
+
+/**
+ * Result of canonical task execution — carries both the A2A task
+ * and the original AgentResponse for backward compatibility.
+ */
+export interface CanonicalWorkerTaskResult {
+  task: Task;
+  response?: AgentResponse;
+  error?: { code: string; message: string };
+}
+
+/**
+ * Execute a local worker request through canonical A2A task semantics.
+ *
+ * This is the single execution path for all local worker tasks.
+ * It wraps AgentLoop (or any AgentLoopLike) inside the canonical
+ * task lifecycle: SUBMITTED → WORKING → terminal state.
+ *
+ * Approval pauses surface as INPUT_REQUIRED in the task lifecycle
+ * and are transported via the injected askApproval callback.
+ */
+export async function executeCanonicalWorkerTask(
+  request: CanonicalWorkerTaskRequest,
+  deps: CanonicalWorkerTaskDeps,
+): Promise<CanonicalWorkerTaskResult> {
+  const taskId = request.taskId ?? request.requestId;
+  const contextId = request.contextId ?? request.sessionId;
+
+  // Phase 1: SUBMITTED
+  let task = mapLocalTextInputToTask({
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    message: request.message,
+    taskId,
+    contextId,
+  });
+  deps.onTaskUpdate?.(task);
+
+  // Phase 2: WORKING
+  task = transitionTask(task, "WORKING");
+  deps.onTaskUpdate?.(task);
+
+  // Build approval wrapper that surfaces pauses in A2A lifecycle
+  const wrappedAskApproval: AskApprovalFn | undefined = deps.askApproval
+    ? async (req: ApprovalRequest): Promise<ApprovalResponse> => {
+        // Transition to INPUT_REQUIRED
+        task = mapApprovalPauseToInputRequiredTask(task, {
+          command: req.command,
+          binary: req.binary,
+          prompt: `Awaiting approval for ${req.binary}: ${req.command}`,
+          continuationToken: req.requestId,
+        });
+        deps.onTaskUpdate?.(task);
+
+        // Transport the approval request
+        const response = await deps.askApproval!(req);
+
+        // Resume to WORKING
+        task = transitionTask(task, "WORKING");
+        deps.onTaskUpdate?.(task);
+
+        return response;
+      }
+    : undefined;
+
+  // Create the loop with canonical context
+  const loop = deps.createLoop({
+    sessionId: request.sessionId,
+    model: request.model,
+    traceId: request.traceId,
+    taskId,
+    contextId,
+    askApproval: wrappedAskApproval,
+  });
+
+  try {
+    const response = await loop.processMessage(request.message);
+
+    // Phase 3: COMPLETED
+    task = mapTaskResultToCompletion(task, response.content);
+    deps.onTaskUpdate?.(task);
+
+    return { task, response };
+  } catch (err) {
+    // Phase 3: FAILED or REJECTED
+    task = mapTaskErrorToTerminalStatus(task, err);
+    deps.onTaskUpdate?.(task);
+
+    const message = err instanceof Error ? err.message : String(err);
+    return { task, error: { code: "AGENT_ERROR", message } };
+  } finally {
+    await loop.close();
+  }
+}
+
+function transitionTask(task: Task, newState: Task["status"]["state"]): Task {
+  assertValidTaskTransition(task.status.state, newState);
+  return {
+    ...task,
+    status: {
+      ...task.status,
+      state: newState,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
 
 let agentId = "default";
 let config: WorkerConfig | null = null;
@@ -209,6 +356,7 @@ function createAgentLoop(
   traceId?: string,
   taskId?: string,
   contextId?: string,
+  overrideAskApproval?: AskApprovalFn,
 ): AgentLoop {
   if (!config) {
     throw new AgentError(
@@ -232,7 +380,7 @@ function createAgentLoop(
       sendToAgent: createSendToAgent(taskId, contextId, traceId),
       availablePeers: peers,
       sandboxConfig,
-      askApproval,
+      askApproval: overrideAskApproval ?? askApproval,
       traceWriter: traceWriter ?? undefined,
       traceId,
       taskId,
@@ -272,29 +420,64 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break;
       }
 
+      // Task 3.2: Route through canonical A2A task execution path.
+      // The legacy observability hooks (emitTaskStarted/Completed) are preserved
+      // as a compatibility bridge; they will be replaced by task lifecycle events.
       const traceId = msg.traceId;
       const taskId = msg.taskId ?? msg.requestId;
       const contextId = msg.contextId ?? taskId;
       emitTaskStarted(msg.requestId, msg.sessionId, traceId, taskId, contextId);
 
       try {
-        const loop = createAgentLoop(
-          msg.sessionId,
-          msg.model,
-          msg.traceId,
-          taskId,
-          contextId,
+        const result = await executeCanonicalWorkerTask(
+          {
+            requestId: msg.requestId,
+            sessionId: msg.sessionId,
+            message: msg.message,
+            model: msg.model,
+            traceId: msg.traceId,
+            taskId,
+            contextId,
+          },
+          {
+            createLoop: (ctx) => createAgentLoop(
+              ctx.sessionId,
+              ctx.model,
+              ctx.traceId,
+              ctx.taskId,
+              ctx.contextId,
+              ctx.askApproval,
+            ),
+            askApproval,
+            onTaskUpdate: (task) => {
+              emitAgentTask(
+                task.id,
+                agentId,
+                agentId,
+                msg.message.slice(0, 200),
+                task.status.state.toLowerCase(),
+                undefined,
+                traceId,
+                task.contextId,
+              );
+            },
+          },
         );
-        try {
-          const result = await loop.processMessage(msg.message);
+
+        if (result.response) {
           respond({
             type: "result",
             requestId: msg.requestId,
-            content: result.content,
-            finishReason: result.finishReason,
+            content: result.response.content,
+            finishReason: result.response.finishReason,
           });
-        } finally {
-          await loop.close();
+        } else {
+          respond({
+            type: "error",
+            requestId: msg.requestId,
+            code: result.error?.code ?? "AGENT_ERROR",
+            message: result.error?.message ?? "Unknown error",
+          });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

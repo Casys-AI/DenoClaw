@@ -37,6 +37,20 @@ import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
 
 export type AskApprovalFn = (req: ApprovalRequest) => Promise<ApprovalResponse>;
 
+export interface AgentLoopLike {
+  processMessage(userMessage: string): Promise<AgentResponse>;
+  close(): Promise<void>;
+}
+
+export interface AgentLoopFactoryContext {
+  sessionId: string;
+  model?: string;
+  traceId?: string;
+  taskId: string;
+  contextId: string;
+  askApproval?: AskApprovalFn;
+}
+
 export interface AgentLoopDeps {
   providers?: ProviderManager;
   memory?: MemoryPort;
@@ -52,7 +66,7 @@ export interface AgentLoopDeps {
   agentId?: string;
 }
 
-export class AgentLoop {
+export class AgentLoop implements AgentLoopLike {
   private config: AgentConfig;
   private providers: ProviderManager;
   private memory: MemoryPort;

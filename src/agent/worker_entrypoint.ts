@@ -28,7 +28,7 @@ import {
   mapTaskErrorToTerminalStatus,
   mapApprovalPauseToInputRequiredTask,
 } from "../messaging/a2a/internal_mapping.ts";
-import { assertValidTaskTransition } from "../messaging/a2a/internal_contract.ts";
+import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
   WorkerRequest,
@@ -150,24 +150,18 @@ export async function executeCanonicalWorkerTask(
   }
 }
 
-function transitionTask(task: Task, newState: Task["status"]["state"]): Task {
-  assertValidTaskTransition(task.status.state, newState);
-  return {
-    ...task,
-    status: {
-      ...task.status,
-      state: newState,
-      timestamp: new Date().toISOString(),
-    },
-  };
-}
+const workerGlobal = globalThis as typeof globalThis & {
+  postMessage: (msg: WorkerResponse) => void;
+  onmessage: ((e: MessageEvent<WorkerRequest>) => void | Promise<void>) | null;
+  close: () => void;
+};
 
 let agentId = "default";
 let config: WorkerConfig | null = null;
 let kvPrivatePath: string | undefined;
 let traceWriter: TraceWriter | null = null;
 function respond(msg: WorkerResponse): void {
-  self.postMessage(msg);
+  workerGlobal.postMessage(msg);
 }
 
 // ── Observability — emit to main process (no direct KV writes) ──
@@ -341,7 +335,7 @@ broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
     drainAskPending();
     broadcast.close();
-    self.close();
+    workerGlobal.close();
   }
 };
 
@@ -389,7 +383,7 @@ function createAgentLoop(
 
 // ── Message handler ──────────────────────────────────────
 
-self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
+workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
 
   switch (msg.type) {
@@ -428,6 +422,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       try {
         const result = await executeCanonicalWorkerTask(
           {
+            type: "process",
             requestId: msg.requestId,
             sessionId: msg.sessionId,
             message: msg.message,
@@ -620,7 +615,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     case "shutdown": {
       drainAskPending();
       broadcast.close();
-      self.close();
+      workerGlobal.close();
       break;
     }
   }

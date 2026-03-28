@@ -40,22 +40,22 @@ Deno.test("worker protocol classifies result, error, agent_send, agent_result, a
 // ── Mutual exclusion ─────────────────────────────────────
 
 Deno.test("worker protocol infra and bridge classifications are mutually exclusive for requests", () => {
-  for (const type of ["init", "ask_response", "shutdown"]) {
+  for (const type of ["init", "ask_response", "shutdown"] as const) {
     assertEquals(isInfraRequest(type), true);
     assertEquals(isBridgeRequest(type), false);
   }
-  for (const type of ["process", "agent_deliver", "agent_response"]) {
+  for (const type of ["process", "agent_deliver", "agent_response"] as const) {
     assertEquals(isInfraRequest(type), false);
     assertEquals(isBridgeRequest(type), true);
   }
 });
 
 Deno.test("worker protocol infra and bridge classifications are mutually exclusive for responses", () => {
-  for (const type of ["ready", "ask_approval", "task_started", "task_completed"]) {
+  for (const type of ["ready", "ask_approval", "task_started", "task_completed"] as const) {
     assertEquals(isInfraResponse(type), true);
     assertEquals(isBridgeResponse(type), false);
   }
-  for (const type of ["result", "error", "agent_send", "agent_result", "agent_task"]) {
+  for (const type of ["result", "error", "agent_send", "agent_result", "agent_task"] as const) {
     assertEquals(isInfraResponse(type), false);
     assertEquals(isBridgeResponse(type), true);
   }

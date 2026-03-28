@@ -27,6 +27,7 @@ class StubLoop implements AgentLoopLike {
 
 function createRequest(overrides: Partial<CanonicalWorkerTaskRequest> = {}): CanonicalWorkerTaskRequest {
   return {
+    type: "process",
     requestId: "req-1",
     sessionId: "session-1",
     message: "hello",

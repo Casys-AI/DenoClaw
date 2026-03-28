@@ -1,10 +1,15 @@
 import type { A2AMessage, Artifact, Task, TaskState } from "./types.ts";
-import { TERMINAL_STATES } from "./types.ts";
 import { log } from "../../shared/log.ts";
+import {
+  appendArtifactToTask,
+  createCanonicalTask,
+  isTerminalTaskState,
+  transitionTask,
+} from "./internal_contract.ts";
 
 /**
  * KV-backed Task store for A2A protocol.
- * Manages task lifecycle: SUBMITTED → WORKING → COMPLETED/FAILED.
+ * Manages task lifecycle via the canonical internal A2A contract helpers.
  */
 export class TaskStore {
   private kv: Deno.Kv | null = null;
@@ -21,13 +26,11 @@ export class TaskStore {
   ): Promise<Task> {
     const kv = await this.getKv();
 
-    const task: Task = {
+    const task = createCanonicalTask({
       id: taskId,
+      message,
       contextId,
-      status: { state: "SUBMITTED", timestamp: new Date().toISOString() },
-      artifacts: [],
-      history: [message],
-    };
+    });
 
     await kv.set(["a2a_tasks", taskId], task);
     log.debug(`A2A Task créée : ${taskId}`);
@@ -51,25 +54,19 @@ export class TaskStore {
 
     const task = entry.value;
 
-    // Can't change terminal states
-    if (TERMINAL_STATES.includes(task.status.state)) {
+    if (isTerminalTaskState(task.status.state)) {
       log.warn(
         `A2A Task ${taskId} is in terminal state ${task.status.state}, cannot change to ${state}`,
       );
       return task;
     }
 
-    task.status = {
-      state,
-      message,
-      timestamp: new Date().toISOString(),
-    };
+    const nextTask = transitionTask(task, state, { message });
+    if (message) nextTask.history = [...nextTask.history, message];
 
-    if (message) task.history.push(message);
-
-    await kv.set(["a2a_tasks", taskId], task);
+    await kv.set(["a2a_tasks", taskId], nextTask);
     log.debug(`A2A Task ${taskId} → ${state}`);
-    return task;
+    return nextTask;
   }
 
   async addArtifact(taskId: string, artifact: Artifact): Promise<Task | null> {
@@ -77,10 +74,9 @@ export class TaskStore {
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
     if (!entry.value) return null;
 
-    const task = entry.value;
-    task.artifacts.push(artifact);
-    await kv.set(["a2a_tasks", taskId], task);
-    return task;
+    const nextTask = appendArtifactToTask(entry.value, artifact);
+    await kv.set(["a2a_tasks", taskId], nextTask);
+    return nextTask;
   }
 
   async addMessage(taskId: string, message: A2AMessage): Promise<Task | null> {

@@ -11,7 +11,7 @@ import { log } from "../shared/log.ts";
  * AgentRuntime — runs inside a Deno Subhosting deployment.
  *
  * This is the orchestrator:
- * - Listens for messages via KV Queues
+ * - Starts the broker-facing runtime port (transport decided by AgentBrokerPort)
  * - Calls LLM via AgentBrokerPort (never directly)
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
  * - Persists state via MemoryPort (KvdexMemory by default)

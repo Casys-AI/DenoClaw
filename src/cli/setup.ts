@@ -310,8 +310,8 @@ export async function publishAgent(): Promise<void> {
     print(`
 ✓ Agent "${agentName}" publié sur Subhosting !
 
-  L'agent écoute les messages via KV Queues.
-  Il communique avec le broker pour les LLM calls et tool execution.
+  L'agent expose un runtime piloté par le broker.
+  Il communique avec le broker pour les appels LLM, l'exécution d'outils et la persistance durable.
 
   Pour envoyer un message à cet agent :
     Depuis un autre agent : broker.sendToAgent("${agentName}", "instruction")

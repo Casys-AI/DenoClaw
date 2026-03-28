@@ -1,6 +1,6 @@
 /**
  * Protocol types for Broker ↔ Agent ↔ Tunnel communication.
- * All messages go through KV Queues as JSON.
+ * These envelopes describe broker-level routing metadata; transport remains environment-dependent.
  */
 
 import type { SandboxPermission } from "../shared/types.ts";

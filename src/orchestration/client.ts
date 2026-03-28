@@ -21,7 +21,7 @@ import { log } from "../shared/log.ts";
  * BrokerClient — used by agents in Subhosting to communicate with the Broker on Deploy.
  *
  * In local mode: calls providers/tools directly (pass-through).
- * In Subhosting mode: sends requests via KV Queues to the broker.
+ * In Subhosting mode: uses the broker-facing transport configured for the current runtime.
  */
 export class BrokerClient implements AgentBrokerPort {
   private agentId: string;

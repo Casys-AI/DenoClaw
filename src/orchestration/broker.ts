@@ -30,7 +30,7 @@ import {
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
 import { getResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
-import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import type { Task } from "../messaging/a2a/types.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -485,14 +485,17 @@ console.log(await r.text());`;
       ...(payload.metadata ? { request: payload.metadata } : {}),
     });
 
-    await this.routeAgentMessage(fromAgentId, payload.targetAgent, {
-      instruction: this.extractInstruction(payload.message),
-      data: payload.metadata,
-      taskId: persistedTask.id,
-      contextId: persistedTask.contextId,
-      metadata: {
-        bridge: "legacy-agent_message",
+    await this.routeBrokerMessageToAgent(payload.targetAgent, {
+      id: generateId(),
+      from: fromAgentId,
+      to: payload.targetAgent,
+      type: "task_submit",
+      payload: {
+        ...payload,
+        taskId: persistedTask.id,
+        contextId: persistedTask.contextId,
       },
+      timestamp: new Date().toISOString(),
     });
 
     return persistedTask;
@@ -513,27 +516,43 @@ console.log(await r.text());`;
     const targetAgentId = typeof brokerMetadata.targetAgent === "string"
       ? brokerMetadata.targetAgent
       : undefined;
-    if (targetAgentId) {
-      await this.assertPeerAccess(fromAgentId, targetAgentId);
+    if (!targetAgentId) {
+      throw new DenoClawError(
+        "TASK_TARGET_UNKNOWN",
+        { taskId: existing.id, brokerMetadata },
+        "Broker task metadata is missing targetAgent",
+      );
+    }
+    await this.assertPeerAccess(fromAgentId, targetAgentId);
+
+    if (existing.status.state !== "INPUT_REQUIRED") {
+      throw new DenoClawError(
+        "TASK_NOT_WAITING_FOR_INPUT",
+        { taskId: existing.id, state: existing.status.state },
+        "Only INPUT_REQUIRED tasks can be resumed through broker continuation",
+      );
     }
 
     const resume = getResumePayloadMetadata({ metadata: payload.metadata });
     if (resume?.approved === false) {
       const rejected = transitionTask(existing, "REJECTED", {
         message: payload.message,
-        metadata: payload.metadata,
       });
+      rejected.history = [...existing.history, payload.message];
       await this.writeTask(rejected);
       return rejected;
     }
 
-    const resumed = transitionTask(existing, "WORKING", {
-      message: payload.message,
-      metadata: payload.metadata,
+    await this.routeBrokerMessageToAgent(targetAgentId, {
+      id: generateId(),
+      from: fromAgentId,
+      to: targetAgentId,
+      type: "task_continue",
+      payload,
+      timestamp: new Date().toISOString(),
     });
-    resumed.history = [...existing.history, payload.message];
-    await this.writeTask(resumed);
-    return resumed;
+
+    return existing;
   }
 
   async cancelTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
@@ -688,10 +707,9 @@ console.log(await r.text());`;
     targetAgentId: string,
     payload: AgentMessagePayload,
   ): Promise<void> {
-    const kv = await this.getKv();
     await this.assertPeerAccess(fromAgentId, targetAgentId);
 
-    const forwarded: Extract<BrokerMessage, { type: "agent_message" }> = {
+    await this.routeBrokerMessageToAgent(targetAgentId, {
       id: generateId(),
       from: fromAgentId,
       to: targetAgentId,
@@ -704,33 +722,30 @@ console.log(await r.text());`;
         metadata: payload.metadata,
       },
       timestamp: new Date().toISOString(),
-    };
+    });
+  }
 
-    await this.metrics.recordAgentMessage(fromAgentId, targetAgentId);
+  private async routeBrokerMessageToAgent(
+    targetAgentId: string,
+    message: Extract<BrokerMessage, {
+      type: "agent_message" | "task_submit" | "task_continue"
+    }>,
+  ): Promise<void> {
+    const kv = await this.getKv();
+
+    await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
     const remoteTunnel = this.findTunnelForAgent(targetAgentId);
     if (remoteTunnel) {
-      remoteTunnel.send(JSON.stringify(forwarded));
+      remoteTunnel.send(JSON.stringify(message));
       log.info(
-        `A2A routé via tunnel instance : ${fromAgentId} → ${targetAgentId}`,
+        `A2A routé via tunnel instance : ${message.from} → ${targetAgentId} (${message.type})`,
       );
       return;
     }
 
-    await kv.enqueue(forwarded);
-    log.info(`A2A routé local : ${fromAgentId} → ${targetAgentId}`);
-  }
-
-  private extractInstruction(message: A2AMessage): string {
-    const text = message.parts
-      .filter((part): part is Extract<typeof part, { kind: "text" }> =>
-        part.kind === "text"
-      )
-      .map((part) => part.text)
-      .join("\n")
-      .trim();
-
-    return text || "[non-text task payload]";
+    await kv.enqueue(message);
+    log.info(`A2A routé local : ${message.from} → ${targetAgentId} (${message.type})`);
   }
 
   // ── Tunnel management ───────────────────────────────

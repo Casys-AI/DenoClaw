@@ -54,7 +54,7 @@ function waitForQueuedMessage(
   });
 }
 
-Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards legacy bridge message", async () => {
+Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards canonical task submit", async () => {
   const kvPath = await Deno.makeTempFile({ suffix: ".db" });
   const kv = await Deno.openKv(kvPath);
 
@@ -68,7 +68,7 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards leg
     const forwardedPromise = waitForQueuedMessage(
       kv,
       (message) =>
-        message.type === "agent_message" && message.to === "agent-beta",
+        message.type === "task_submit" && message.to === "agent-beta",
     );
 
     const task = await broker.submitAgentTask("agent-alpha", {
@@ -94,15 +94,17 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards leg
 
     const forwarded = await forwardedPromise as Extract<
       BrokerMessage,
-      { type: "agent_message" }
+      { type: "task_submit" }
     >;
-    assertEquals(forwarded.type, "agent_message");
+    assertEquals(forwarded.type, "task_submit");
     assertEquals(forwarded.payload.taskId, "task-1");
     assertEquals(forwarded.payload.contextId, "ctx-1");
-    assertEquals(forwarded.payload.instruction, "Summarise this");
-    assertEquals(forwarded.payload.metadata, {
-      bridge: "legacy-agent_message",
+    assertEquals(forwarded.payload.targetAgent, "agent-beta");
+    assertEquals(forwarded.payload.message.parts[0], {
+      kind: "text",
+      text: "Summarise this",
     });
+    assertEquals(forwarded.payload.metadata, { source: "test" });
 
     await broker.stop();
   } finally {
@@ -225,7 +227,7 @@ Deno.test("BrokerServer.recordTaskResult rejects updates from non-target agents"
   }
 });
 
-Deno.test("BrokerServer.continueAgentTask resumes paused task and appends history", async () => {
+Deno.test("BrokerServer.continueAgentTask forwards canonical continuation without mutating runtime state locally", async () => {
   const kvPath = await Deno.makeTempFile({ suffix: ".db" });
   const kv = await Deno.openKv(kvPath);
 
@@ -254,6 +256,12 @@ Deno.test("BrokerServer.continueAgentTask resumes paused task and appends histor
     };
     await kv.set(["a2a_tasks", paused.id], paused);
 
+    const forwardedPromise = waitForQueuedMessage(
+      kv,
+      (message) =>
+        message.type === "task_continue" && message.to === "agent-beta",
+    );
+
     const resumed = await broker.continueAgentTask("agent-alpha", {
       taskId: paused.id,
       message: createMessage("Approved, continue"),
@@ -264,10 +272,19 @@ Deno.test("BrokerServer.continueAgentTask resumes paused task and appends histor
     });
 
     assertExists(resumed);
-    assertEquals(resumed?.status.state, "WORKING");
-    assertEquals(resumed?.history.at(-1)?.parts[0], {
+    assertEquals(resumed?.status.state, "INPUT_REQUIRED");
+
+    const forwarded = await forwardedPromise as Extract<
+      BrokerMessage,
+      { type: "task_continue" }
+    >;
+    assertEquals(forwarded.payload.taskId, paused.id);
+    assertEquals(forwarded.payload.message.parts[0], {
       kind: "text",
       text: "Approved, continue",
+    });
+    assertEquals(forwarded.payload.metadata, {
+      resume: { kind: "approval", approved: true },
     });
 
     await broker.stop();
@@ -314,6 +331,10 @@ Deno.test("BrokerServer.continueAgentTask classifies explicit refusal as REJECTE
 
     assertExists(rejected);
     assertEquals(rejected?.status.state, "REJECTED");
+    assertEquals(rejected?.history.at(-1)?.parts[0], {
+      kind: "text",
+      text: "No",
+    });
 
     await broker.stop();
   } finally {

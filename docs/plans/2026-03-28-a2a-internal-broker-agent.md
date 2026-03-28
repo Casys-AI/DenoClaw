@@ -35,27 +35,35 @@ Plan written against repository state:
   - broker → agent initiation now routes canonical `task_submit` / `task_continue` instead of only legacy `agent_message`
   - broker-backed shell approvals now produce canonical `INPUT_REQUIRED` instead of silently bypassing lifecycle truth
 
-### Partially complete / still transitional
-- **Broker-backed pause/resume semantics**
-  - continuation is now canonical from broker to runtime
-  - broker-backed shell approval now emits canonical `INPUT_REQUIRED`
-  - however, approval resume is still implemented as an honest **next-call grant** model, not a true in-call suspended tool invocation resume
-- **Legacy inter-agent messaging path**
-  - `agent_message` still exists for simple text-style inter-agent flows
-  - canonical task flows and legacy message flows still coexist
-- **Transport story**
-  - center of gravity has moved away from queue/RPC thinking
-  - `BrokerClient` still contains request/response legacy machinery (`pendingRequests`) for non-task flows
+- **Approval semantics hardened**
+  - decision: keep one-shot grant model (honest for Subhosting constraints)
+  - grants now scoped to exact command+binary (security fix)
+  - multiple simultaneous approvals per task via `pendingResumes` record
+- **Phase 6 — BrokerClient transport extraction**
+  - `BrokerTransport` interface + `KvQueueTransport` extracted
+  - `BrokerClient` refactored to accept pluggable transport via DI
+  - `pendingRequests` moved from client to transport implementation
+- **Phase 7 — KV Queue demoted**
+  - `AgentRuntime.start()` no longer starts KV Queue intake — `startKvQueueIntake()` for local, HTTP handler for Subhosting
+  - `handleIncomingMessage()` is the canonical transport-agnostic entry point
+  - `MessageBus` fallback removed — fails explicitly if not initialized
+  - `MessageBus` tracks KV ownership (no double-close)
+- **Legacy sendToAgent/agent_message removed**
+  - `sendToAgent` removed from `AgentBrokerPort` and `BrokerClient`
+  - `handleLegacyAgentMessage` removed from `AgentRuntime`
+  - `legacyReplyTarget` removed — all execution paths are canonical task flows
+  - `executeConversation` now requires `canonicalTask` (no more nullable)
 
-### Remaining high-value work
-- Make an explicit decision on broker-backed approval semantics:
-  1. keep the honest current model: canonical pause + one-shot next-call grant, or
-  2. build a true broker-level suspendable in-call approval contract
-- Further tighten `relay.ts` / `bus.ts` once the lifecycle story is fully true, instead of cleaning transport prematurely
-- Continue reducing legacy envelope concepts around simple inter-agent message flows
-- Revisit AX debt items when the surrounding code is touched naturally:
-  - `internal_mapping.ts` likely needs a more honest name/location later because it is a local bridge, not the canonical A2A protocol
-  - keep tightening public boundaries opportunistically when touching adjacent code, without drifting into cosmetic cleanup
+- **internal_mapping.ts → task_mapping.ts**
+  - renamed to `task_mapping.ts` (honest name)
+  - removed boundary violation (`worker_protocol.ts` import)
+  - `LocalTextInput` → standalone `TaskTextInput` (no agent/ dependency)
+- **Broker legacy agent_message handler removed**
+  - `handleAgentMessage`, `routeAgentMessage`, `sendAgentAck` removed
+  - `routeBrokerMessageToAgent` type narrowed to `task_submit | task_continue` only
+
+### Remaining work
+- Worker protocol bridge messages (`agent_send`/`agent_deliver`/`agent_result`) still used for local inter-agent transport — these are plumbing, not task model
 
 ## What this plan is actually fixing
 

@@ -23,7 +23,6 @@ export { A2AClient } from "./client.ts";
 export { A2AServer } from "./server.ts";
 export {
   A2ARuntimePort,
-  resolveRuntimeTaskContextId,
   type ContinueTaskRequest,
   type RuntimeTaskEvent,
   type SubmitTaskRequest,

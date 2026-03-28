@@ -4,6 +4,7 @@ import type {
   BrokerEnvelope,
   ToolResult,
 } from "../shared/types.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
@@ -15,7 +16,7 @@ import {
   mapApprovalPauseToInputRequiredTask,
   mapTaskErrorToTerminalStatus,
   mapTaskResultToCompletion,
-} from "../messaging/a2a/internal_mapping.ts";
+} from "../messaging/a2a/task_mapping.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
@@ -23,29 +24,22 @@ import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
 
 /**
- * AgentRuntime — runs inside a Deno Subhosting deployment.
+ * AgentRuntime — runs inside a Deno Subhosting deployment or local worker.
  *
- * This is the orchestrator:
- * - Starts the broker-facing runtime port (transport decided by AgentBrokerPort)
+ * HTTP-reactive, task-oriented runtime:
+ * - Receives work via handleIncomingMessage() (transport-agnostic)
  * - Calls LLM via AgentBrokerPort (never directly)
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
  * - Persists state via MemoryPort (KvdexMemory by default)
- * - Runs heartbeat via Deno.cron
  *
- * No code executes here — all execution goes through Sandbox.
- * Depends on AgentBrokerPort interface (DI), not on BrokerClient concret.
+ * Transport is decided by the caller: HTTP handler in Subhosting,
+ * KV Queue listener in local mode. The runtime does not assume any
+ * specific transport mechanism.
  */
 type BrokerCanonicalTaskPort = AgentBrokerPort & {
   getTask(taskId: string): Promise<Task | null>;
   reportTaskResult(task: Task): Promise<Task>;
 };
-
-interface LegacyAgentMessagePayload {
-  instruction: string;
-  data?: unknown;
-  taskId?: string;
-  contextId?: string;
-}
 
 interface RuntimeTaskSubmitPayload {
   taskId: string;
@@ -106,26 +100,6 @@ export class AgentRuntime {
     await this.skills.loadSkills();
     await this.broker.startListening();
 
-    const kv = await this.getKv();
-    kv.listenQueue(async (raw: unknown) => {
-      const msg = raw as BrokerEnvelope;
-      if (msg.to !== this.agentId) return;
-
-      switch (msg.type) {
-        case "agent_message":
-          await this.handleLegacyAgentMessage(msg);
-          break;
-        case "task_submit":
-          await this.handleTaskSubmitMessage(msg);
-          break;
-        case "task_continue":
-          await this.handleTaskContinueMessage(msg);
-          break;
-        default:
-          log.debug(`Message type ignoré dans runtime : ${msg.type}`);
-      }
-    });
-
     await this.cron.heartbeat(async () => {
       log.debug(`Heartbeat: ${this.agentId}`);
       const kv = await this.getKv();
@@ -135,6 +109,7 @@ export class AgentRuntime {
       });
     }, 5);
 
+    const kv = await this.getKv();
     await kv.set(["agents", this.agentId, "status"], {
       status: "running",
       startedAt: new Date().toISOString(),
@@ -142,31 +117,55 @@ export class AgentRuntime {
     });
   }
 
-  private async handleLegacyAgentMessage(msg: BrokerEnvelope): Promise<void> {
-    const payload = msg.payload as LegacyAgentMessagePayload;
-    log.info(
-      `Message reçu de ${msg.from}: ${payload.instruction.slice(0, 100)}`,
-    );
-
-    const canonicalTask = payload.taskId
-      ? createCanonicalTask({
-        id: payload.taskId,
-        contextId: payload.contextId,
-        message: {
-          messageId: crypto.randomUUID(),
-          role: "user",
-          parts: [{ kind: "text", text: payload.instruction }],
-        },
-      })
-      : null;
-
-    await this.executeConversation({
-      fromAgentId: msg.from,
-      inputText: payload.instruction,
-      canonicalTask,
-      reportWorkingTransition: canonicalTask !== null,
-      legacyReplyTarget: canonicalTask ? undefined : msg.from,
+  /**
+   * Start receiving work via KV Queue (local mode convenience).
+   * In Subhosting, call handleIncomingMessage() from the HTTP handler instead.
+   */
+  async startKvQueueIntake(): Promise<void> {
+    const kv = await this.getKv();
+    kv.listenQueue(async (raw: unknown) => {
+      const msg = raw as BrokerEnvelope;
+      if (msg.to !== this.agentId) return;
+      await this.handleIncomingMessage(msg);
     });
+    log.info(`AgentRuntime: KV Queue intake démarrée (${this.agentId})`);
+  }
+
+  /**
+   * Handle an incoming broker message (transport-agnostic).
+   * Called by KV Queue listener locally, or HTTP handler in Subhosting.
+   */
+  async handleIncomingMessage(msg: BrokerEnvelope): Promise<void> {
+    try {
+      switch (msg.type) {
+        case "task_submit":
+          await this.handleTaskSubmitMessage(msg);
+          break;
+        case "task_continue":
+          await this.handleTaskContinueMessage(msg);
+          break;
+        default:
+          log.warn(`Message type ignoré dans runtime : ${msg.type}`);
+      }
+    } catch (e) {
+      log.error("handleIncomingMessage failed", e);
+      const payload = msg.payload as { taskId?: string } | undefined;
+      const taskId = payload?.taskId;
+      if (taskId) {
+        try {
+          const port = this.broker as Partial<BrokerCanonicalTaskPort>;
+          if (typeof port.getTask === "function" && typeof port.reportTaskResult === "function") {
+            const existing = await port.getTask(taskId);
+            if (existing) {
+              const failed = mapTaskErrorToTerminalStatus(existing, e);
+              await port.reportTaskResult(failed);
+            }
+          }
+        } catch (reportErr) {
+          log.error("Failed to report terminal FAILED state for task", reportErr);
+        }
+      }
+    }
   }
 
   private async handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void> {
@@ -190,8 +189,10 @@ export class AgentRuntime {
     const payload = msg.payload as RuntimeTaskContinuePayload;
     const existing = await this.getCanonicalTaskPort().getTask(payload.taskId);
     if (!existing) {
-      throw new Error(
-        `Broker-backed continuation received unknown task ${payload.taskId}`,
+      throw new DenoClawError(
+        "TASK_NOT_FOUND",
+        { taskId: payload.taskId },
+        "Broker-backed continuation received unknown task",
       );
     }
 
@@ -215,15 +216,14 @@ export class AgentRuntime {
   private async executeConversation(options: {
     fromAgentId: string;
     inputText: string;
-    canonicalTask?: Task | null;
+    canonicalTask: Task;
     reportWorkingTransition: boolean;
-    legacyReplyTarget?: string;
   }): Promise<void> {
     const sessionId = `agent:${options.fromAgentId}:${this.agentId}`;
     const memory = await this.getMemory(sessionId);
-    let canonicalTask = options.canonicalTask ?? null;
+    let canonicalTask = options.canonicalTask;
 
-    if (canonicalTask && options.reportWorkingTransition) {
+    if (options.reportWorkingTransition) {
       canonicalTask = transitionTask(canonicalTask, "WORKING");
       await this.reportCanonicalTaskResult(canonicalTask);
     }
@@ -274,34 +274,30 @@ export class AgentRuntime {
             const result = await this.broker.execTool(
               tc.function.name,
               args,
-              canonicalTask
-                ? { taskId: canonicalTask.id, contextId: canonicalTask.contextId }
-                : undefined,
+              { taskId: canonicalTask.id, contextId: canonicalTask.contextId },
             );
 
-            if (canonicalTask) {
-              const approvalPause = this.extractApprovalPause(result);
-              if (approvalPause) {
-                await memory.addMessage({
-                  role: "tool",
-                  content: `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
-                  name: tc.function.name,
-                  tool_call_id: tc.id,
-                });
-                const pausedTask = mapApprovalPauseToInputRequiredTask(
-                  canonicalTask,
-                  {
-                    command: approvalPause.command,
-                    binary: approvalPause.binary,
-                    prompt: approvalPause.prompt,
-                  },
-                );
-                await this.reportCanonicalTaskResult(pausedTask);
-                log.info(
-                  `Tâche canonique en pause INPUT_REQUIRED pour ${options.fromAgentId}`,
-                );
-                return;
-              }
+            const approvalPause = this.extractApprovalPause(result);
+            if (approvalPause) {
+              await memory.addMessage({
+                role: "tool",
+                content: `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
+                name: tc.function.name,
+                tool_call_id: tc.id,
+              });
+              const pausedTask = mapApprovalPauseToInputRequiredTask(
+                canonicalTask,
+                {
+                  command: approvalPause.command,
+                  binary: approvalPause.binary,
+                  prompt: approvalPause.prompt,
+                },
+              );
+              await this.reportCanonicalTaskResult(pausedTask);
+              log.info(
+                `Tâche canonique en pause INPUT_REQUIRED pour ${options.fromAgentId}`,
+              );
+              return;
             }
 
             await memory.addMessage({
@@ -324,48 +320,27 @@ export class AgentRuntime {
           content: response.content,
         });
 
-        if (canonicalTask) {
-          const completedTask = mapTaskResultToCompletion(
-            canonicalTask,
-            response.content,
-          );
-          await this.reportCanonicalTaskResult(completedTask);
-          log.info(
-            `Tâche canonique terminée pour ${options.fromAgentId} (${iteration} itérations)`,
-          );
-          return;
-        }
-
-        await this.broker.sendToAgent(
-          options.legacyReplyTarget ?? options.fromAgentId,
+        const completedTask = mapTaskResultToCompletion(
+          canonicalTask,
           response.content,
         );
+        await this.reportCanonicalTaskResult(completedTask);
         log.info(
-          `Réponse envoyée à ${options.legacyReplyTarget ?? options.fromAgentId} (${iteration} itérations)`,
+          `Tâche canonique terminée pour ${options.fromAgentId} (${iteration} itérations)`,
         );
         return;
       }
 
-      if (canonicalTask) {
-        await this.reportCanonicalTaskResult(
-          mapTaskErrorToTerminalStatus(
-            canonicalTask,
-            new Error("Max iterations reached."),
-          ),
-        );
-        return;
-      }
-
-      await this.broker.sendToAgent(
-        options.legacyReplyTarget ?? options.fromAgentId,
-        "Max iterations reached.",
+      await this.reportCanonicalTaskResult(
+        mapTaskErrorToTerminalStatus(
+          canonicalTask,
+          new Error("Max iterations reached."),
+        ),
       );
     } catch (error) {
-      if (canonicalTask) {
-        await this.reportCanonicalTaskResult(
-          mapTaskErrorToTerminalStatus(canonicalTask, error),
-        );
-      }
+      await this.reportCanonicalTaskResult(
+        mapTaskErrorToTerminalStatus(canonicalTask, error),
+      );
       throw error;
     }
   }
@@ -385,13 +360,17 @@ export class AgentRuntime {
   private getCanonicalTaskPort(): BrokerCanonicalTaskPort {
     const broker = this.broker as Partial<BrokerCanonicalTaskPort>;
     if (typeof broker.getTask !== "function") {
-      throw new Error(
-        "AgentBrokerPort does not expose getTask(); broker-backed canonical continuation is unavailable",
+      throw new DenoClawError(
+        "BROKER_PORT_MISSING_METHOD",
+        { method: "getTask" },
+        "Use a BrokerClient that supports canonical task operations",
       );
     }
     if (typeof broker.reportTaskResult !== "function") {
-      throw new Error(
-        "AgentBrokerPort does not expose reportTaskResult(); broker-backed canonical task updates are unavailable",
+      throw new DenoClawError(
+        "BROKER_PORT_MISSING_METHOD",
+        { method: "reportTaskResult" },
+        "Use a BrokerClient that supports canonical task operations",
       );
     }
     return broker as BrokerCanonicalTaskPort;

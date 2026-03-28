@@ -27,12 +27,6 @@ export interface TelegramConfig {
   allowFrom?: string[];
 }
 
-export interface DiscordConfig {
-  enabled: boolean;
-  token?: string;
-  allowFrom?: string[];
-}
-
 export interface WebhookConfig {
   enabled: boolean;
   port?: number;
@@ -41,6 +35,5 @@ export interface WebhookConfig {
 
 export interface ChannelsConfig {
   telegram?: TelegramConfig;
-  discord?: DiscordConfig;
   webhook?: WebhookConfig;
 }

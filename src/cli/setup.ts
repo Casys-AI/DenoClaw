@@ -314,8 +314,8 @@ export async function publishAgent(): Promise<void> {
   Il communique avec le broker pour les appels LLM, l'exécution d'outils et la persistance durable.
 
   Pour envoyer un message à cet agent :
-    Depuis un autre agent : broker.sendToAgent("${agentName}", "instruction")
-    Depuis le broker : route un message avec to="${agentName}"
+    Depuis un autre agent : broker.sendTextTask("${agentName}", "instruction")
+    Depuis le broker : route un task_submit avec targetAgent="${agentName}"
 `);
   } catch (e) {
     error(`Erreur : ${(e as Error).message}`);
@@ -353,6 +353,7 @@ const broker = new BrokerClient(agentId);
 const runtime = new AgentRuntime(agentId, { model }, broker);
 
 await runtime.start();
+await runtime.startKvQueueIntake();
 console.log("Agent started:", agentId, "model:", model);
 
 // Graceful shutdown

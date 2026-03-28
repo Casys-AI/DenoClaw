@@ -1,5 +1,6 @@
 import type { A2AMessage, Artifact, Task, TaskState } from "./types.ts";
 import { TERMINAL_STATES } from "./types.ts";
+import { DenoClawError } from "../../shared/errors.ts";
 
 export const ALLOWED_TASK_STATE_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   SUBMITTED: ["WORKING", "CANCELED", "FAILED", "REJECTED"],
@@ -55,7 +56,11 @@ export function canTransitionTaskState(from: TaskState, to: TaskState): boolean 
 
 export function assertValidTaskTransition(from: TaskState, to: TaskState): void {
   if (!canTransitionTaskState(from, to)) {
-    throw new Error(`Invalid A2A task transition: ${from} -> ${to}`);
+    throw new DenoClawError(
+      "INVALID_TASK_TRANSITION",
+      { from, to },
+      "Check allowed state transitions in A2A contract",
+    );
   }
 }
 

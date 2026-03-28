@@ -1,6 +1,9 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { BrokerServer } from "./broker.ts";
-import { createResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
+import {
+  createAwaitedInputMetadata,
+  createResumePayloadMetadata,
+} from "../messaging/a2a/input_metadata.ts";
 import type { BrokerMessage } from "./types.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 
@@ -251,7 +254,14 @@ Deno.test("BrokerServer.continueAgentTask forwards canonical continuation withou
       status: {
         state: "INPUT_REQUIRED",
         timestamp: new Date().toISOString(),
-        metadata: { awaitedInput: { kind: "approval", prompt: "approve?" } },
+        metadata: {
+          awaitedInput: {
+            kind: "approval",
+            command: "git status",
+            binary: "git",
+            prompt: "approve?",
+          },
+        },
       },
     };
     await kv.set(["a2a_tasks", paused.id], paused);
@@ -478,6 +488,11 @@ Deno.test("BrokerServer consumes one approved continuation to allow the next bro
       status: {
         state: "INPUT_REQUIRED",
         timestamp: new Date().toISOString(),
+        metadata: createAwaitedInputMetadata({
+          kind: "approval",
+          command: "git status",
+          binary: "git",
+        }),
       },
     });
 
@@ -532,6 +547,112 @@ Deno.test("BrokerServer consumes one approved continuation to allow the next bro
       undefined,
     );
     assertEquals(secondCheck?.error?.code, "EXEC_APPROVAL_REQUIRED");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer rejects grant consumption when command does not match", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+    await kv.set(["agents", "agent-beta", "config"], {
+      acceptFrom: ["agent-alpha"],
+      sandbox: {
+        allowedPermissions: ["run"],
+        execPolicy: {
+          security: "allowlist",
+          allowedCommands: ["git", "npm"],
+          ask: "always",
+        },
+      },
+    });
+
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const submitted = await broker.submitAgentTask("agent-alpha", {
+      targetAgent: "agent-beta",
+      taskId: "task-mismatch",
+      message: createMessage("Run git status"),
+    });
+
+    // Pause with approval for "git status"
+    await kv.set(["a2a_tasks", submitted.id], {
+      ...submitted,
+      status: {
+        state: "INPUT_REQUIRED",
+        timestamp: new Date().toISOString(),
+        metadata: createAwaitedInputMetadata({
+          kind: "approval",
+          command: "git status",
+          binary: "git",
+        }),
+      },
+    });
+
+    // Approve "git status"
+    await broker.continueAgentTask("agent-alpha", {
+      taskId: submitted.id,
+      message: createMessage("Approved"),
+      metadata: createResumePayloadMetadata({ kind: "approval", approved: true }),
+    });
+
+    // Try to consume with a DIFFERENT command — must be rejected
+    const mismatchCheck = await (broker as unknown as {
+      resolveBrokerToolApprovalRequirement(
+        agentId: string,
+        req: { tool: string; args: Record<string, unknown>; taskId?: string },
+        agentPolicy?: unknown,
+        defaultPolicy?: unknown,
+      ): Promise<{ error?: { code?: string } } | null>;
+    }).resolveBrokerToolApprovalRequirement(
+      "agent-beta",
+      {
+        tool: "shell",
+        args: { command: "npm install", dry_run: false },
+        taskId: submitted.id,
+      },
+      {
+        security: "allowlist",
+        allowedCommands: ["git", "npm"],
+        ask: "always",
+      },
+      undefined,
+    );
+    assertEquals(mismatchCheck?.error?.code, "EXEC_APPROVAL_REQUIRED");
+
+    // Original command still works
+    const matchCheck = await (broker as unknown as {
+      resolveBrokerToolApprovalRequirement(
+        agentId: string,
+        req: { tool: string; args: Record<string, unknown>; taskId?: string },
+        agentPolicy?: unknown,
+        defaultPolicy?: unknown,
+      ): Promise<unknown>;
+    }).resolveBrokerToolApprovalRequirement(
+      "agent-beta",
+      {
+        tool: "shell",
+        args: { command: "git status", dry_run: false },
+        taskId: submitted.id,
+      },
+      {
+        security: "allowlist",
+        allowedCommands: ["git", "npm"],
+        ask: "always",
+      },
+      undefined,
+    );
+    assertEquals(matchCheck, null);
 
     await broker.stop();
   } finally {

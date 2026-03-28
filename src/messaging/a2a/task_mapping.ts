@@ -1,11 +1,12 @@
 /**
- * Internal local-runtime → canonical A2A mapping helpers.
+ * Runtime → canonical A2A task mapping helpers.
  *
- * This module is intentionally a narrow compatibility bridge. It maps worker
- * protocol inputs and local runtime outcomes into canonical A2A task shapes,
- * but lifecycle rules remain centralized in `internal_contract.ts`.
+ * Maps runtime inputs (text messages, errors, approval pauses) into canonical
+ * A2A task shapes. Lifecycle rules remain centralized in `internal_contract.ts`.
+ *
+ * This module has no dependency on agent/ or orchestration/ — it only uses
+ * shared types and A2A primitives.
  */
-import type { WorkerRequest } from "../../agent/worker_protocol.ts";
 import { AgentError, DenoClawError } from "../../shared/errors.ts";
 import {
   classifyRefusalTerminalState,
@@ -14,14 +15,14 @@ import {
 import { createAwaitedInputMetadata } from "./input_metadata.ts";
 import type { A2AMessage, Artifact, Task } from "./types.ts";
 
-type LocalProcessRequest = Extract<WorkerRequest, { type: "process" }>;
-
-type LocalTextInput = Pick<
-  LocalProcessRequest,
-  "requestId" | "sessionId" | "message" | "taskId" | "contextId"
-> & {
+export interface TaskTextInput {
+  requestId: string;
+  sessionId: string;
+  message: string;
+  taskId?: string;
+  contextId?: string;
   role?: A2AMessage["role"];
-};
+}
 
 export interface ApprovalPauseInput {
   command: string;
@@ -38,9 +39,10 @@ export function resolveContextIdFromSessionId(sessionId: string): string {
   return sessionId;
 }
 
-export function mapLocalTextInputToTask(input: LocalTextInput): Task {
+export function mapLocalTextInputToTask(input: TaskTextInput): Task {
   const taskId = input.taskId ?? resolveTaskIdFromRequestId(input.requestId);
-  const contextId = input.contextId ?? resolveContextIdFromSessionId(input.sessionId);
+  const contextId = input.contextId ??
+    resolveContextIdFromSessionId(input.sessionId);
 
   return createCanonicalTask({
     id: taskId,
@@ -77,7 +79,10 @@ export function mapTaskResultToCompletion(
   };
 }
 
-export function mapTaskErrorToTerminalStatus(task: Task, error: unknown): Task {
+export function mapTaskErrorToTerminalStatus(
+  task: Task,
+  error: unknown,
+): Task {
   const normalized = normalizeTaskError(error);
   const state = classifyRefusalTerminalState(normalized.reason);
 
@@ -119,7 +124,10 @@ export function mapApprovalPauseToInputRequiredTask(
   };
 }
 
-function createTextMessage(text: string, role: A2AMessage["role"]): A2AMessage {
+function createTextMessage(
+  text: string,
+  role: A2AMessage["role"],
+): A2AMessage {
   return {
     messageId: crypto.randomUUID(),
     role,
@@ -163,7 +171,10 @@ function classifyErrorReason(
   if (code.includes("USER_DENIED") || code.includes("REJECTED_BY_USER")) {
     return "user";
   }
-  if (code.includes("POLICY") || code.includes("ALLOWLIST") || code.includes("DENIED")) {
+  if (
+    code.includes("POLICY") || code.includes("ALLOWLIST") ||
+    code.includes("DENIED")
+  ) {
     return "policy";
   }
   if (code.length > 0) return "runtime";

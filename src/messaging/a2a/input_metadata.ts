@@ -11,7 +11,7 @@ export interface ClarificationField {
 
 export interface ApprovalAwaitedInput {
   kind: "approval";
-  command?: string;
+  command: string;
   binary?: string;
   prompt?: string;
   continuationToken?: string;

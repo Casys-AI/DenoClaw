@@ -25,10 +25,28 @@ import { RateLimiter } from "./rate_limit.ts";
 import { GitHubOAuth } from "./github_oauth.ts";
 import { AgentStore } from "./agent_store.ts";
 import { log } from "../shared/log.ts";
-import {
-  getDashboardAllowedUsers,
-  getDashboardAuthMode,
-} from "../../web/lib/dashboard-auth.ts";
+
+type DashboardAuthMode = "local-open" | "token" | "github-oauth";
+
+function getDashboardAuthMode(): DashboardAuthMode {
+  const raw = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
+  if (raw) {
+    const v = raw.trim().toLowerCase();
+    if (v === "token") return "token";
+    if (v === "github" || v === "github-oauth" || v === "oauth") {
+      return "github-oauth";
+    }
+  }
+  return Deno.env.get("DENO_DEPLOYMENT_ID") ? "github-oauth" : "local-open";
+}
+
+function getDashboardAllowedUsers(): string[] | undefined {
+  const raw = Deno.env.get("DENOCLAW_DASHBOARD_GITHUB_ALLOWED_USERS") ??
+    Deno.env.get("GITHUB_ALLOWED_USERS");
+  if (!raw) return undefined;
+  const users = raw.split(",").map((u) => u.trim()).filter(Boolean);
+  return users.length > 0 ? users : undefined;
+}
 
 export interface GatewayDeps {
   bus: MessageBus;

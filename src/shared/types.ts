@@ -97,11 +97,6 @@ export interface AgentBrokerPort {
     args: Record<string, unknown>,
     correlation?: { taskId?: string; contextId?: string },
   ): Promise<ToolResult>;
-  sendToAgent(
-    targetAgentId: string,
-    instruction: string,
-    data?: unknown,
-  ): Promise<BrokerEnvelope>;
   close(): void;
 }
 

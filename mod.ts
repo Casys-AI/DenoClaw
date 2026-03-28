@@ -70,7 +70,6 @@ export type {
 export type {
   ChannelMessage,
   ChannelsConfig,
-  DiscordConfig,
   Session,
   TelegramConfig,
   WebhookConfig,

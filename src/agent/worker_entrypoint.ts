@@ -20,6 +20,7 @@ import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
+import { log } from "../shared/log.ts";
 import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
@@ -27,7 +28,7 @@ import {
   mapTaskResultToCompletion,
   mapTaskErrorToTerminalStatus,
   mapApprovalPauseToInputRequiredTask,
-} from "../messaging/a2a/internal_mapping.ts";
+} from "../messaging/a2a/task_mapping.ts";
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
@@ -395,7 +396,9 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       try {
         const sharedKv = await Deno.openKv(msg.kvPaths.shared);
         traceWriter = new TraceWriter(sharedKv);
-      } catch { /* shared KV not available — tracing disabled */ }
+      } catch (e) {
+        log.warn("Shared KV unavailable — tracing disabled", e instanceof Error ? e.message : String(e));
+      }
       respond({ type: "ready", agentId });
       break;
     }

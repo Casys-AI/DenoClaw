@@ -19,7 +19,7 @@ Import public A2A types and ports from `src/messaging/a2a/mod.ts`.
 - task creation and task-state transitions
 - terminal-state checks and refusal classification
 
-Internal adapters such as `internal_mapping.ts` may map local runtime inputs into canonical tasks, but they should not redefine lifecycle rules.
+`task_mapping.ts` maps runtime inputs (text, errors, approval pauses) into canonical tasks but does not redefine lifecycle rules.
 
 ## Input-required metadata
 

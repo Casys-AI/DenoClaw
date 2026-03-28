@@ -72,13 +72,6 @@ function createBrokerStub(responseText = "done"): BrokerTaskPortStub {
         new Error("execTool should not be called in this test"),
       );
     },
-    sendToAgent(): Promise<BrokerEnvelope> {
-      return Promise.reject(
-        new Error(
-          "sendToAgent should not be called for canonical task flow",
-        ),
-      );
-    },
     getTask(taskId: string): Promise<Task | null> {
       return Promise.resolve(
         this.currentTask?.id === taskId ? this.currentTask : null,

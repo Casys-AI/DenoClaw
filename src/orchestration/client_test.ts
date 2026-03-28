@@ -97,19 +97,6 @@ function startBrokerResponder(kv: Deno.Kv): void {
           timestamp: new Date().toISOString(),
         };
         break;
-      case "agent_message":
-        response = {
-          id: message.id,
-          from: "broker",
-          to: message.from,
-          type: "agent_response",
-          payload: {
-            accepted: true,
-            targetAgent: message.payload.targetAgent ?? "unknown-target",
-          },
-          timestamp: new Date().toISOString(),
-        };
-        break;
       default:
         response = {
           id: message.id,
@@ -215,26 +202,3 @@ Deno.test("BrokerClient.reportTaskResult round-trips canonical task updates", as
   }
 });
 
-Deno.test("BrokerClient.sendToAgent resolves broker acknowledgement instead of hanging", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
-
-  try {
-    startBrokerResponder(kv);
-    const client = new BrokerClient("agent-alpha", { kv });
-    await client.startListening();
-
-    const response = await client.sendToAgent("agent-beta", "ping", {
-      correlation: "demo",
-    }) as Extract<BrokerMessage, { type: "agent_response" }>;
-
-    assertEquals(response.type, "agent_response");
-    assertEquals(response.payload.accepted, true);
-    assertEquals(response.payload.targetAgent, "agent-beta");
-
-    client.close();
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
-});

@@ -14,60 +14,109 @@ function makeMsg(channelType = "test"): ChannelMessage {
 }
 
 Deno.test("MessageBus dispatches to channel-specific handlers", async () => {
-  const bus = new MessageBus();
-  // Don't init KV for unit test — uses fallback in-memory dispatch
-  const received: string[] = [];
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const bus = new MessageBus(kv);
+    await bus.init();
+    const received: string[] = [];
 
-  bus.subscribe("test", async (msg) => {
-    received.push(msg.content);
-    await Promise.resolve();
-  });
+    bus.subscribe("test", async (msg) => {
+      received.push(msg.content);
+      await Promise.resolve();
+    });
 
-  await bus.publish(makeMsg("test"));
-  assertEquals(received, ["hello"]);
-  bus.close();
+    await bus.publish(makeMsg("test"));
+    // KV Queue dispatch is async — wait for delivery
+    await new Promise((r) => setTimeout(r, 500));
+    assertEquals(received, ["hello"]);
+    bus.close();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
 });
 
 Deno.test("MessageBus dispatches to global handlers", async () => {
-  const bus = new MessageBus();
-  const received: string[] = [];
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const bus = new MessageBus(kv);
+    await bus.init();
+    const received: string[] = [];
 
-  bus.subscribeAll(async (msg) => {
-    received.push(msg.channelType);
-    await Promise.resolve();
-  });
+    bus.subscribeAll(async (msg) => {
+      received.push(msg.channelType);
+      await Promise.resolve();
+    });
 
-  await bus.publish(makeMsg("a"));
-  await bus.publish(makeMsg("b"));
-  assertEquals(received, ["a", "b"]);
-  bus.close();
+    await bus.publish(makeMsg("a"));
+    await bus.publish(makeMsg("b"));
+    await new Promise((r) => setTimeout(r, 500));
+    assertEquals(received, ["a", "b"]);
+    bus.close();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
 });
 
 Deno.test("MessageBus ignores unrelated channel handlers", async () => {
-  const bus = new MessageBus();
-  let called = false;
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const bus = new MessageBus(kv);
+    await bus.init();
+    let called = false;
 
-  bus.subscribe("other", async () => {
-    called = true;
-    await Promise.resolve();
-  });
+    bus.subscribe("other", async () => {
+      called = true;
+      await Promise.resolve();
+    });
 
-  await bus.publish(makeMsg("test"));
-  assertEquals(called, false);
-  bus.close();
+    await bus.publish(makeMsg("test"));
+    await new Promise((r) => setTimeout(r, 500));
+    assertEquals(called, false);
+    bus.close();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
 });
 
 Deno.test("MessageBus clear removes all handlers", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const bus = new MessageBus(kv);
+    await bus.init();
+    let called = false;
+
+    bus.subscribeAll(async () => {
+      called = true;
+      await Promise.resolve();
+    });
+
+    bus.clear();
+    await bus.publish(makeMsg("test"));
+    await new Promise((r) => setTimeout(r, 500));
+    assertEquals(called, false);
+    bus.close();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("MessageBus.publish throws if not initialized", async () => {
   const bus = new MessageBus();
-  let called = false;
-
-  bus.subscribeAll(async () => {
-    called = true;
-    await Promise.resolve();
-  });
-
-  bus.clear();
-  await bus.publish(makeMsg("test"));
-  assertEquals(called, false);
+  let threw = false;
+  try {
+    await bus.publish(makeMsg("test"));
+  } catch (e) {
+    threw = true;
+    assertEquals((e as { code: string }).code, "BUS_NOT_INITIALIZED");
+  }
+  assertEquals(threw, true);
   bus.close();
 });

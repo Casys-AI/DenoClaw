@@ -190,6 +190,7 @@ const BRIDGE_RESPONSE_TYPES: ReadonlySet<BridgeResponseType> = new Set([
   "agent_task",
 ]);
 
+// test utilities
 /** Returns true if this request message type is infra (permanent runtime plumbing). */
 export function isInfraRequest(type: WorkerRequest["type"]): boolean {
   return INFRA_REQUEST_TYPES.has(type as InfraRequestType);

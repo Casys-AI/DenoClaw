@@ -1,9 +1,10 @@
 import { getDashboardBasePath } from "./base-path.ts";
 import { getInstances, type Instance } from "./instances.ts";
+import { SESSION_COOKIE as _SESSION_COOKIE } from "../../src/orchestration/github_oauth.ts";
 
 export type DashboardAuthMode = "local-open" | "token" | "github-oauth";
 
-export const DASHBOARD_GITHUB_SESSION_COOKIE = "denoclaw_session";
+export const DASHBOARD_GITHUB_SESSION_COOKIE: string = _SESSION_COOKIE;
 export const DASHBOARD_BROKER_COOKIE = "denoclaw_broker_url";
 export const DASHBOARD_TOKEN_COOKIE = "denoclaw_token";
 

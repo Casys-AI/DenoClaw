@@ -1,20 +1,23 @@
 import type { ChannelMessage } from "./types.ts";
 import { log } from "../shared/log.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import { spanBusPublish } from "../telemetry/mod.ts";
 
 export type MessageHandler = (message: ChannelMessage) => Promise<void>;
 
 /**
- * MessageBus backed by Deno KV Queues.
+ * MessageBus for channel message delivery (Telegram, webhooks, etc.).
  *
- * - publish() → kv.enqueue() for durable, at-least-once delivery
- * - Handlers are registered in-memory but triggered by kv.listenQueue()
- * - Falls back to direct in-memory dispatch if KV is unavailable
+ * Uses KV Queues as an optional optimization for durable at-least-once delivery.
+ * Falls back to direct in-memory dispatch if KV is unavailable.
+ * This bus handles channel routing only — broker↔agent task transport
+ * is handled separately by BrokerTransport.
  */
 export class MessageBus {
   private handlers = new Map<string, Set<MessageHandler>>();
   private globalHandlers = new Set<MessageHandler>();
   private kv: Deno.Kv | null = null;
+  private ownsKv: boolean;
   private kvReady = false;
 
   constructor(kv?: Deno.Kv) {
@@ -22,6 +25,7 @@ export class MessageBus {
       this.kv = kv;
       this.kvReady = true;
     }
+    this.ownsKv = !kv;
   }
 
   async init(): Promise<void> {
@@ -36,19 +40,14 @@ export class MessageBus {
       return;
     }
 
-    try {
-      this.kv = await Deno.openKv();
-      this.kv.listenQueue(async (raw: unknown) => {
-        const message = raw as ChannelMessage;
-        log.debug(`KV Queue: message reçu (${message.id})`);
-        await this.dispatch(message);
-      });
-      this.kvReady = true;
-      log.info("MessageBus: KV Queues activées");
-    } catch (e) {
-      log.warn("MessageBus: KV indisponible, fallback in-memory", e);
-      this.kvReady = false;
-    }
+    this.kv = await Deno.openKv();
+    this.kv.listenQueue(async (raw: unknown) => {
+      const message = raw as ChannelMessage;
+      log.debug(`KV Queue: message reçu (${message.id})`);
+      await this.dispatch(message);
+    });
+    this.kvReady = true;
+    log.info("MessageBus: KV Queues activées");
   }
 
   subscribe(channelType: string, handler: MessageHandler): void {
@@ -71,19 +70,20 @@ export class MessageBus {
   }
 
   /**
-   * Publish a message.
-   * If KV is available → kv.enqueue() for durable delivery.
-   * Otherwise → direct in-memory dispatch.
+   * Publish a message via KV Queue.
+   * Requires init() to have been called successfully.
    */
   async publish(message: ChannelMessage): Promise<void> {
     await spanBusPublish(message.channelType, message.id, async () => {
-      log.info(`Bus: message de ${message.channelType} (${message.id})`);
-
-      if (this.kvReady && this.kv) {
-        await this.kv.enqueue(message);
-      } else {
-        await this.dispatch(message);
+      if (!this.kvReady || !this.kv) {
+        throw new DenoClawError(
+          "BUS_NOT_INITIALIZED",
+          {},
+          "Call bus.init() before publishing messages",
+        );
       }
+      log.info(`Bus: message de ${message.channelType} (${message.id})`);
+      await this.kv.enqueue(message);
     });
   }
 
@@ -113,7 +113,7 @@ export class MessageBus {
     try {
       await handler(message);
     } catch (e) {
-      log.error("Erreur handler message bus", e);
+      log.error(`Bus handler error (channel: ${message.channelType}, msg: ${message.id})`, e);
     }
   }
 
@@ -124,10 +124,10 @@ export class MessageBus {
 
   close(): void {
     this.clear();
-    if (this.kv) {
+    if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
-      this.kvReady = false;
     }
+    this.kvReady = false;
   }
 }

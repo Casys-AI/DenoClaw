@@ -1,5 +1,4 @@
 import type {
-  AgentMessagePayload,
   BrokerMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
@@ -32,7 +31,10 @@ import {
   isTerminalTaskState,
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
-import { getResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
+import {
+  getAwaitedInputMetadata,
+  getResumePayloadMetadata,
+} from "../messaging/a2a/input_metadata.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 
 /**
@@ -40,9 +42,12 @@ import type { Task } from "../messaging/a2a/types.ts";
  *
  * Responsibilities:
  * - LLM Proxy (API keys + CLI tunnel routing)
- * - Message routing between agents (KV Queues)
+ * - Canonical A2A task routing between agents
  * - Tunnel hub (WebSocket connections to local machines)
  * - Agent lifecycle (Subhosting + Sandbox CRUD)
+ *
+ * Transport: KV Queue locally, HTTP/SSE on the network.
+ * KV Queue is the current local transport — not the canonical model.
  */
 export interface BrokerServerDeps {
   providers?: ProviderManager;
@@ -50,6 +55,23 @@ export interface BrokerServerDeps {
   metrics?: MetricsCollector;
   kv?: Deno.Kv;
   taskStore?: TaskStore;
+}
+
+interface ApprovalGrant {
+  kind: "approval";
+  approved: true;
+  command: string;
+  binary: string;
+  grantedAt: string;
+}
+
+type PendingResumes = Record<string, ApprovalGrant>;
+
+interface BrokerTaskMetadata {
+  submittedBy?: string;
+  targetAgent?: string;
+  request?: Record<string, unknown>;
+  pendingResumes?: PendingResumes;
 }
 
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
@@ -135,9 +157,6 @@ export class BrokerServer {
           break;
         case "tool_request":
           await this.handleToolRequest(msg);
-          break;
-        case "agent_message":
-          await this.handleAgentMessage(msg);
           break;
         case "task_submit":
           await this.handleTaskSubmit(msg);
@@ -386,7 +405,7 @@ export class BrokerServer {
       req.taskId &&
       check.reason !== "denied" &&
       (policy.ask === "always" || policy.ask === "on-miss") &&
-      await this.consumeApprovedTaskResume(req.taskId)
+      await this.consumeApprovedTaskResume(req.taskId, command)
     ) {
       return null;
     }
@@ -428,23 +447,38 @@ export class BrokerServer {
     };
   }
 
-  private async consumeApprovedTaskResume(taskId: string): Promise<boolean> {
-    const task = await this.taskStore.get(taskId);
-    if (!task) return false;
+  private async consumeApprovedTaskResume(
+    taskId: string,
+    command: string,
+  ): Promise<boolean> {
+    const kv = await this.getKv();
+    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
+    if (!entry.value) return false;
 
-    const brokerMetadata = this.getTaskBrokerMetadata(task);
-    const pendingResume = brokerMetadata.pendingResume;
-    if (
-      !pendingResume || typeof pendingResume !== "object" ||
-      (pendingResume as Record<string, unknown>).approved !== true
-    ) {
-      return false;
-    }
+    const brokerMetadata = this.getTaskBrokerMetadata(entry.value);
+    const pendingResumes = this.getPendingResumes(brokerMetadata);
+    const grantKey = pendingResumes[command]?.approved === true
+      ? command
+      : pendingResumes["*"]?.approved === true
+      ? "*"
+      : null;
+    if (!grantKey) return false;
 
-    const nextBrokerMetadata = { ...brokerMetadata };
-    delete nextBrokerMetadata.pendingResume;
-    await this.persistTaskMetadata(task, nextBrokerMetadata);
-    return true;
+    const nextResumes = { ...pendingResumes };
+    delete nextResumes[grantKey];
+    const nextTask: Task = {
+      ...entry.value,
+      metadata: {
+        ...(entry.value.metadata ?? {}),
+        broker: { ...brokerMetadata, pendingResumes: nextResumes },
+      },
+    };
+    // Atomic check+set to prevent TOCTOU: if another request already consumed this grant, commit fails.
+    const result = await kv.atomic().check(entry).set(
+      ["a2a_tasks", taskId],
+      nextTask,
+    ).commit();
+    return result.ok;
   }
 
   private async replyToolResult(
@@ -530,25 +564,7 @@ console.log(await r.text());`;
     }
   }
 
-  // ── Inter-agent routing (ADR-006: A2A + peers check) ─
-
-  private async handleAgentMessage(
-    msg: Extract<BrokerMessage, { type: "agent_message" }>,
-  ): Promise<void> {
-    const payload = msg.payload;
-    if (!payload.targetAgent) {
-      throw new DenoClawError(
-        "INVALID_AGENT_MESSAGE",
-        { from: msg.from, payload },
-        "Provide targetAgent when routing via broker",
-      );
-    }
-    await this.routeAgentMessage(msg.from, payload.targetAgent, payload);
-    await this.sendAgentAck(msg.from, msg.id, payload.targetAgent, {
-      taskId: payload.taskId,
-      contextId: payload.contextId,
-    });
-  }
+  // ── Canonical task message handlers ─────────────────
 
   private async handleTaskSubmit(
     msg: Extract<BrokerMessage, { type: "task_submit" }>,
@@ -661,14 +677,26 @@ console.log(await r.text());`;
       return rejected;
     }
 
+    let updated = existing;
     if (resume?.approved === true) {
-      await this.persistTaskMetadata(existing, {
+      const awaitedInput = getAwaitedInputMetadata(existing.status);
+      const command = awaitedInput?.kind === "approval"
+        ? awaitedInput.command
+        : "*";
+      const binary = awaitedInput?.kind === "approval" && awaitedInput.binary
+        ? awaitedInput.binary
+        : command;
+      const pendingResumes = this.getPendingResumes(brokerMetadata);
+      const grant: ApprovalGrant = {
+        kind: "approval",
+        approved: true,
+        command,
+        binary,
+        grantedAt: new Date().toISOString(),
+      };
+      updated = await this.persistTaskMetadata(existing, {
         ...brokerMetadata,
-        pendingResume: {
-          kind: resume.kind,
-          approved: true,
-          grantedAt: new Date().toISOString(),
-        },
+        pendingResumes: { ...pendingResumes, [command]: grant },
       });
     }
 
@@ -681,7 +709,7 @@ console.log(await r.text());`;
       timestamp: new Date().toISOString(),
     });
 
-    return existing;
+    return updated;
   }
 
   async cancelTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
@@ -766,7 +794,7 @@ console.log(await r.text());`;
 
   private async persistTaskMetadata(
     task: Task,
-    brokerMetadata: Record<string, unknown>,
+    brokerMetadata: BrokerTaskMetadata,
   ): Promise<Task> {
     const nextTask: Task = {
       ...task,
@@ -784,11 +812,15 @@ console.log(await r.text());`;
     await kv.set(["a2a_tasks", task.id], task);
   }
 
-  private getTaskBrokerMetadata(task: Task): Record<string, unknown> {
+  private getTaskBrokerMetadata(task: Task): BrokerTaskMetadata {
     const metadata = task.metadata?.broker;
     return typeof metadata === "object" && metadata !== null
-      ? metadata as Record<string, unknown>
+      ? metadata as BrokerTaskMetadata
       : {};
+  }
+
+  private getPendingResumes(brokerMetadata: BrokerTaskMetadata): PendingResumes {
+    return brokerMetadata.pendingResumes ?? {};
   }
 
   private async assertPeerAccess(
@@ -831,33 +863,10 @@ console.log(await r.text());`;
     }
   }
 
-  private async routeAgentMessage(
-    fromAgentId: string,
-    targetAgentId: string,
-    payload: AgentMessagePayload,
-  ): Promise<void> {
-    await this.assertPeerAccess(fromAgentId, targetAgentId);
-
-    await this.routeBrokerMessageToAgent(targetAgentId, {
-      id: generateId(),
-      from: fromAgentId,
-      to: targetAgentId,
-      type: "agent_message",
-      payload: {
-        instruction: payload.instruction,
-        data: payload.data,
-        taskId: payload.taskId,
-        contextId: payload.contextId,
-        metadata: payload.metadata,
-      },
-      timestamp: new Date().toISOString(),
-    });
-  }
-
   private async routeBrokerMessageToAgent(
     targetAgentId: string,
     message: Extract<BrokerMessage, {
-      type: "agent_message" | "task_submit" | "task_continue"
+      type: "task_submit" | "task_continue"
     }>,
   ): Promise<void> {
     const kv = await this.getKv();
@@ -1161,29 +1170,6 @@ console.log(await r.text());`;
       to,
       type: "task_result",
       payload: { task },
-      timestamp: new Date().toISOString(),
-    };
-    await kv.enqueue(reply);
-  }
-
-  private async sendAgentAck(
-    to: string,
-    requestId: string,
-    targetAgent: string,
-    options: { taskId?: string; contextId?: string } = {},
-  ): Promise<void> {
-    const kv = await this.getKv();
-    const reply: Extract<BrokerMessage, { type: "agent_response" }> = {
-      id: requestId,
-      from: "broker",
-      to,
-      type: "agent_response",
-      payload: {
-        accepted: true,
-        targetAgent,
-        taskId: options.taskId,
-        contextId: options.contextId,
-      },
       timestamp: new Date().toISOString(),
     };
     await kv.enqueue(reply);

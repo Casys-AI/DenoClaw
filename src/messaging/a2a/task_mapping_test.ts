@@ -7,9 +7,9 @@ import {
   mapTaskResultToCompletion,
   resolveContextIdFromSessionId,
   resolveTaskIdFromRequestId,
-} from "./internal_mapping.ts";
+} from "./task_mapping.ts";
 
-Deno.test("internal mapping keeps request/session ids aligned with canonical task/context ids", () => {
+Deno.test("task mapping keeps request/session ids aligned with canonical task/context ids", () => {
   assertEquals(resolveTaskIdFromRequestId("req-1"), "req-1");
   assertEquals(resolveContextIdFromSessionId("session-1"), "session-1");
 
@@ -31,7 +31,7 @@ Deno.test("internal mapping keeps request/session ids aligned with canonical tas
   });
 });
 
-Deno.test("internal mapping converts final textual output into artifact plus terminal status", () => {
+Deno.test("task mapping converts final textual output into artifact plus terminal status", () => {
   const task = mapLocalTextInputToTask({
     requestId: "req-2",
     sessionId: "session-2",
@@ -44,7 +44,7 @@ Deno.test("internal mapping converts final textual output into artifact plus ter
   assertEquals(completed.artifacts[0].parts[0], { kind: "text", text: "done" });
 });
 
-Deno.test("internal mapping classifies refusal errors as REJECTED and generic errors as FAILED", () => {
+Deno.test("task mapping classifies refusal errors as REJECTED and generic errors as FAILED", () => {
   const task = mapLocalTextInputToTask({
     requestId: "req-3",
     sessionId: "session-3",
@@ -63,7 +63,7 @@ Deno.test("internal mapping classifies refusal errors as REJECTED and generic er
   assertEquals(failed.status.metadata?.errorCode, "UNEXPECTED_ERROR");
 });
 
-Deno.test("internal mapping turns approval pauses into INPUT_REQUIRED metadata", () => {
+Deno.test("task mapping turns approval pauses into INPUT_REQUIRED metadata", () => {
   const task = mapLocalTextInputToTask({
     requestId: "req-4",
     sessionId: "session-4",

@@ -11,7 +11,7 @@ const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_URL = "https://api.github.com/user";
 
-const SESSION_COOKIE = "denoclaw_session";
+export const SESSION_COOKIE = "denoclaw_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface GitHubUser {

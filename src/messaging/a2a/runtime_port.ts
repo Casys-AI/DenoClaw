@@ -4,7 +4,6 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from "./types.ts";
-import { resolveTaskContextId } from "./internal_contract.ts";
 
 /**
  * Transport-agnostic A2A runtime port.
@@ -34,9 +33,3 @@ export interface ContinueTaskRequest {
 }
 
 export type RuntimeTaskEvent = TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
-
-export function resolveRuntimeTaskContextId(
-  request: Pick<SubmitTaskRequest, "taskId" | "contextId">,
-): string {
-  return resolveTaskContextId(request.taskId, request.contextId);
-}

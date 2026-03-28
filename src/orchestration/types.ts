@@ -5,6 +5,7 @@
 
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import type {
+  LLMResponse,
   SandboxPermission,
   StructuredError,
 } from "../shared/types.ts";
@@ -34,16 +35,7 @@ export interface LLMRequest {
   tools?: unknown[];
 }
 
-export interface LLMResponsePayload {
-  content: string;
-  toolCalls?: unknown[];
-  finishReason?: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
+export type LLMResponsePayload = LLMResponse;
 
 // ── Tool execution ───────────────────────────────────────
 
@@ -58,24 +50,6 @@ export interface ToolResponsePayload {
   success: boolean;
   output: string;
   error?: StructuredError;
-}
-
-// ── Inter-agent bridge metadata ──────────────────────────
-
-export interface AgentMessagePayload {
-  targetAgent?: string;
-  instruction: string;
-  data?: unknown;
-  taskId?: string;
-  contextId?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface AgentResponsePayload {
-  accepted: true;
-  targetAgent: string;
-  taskId?: string;
-  contextId?: string;
 }
 
 // ── Canonical task operations ────────────────────────────
@@ -114,11 +88,6 @@ export type BrokerToolResponseMessage = BrokerEnvelopeBase<
   "tool_response",
   ToolResponsePayload
 >;
-export type BrokerAgentMessage = BrokerEnvelopeBase<"agent_message", AgentMessagePayload>;
-export type BrokerAgentResponseMessage = BrokerEnvelopeBase<
-  "agent_response",
-  AgentResponsePayload
->;
 export type BrokerTaskSubmitMessage = BrokerEnvelopeBase<
   "task_submit",
   BrokerTaskSubmitPayload
@@ -147,8 +116,20 @@ export type BrokerMessage =
   | BrokerLLMResponseMessage
   | BrokerToolRequestMessage
   | BrokerToolResponseMessage
-  | BrokerAgentMessage
-  | BrokerAgentResponseMessage
+  | BrokerEnvelopeBase<"agent_message", {
+    targetAgent?: string;
+    instruction: string;
+    data?: unknown;
+    taskId?: string;
+    contextId?: string;
+    metadata?: Record<string, unknown>;
+  }>
+  | BrokerEnvelopeBase<"agent_response", {
+    accepted: true;
+    targetAgent: string;
+    taskId?: string;
+    contextId?: string;
+  }>
   | BrokerTaskSubmitMessage
   | BrokerTaskContinueMessage
   | BrokerTaskGetMessage

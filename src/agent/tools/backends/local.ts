@@ -18,6 +18,7 @@ import { checkExecPolicy, filterEnv } from "../shell.ts";
 import { log } from "../../../shared/log.ts";
 
 const EXECUTOR_URL = new URL("../tool_executor.ts", import.meta.url).href;
+const DENO_EXECUTABLE = Deno.execPath();
 const DEFAULT_TIMEOUT_SEC = 30;
 
 /** Map SandboxPermission → Deno CLI flag */
@@ -136,7 +137,7 @@ export class LocalProcessBackend implements SandboxBackend {
           ? (req.execPolicy as { envFilter?: string[] }).envFilter
           : undefined;
 
-      const cmd = new Deno.Command("deno", {
+      const cmd = new Deno.Command(DENO_EXECUTABLE, {
         args: ["run", ...flags, EXECUTOR_URL, input],
         stdout: "piped",
         stderr: "piped",

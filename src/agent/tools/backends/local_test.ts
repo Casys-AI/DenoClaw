@@ -246,6 +246,24 @@ Deno.test("LocalProcessBackend approval timeout — denies (fail-closed)", async
 
 // ── close() ──
 
+Deno.test("LocalProcessBackend uses current Deno executable even when PATH lacks deno", async () => {
+  const originalPath = Deno.env.get("PATH");
+  Deno.env.set("PATH", "/definitely-missing-deno");
+
+  try {
+    const backend = new LocalProcessBackend(baseSandbox);
+    const result = await backend.execute(readFileReq());
+    assertEquals(result.success, true);
+    await backend.close();
+  } finally {
+    if (originalPath === undefined) {
+      Deno.env.delete("PATH");
+    } else {
+      Deno.env.set("PATH", originalPath);
+    }
+  }
+});
+
 Deno.test("LocalProcessBackend close is no-op", async () => {
   const backend = new LocalProcessBackend(baseSandbox);
   await backend.close(); // should not throw

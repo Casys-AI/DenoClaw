@@ -92,7 +92,11 @@ export interface AgentBrokerPort {
     maxTokens?: number,
     tools?: ToolDefinition[],
   ): Promise<LLMResponse>;
-  execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult>;
+  execTool(
+    tool: string,
+    args: Record<string, unknown>,
+    correlation?: { taskId?: string; contextId?: string },
+  ): Promise<ToolResult>;
   sendToAgent(
     targetAgentId: string,
     instruction: string,

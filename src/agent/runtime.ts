@@ -1,4 +1,9 @@
-import type { AgentBrokerPort, BrokerEnvelope } from "../shared/types.ts";
+import type {
+  AgentBrokerPort,
+  ApprovalReason,
+  BrokerEnvelope,
+  ToolResult,
+} from "../shared/types.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
@@ -7,6 +12,7 @@ import {
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
 import {
+  mapApprovalPauseToInputRequiredTask,
   mapTaskErrorToTerminalStatus,
   mapTaskResultToCompletion,
 } from "../messaging/a2a/internal_mapping.ts";
@@ -265,7 +271,38 @@ export class AgentRuntime {
               continue;
             }
 
-            const result = await this.broker.execTool(tc.function.name, args);
+            const result = await this.broker.execTool(
+              tc.function.name,
+              args,
+              canonicalTask
+                ? { taskId: canonicalTask.id, contextId: canonicalTask.contextId }
+                : undefined,
+            );
+
+            if (canonicalTask) {
+              const approvalPause = this.extractApprovalPause(result);
+              if (approvalPause) {
+                await memory.addMessage({
+                  role: "tool",
+                  content: `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
+                  name: tc.function.name,
+                  tool_call_id: tc.id,
+                });
+                const pausedTask = mapApprovalPauseToInputRequiredTask(
+                  canonicalTask,
+                  {
+                    command: approvalPause.command,
+                    binary: approvalPause.binary,
+                    prompt: approvalPause.prompt,
+                  },
+                );
+                await this.reportCanonicalTaskResult(pausedTask);
+                log.info(
+                  `Tâche canonique en pause INPUT_REQUIRED pour ${options.fromAgentId}`,
+                );
+                return;
+              }
+            }
 
             await memory.addMessage({
               role: "tool",
@@ -358,6 +395,31 @@ export class AgentRuntime {
       );
     }
     return broker as BrokerCanonicalTaskPort;
+  }
+
+  private extractApprovalPause(
+    result: ToolResult,
+  ): { command: string; binary: string; reason: ApprovalReason; prompt: string } | null {
+    if (result.success || result.error?.code !== "EXEC_APPROVAL_REQUIRED") {
+      return null;
+    }
+
+    const context = result.error.context;
+    if (!context || typeof context !== "object") return null;
+
+    const command = typeof context.command === "string" ? context.command : null;
+    const binary = typeof context.binary === "string" ? context.binary : null;
+    const reason = typeof context.reason === "string"
+      ? context.reason as ApprovalReason
+      : null;
+    if (!command || !binary || !reason) return null;
+
+    return {
+      command,
+      binary,
+      reason,
+      prompt: `Awaiting approval for ${binary}: ${command}`,
+    };
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {

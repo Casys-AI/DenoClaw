@@ -184,8 +184,9 @@ export class BrokerClient implements AgentBrokerPort {
   async execTool(
     tool: string,
     args: Record<string, unknown>,
+    correlation?: { taskId?: string; contextId?: string },
   ): Promise<ToolResult> {
-    const payload: ToolRequest = { tool, args };
+    const payload: ToolRequest = { tool, args, ...correlation };
     const response = await this.request({
       to: "broker",
       type: "tool_request",

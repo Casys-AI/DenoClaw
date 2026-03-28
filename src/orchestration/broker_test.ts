@@ -376,3 +376,166 @@ Deno.test("BrokerServer.submitAgentTask enforces peer policy", async () => {
     await Deno.remove(kvPath);
   }
 });
+
+Deno.test("BrokerServer returns EXEC_APPROVAL_REQUIRED for broker-backed shell tasks", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await kv.set(["agents", "agent-alpha", "config"], {
+      sandbox: {
+        allowedPermissions: ["run"],
+        execPolicy: {
+          security: "allowlist",
+          allowedCommands: ["git"],
+          ask: "always",
+        },
+      },
+    });
+
+    let sandboxCalls = 0;
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      sandbox: {
+        run: () => {
+          sandboxCalls++;
+          return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+        },
+      } as never,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordToolCall: async () => {} } as any,
+    });
+
+    const replyPromise = waitForQueuedMessage(
+      kv,
+      (message) => message.type === "tool_response" && message.to === "agent-alpha",
+    );
+
+    await (broker as unknown as {
+      handleToolRequest(msg: Extract<BrokerMessage, { type: "tool_request" }>): Promise<void>;
+    }).handleToolRequest({
+      id: "tool-req-1",
+      from: "agent-alpha",
+      to: "broker",
+      type: "tool_request",
+      timestamp: new Date().toISOString(),
+      payload: {
+        tool: "shell",
+        args: { command: "git status", dry_run: false },
+        taskId: "task-approval",
+      },
+    });
+
+    const reply = await replyPromise as Extract<BrokerMessage, { type: "tool_response" }>;
+    assertEquals(reply.payload.error?.code, "EXEC_APPROVAL_REQUIRED");
+    assertEquals(reply.payload.error?.context, {
+      taskId: "task-approval",
+      command: "git status",
+      binary: "git",
+      reason: "always-ask",
+    });
+    assertEquals(sandboxCalls, 0);
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer consumes one approved continuation to allow the next broker-backed shell execution", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+    await kv.set(["agents", "agent-beta", "config"], {
+      acceptFrom: ["agent-alpha"],
+      sandbox: {
+        allowedPermissions: ["run"],
+        execPolicy: {
+          security: "allowlist",
+          allowedCommands: ["git"],
+          ask: "always",
+        },
+      },
+    });
+
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const submitted = await broker.submitAgentTask("agent-alpha", {
+      targetAgent: "agent-beta",
+      taskId: "task-resume-grant",
+      message: createMessage("Run git status"),
+    });
+
+    await kv.set(["a2a_tasks", submitted.id], {
+      ...submitted,
+      status: {
+        state: "INPUT_REQUIRED",
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await broker.continueAgentTask("agent-alpha", {
+      taskId: submitted.id,
+      message: createMessage("Approved"),
+      metadata: createResumePayloadMetadata({ kind: "approval", approved: true }),
+    });
+
+    const firstCheck = await (broker as unknown as {
+      resolveBrokerToolApprovalRequirement(
+        agentId: string,
+        req: { tool: string; args: Record<string, unknown>; taskId?: string },
+        agentPolicy?: unknown,
+        defaultPolicy?: unknown,
+      ): Promise<unknown>;
+    }).resolveBrokerToolApprovalRequirement(
+      "agent-beta",
+      {
+        tool: "shell",
+        args: { command: "git status", dry_run: false },
+        taskId: submitted.id,
+      },
+      {
+        security: "allowlist",
+        allowedCommands: ["git"],
+        ask: "always",
+      },
+      undefined,
+    );
+    assertEquals(firstCheck, null);
+
+    const secondCheck = await (broker as unknown as {
+      resolveBrokerToolApprovalRequirement(
+        agentId: string,
+        req: { tool: string; args: Record<string, unknown>; taskId?: string },
+        agentPolicy?: unknown,
+        defaultPolicy?: unknown,
+      ): Promise<{ error?: { code?: string } } | null>;
+    }).resolveBrokerToolApprovalRequirement(
+      "agent-beta",
+      {
+        tool: "shell",
+        args: { command: "git status", dry_run: false },
+        taskId: submitted.id,
+      },
+      {
+        security: "allowlist",
+        allowedCommands: ["git"],
+        ask: "always",
+      },
+      undefined,
+    );
+    assertEquals(secondCheck?.error?.code, "EXEC_APPROVAL_REQUIRED");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});

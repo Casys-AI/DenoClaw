@@ -9,12 +9,15 @@ import type {
 } from "./types.ts";
 import type {
   AgentEntry,
+  ExecPolicy,
   SandboxPermission,
   StructuredError,
+  ToolResult,
 } from "../shared/types.ts";
 import type { Config } from "../config/types.ts";
 import type { BuiltinToolName } from "../agent/tools/types.ts";
 import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
+import { checkExecPolicy } from "../agent/tools/shell.ts";
 import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { SandboxManager } from "./sandbox.ts";
@@ -48,6 +51,13 @@ export interface BrokerServerDeps {
   kv?: Deno.Kv;
   taskStore?: TaskStore;
 }
+
+const DEFAULT_EXEC_POLICY: ExecPolicy = {
+  security: "allowlist",
+  allowedCommands: [],
+  ask: "on-miss",
+  askFallback: "deny",
+};
 
 export class BrokerServer {
   private config: Config;
@@ -283,6 +293,23 @@ export class BrokerServer {
       return;
     }
 
+    const approvalResult = await this.resolveBrokerToolApprovalRequirement(
+      msg.from,
+      req,
+      agentConfig.value?.sandbox?.execPolicy,
+      this.config.agents?.defaults?.sandbox?.execPolicy,
+    );
+    if (approvalResult) {
+      await this.replyToolResult(msg.from, msg.id, approvalResult);
+      await this.metrics.recordToolCall(
+        msg.from,
+        req.tool,
+        false,
+        performance.now() - toolStart,
+      );
+      return;
+    }
+
     // 4. Execute in Sandbox (éphémère)
     try {
       const code = this.buildSandboxCode(req.tool, req.args);
@@ -316,27 +343,17 @@ export class BrokerServer {
         performance.now() - toolStart,
       );
 
-      const reply: BrokerMessage = {
-        id: msg.id,
-        from: "broker",
-        to: msg.from,
-        type: "tool_response",
-        payload: {
-          success: toolSuccess,
-          output: result.stdout,
-          error: !toolSuccess
-            ? {
-              code: "SANDBOX_EXEC_FAILED",
-              context: { stderr: result.stderr, exitCode: result.exitCode },
-              recovery: "Check tool arguments",
-            }
-            : undefined,
-        },
-        timestamp: new Date().toISOString(),
-      };
-
-      const kv = await this.getKv();
-      await kv.enqueue(reply);
+      await this.replyToolResult(msg.from, msg.id, {
+        success: toolSuccess,
+        output: result.stdout,
+        error: !toolSuccess
+          ? {
+            code: "SANDBOX_EXEC_FAILED",
+            context: { stderr: result.stderr, exitCode: result.exitCode },
+            recovery: "Check tool arguments",
+          }
+          : undefined,
+      });
     } catch (e) {
       await this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_CREATE_FAILED",
@@ -344,6 +361,107 @@ export class BrokerServer {
         recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
       });
     }
+  }
+
+  private async resolveBrokerToolApprovalRequirement(
+    _agentId: string,
+    req: { tool: string; args: Record<string, unknown>; taskId?: string },
+    agentPolicy?: ExecPolicy,
+    defaultPolicy?: ExecPolicy,
+  ): Promise<ToolResult | null> {
+    if (req.tool !== "shell" || req.args.dry_run === true) {
+      return null;
+    }
+
+    const command = typeof req.args.command === "string"
+      ? req.args.command
+      : null;
+    if (!command) return null;
+
+    const policy = agentPolicy ?? defaultPolicy ?? DEFAULT_EXEC_POLICY;
+    const check = checkExecPolicy(command, policy);
+    if (check.allowed) return null;
+
+    if (
+      req.taskId &&
+      check.reason !== "denied" &&
+      (policy.ask === "always" || policy.ask === "on-miss") &&
+      await this.consumeApprovedTaskResume(req.taskId)
+    ) {
+      return null;
+    }
+
+    if (
+      check.reason !== "denied" &&
+      (policy.ask === "always" || policy.ask === "on-miss")
+    ) {
+      return {
+        success: false,
+        output: "",
+        error: {
+          code: "EXEC_APPROVAL_REQUIRED",
+          context: {
+            taskId: req.taskId,
+            command,
+            binary: check.binary ?? command,
+            reason: check.reason ?? "not-in-allowlist",
+          },
+          recovery: "Resume the canonical task with approval metadata to continue",
+        },
+      };
+    }
+
+    return {
+      success: false,
+      output: "",
+      error: {
+        code: "EXEC_DENIED",
+        context: {
+          taskId: req.taskId,
+          command,
+          binary: check.binary ?? command,
+          reason: check.reason ?? "denied",
+        },
+        recovery:
+          `Add '${check.binary ?? command}' to execPolicy.allowedCommands or use ask: 'on-miss'`,
+      },
+    };
+  }
+
+  private async consumeApprovedTaskResume(taskId: string): Promise<boolean> {
+    const task = await this.taskStore.get(taskId);
+    if (!task) return false;
+
+    const brokerMetadata = this.getTaskBrokerMetadata(task);
+    const pendingResume = brokerMetadata.pendingResume;
+    if (
+      !pendingResume || typeof pendingResume !== "object" ||
+      (pendingResume as Record<string, unknown>).approved !== true
+    ) {
+      return false;
+    }
+
+    const nextBrokerMetadata = { ...brokerMetadata };
+    delete nextBrokerMetadata.pendingResume;
+    await this.persistTaskMetadata(task, nextBrokerMetadata);
+    return true;
+  }
+
+  private async replyToolResult(
+    to: string,
+    replyToId: string,
+    payload: ToolResult,
+  ): Promise<void> {
+    const kv = await this.getKv();
+    const reply: BrokerMessage = {
+      id: replyToId,
+      from: "broker",
+      to,
+      type: "tool_response",
+      payload,
+      timestamp: new Date().toISOString(),
+    };
+    await kv.enqueue(reply);
   }
 
   /**
@@ -541,6 +659,17 @@ console.log(await r.text());`;
       rejected.history = [...existing.history, payload.message];
       await this.writeTask(rejected);
       return rejected;
+    }
+
+    if (resume?.approved === true) {
+      await this.persistTaskMetadata(existing, {
+        ...brokerMetadata,
+        pendingResume: {
+          kind: resume.kind,
+          approved: true,
+          grantedAt: new Date().toISOString(),
+        },
+      });
     }
 
     await this.routeBrokerMessageToAgent(targetAgentId, {

@@ -50,6 +50,8 @@ export interface LLMResponsePayload {
 export interface ToolRequest {
   tool: string;
   args: Record<string, unknown>;
+  taskId?: string;
+  contextId?: string;
 }
 
 export interface ToolResponsePayload {

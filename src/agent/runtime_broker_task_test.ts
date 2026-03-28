@@ -1,9 +1,12 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { AgentRuntime } from "./runtime.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type {
+  RuntimeTaskContinueMessage,
+  RuntimeTaskSubmitMessage,
+} from "./runtime_transport.ts";
+import type {
   AgentBrokerPort,
-  BrokerEnvelope,
   LLMResponse,
   Message,
   ToolResult,
@@ -66,7 +69,11 @@ function createBrokerStub(responseText = "done"): BrokerTaskPortStub {
     complete(): Promise<LLMResponse> {
       return Promise.resolve({ content: responseText });
     },
-    execTool(_tool: string, _args: Record<string, unknown>, correlation?: { taskId?: string; contextId?: string }): Promise<ToolResult> {
+    execTool(
+      _tool: string,
+      _args: Record<string, unknown>,
+      correlation?: { taskId?: string; contextId?: string },
+    ): Promise<ToolResult> {
       this.lastExecCorrelation = correlation;
       return Promise.reject(
         new Error("execTool should not be called in this test"),
@@ -104,9 +111,15 @@ function createRuntime(
   const runtimeAny = runtime as unknown as {
     getMemory(sessionId: string): Promise<MemoryPort>;
     skills: { getSkills(): never[] };
-    context: { buildContextMessages(messages: Message[], _skills: unknown[], _facts: unknown[]): Message[] };
-    handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void>;
-    handleTaskContinueMessage(msg: BrokerEnvelope): Promise<void>;
+    context: {
+      buildContextMessages(
+        messages: Message[],
+        _skills: unknown[],
+        _facts: unknown[],
+      ): Message[];
+    };
+    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
+    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
   };
 
   runtimeAny.getMemory = (_sessionId: string) => Promise.resolve(memory);
@@ -125,7 +138,7 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
   const runtimeAny = runtime as unknown as {
-    handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void>;
+    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
   };
 
   await runtimeAny.handleTaskSubmitMessage({
@@ -135,7 +148,6 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
     type: "task_submit",
     timestamp: new Date().toISOString(),
     payload: {
-      targetAgent: "agent-beta",
       taskId: "task-1",
       contextId: "ctx-1",
       message: {
@@ -182,7 +194,7 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
   const runtimeAny = runtime as unknown as {
-    handleTaskContinueMessage(msg: BrokerEnvelope): Promise<void>;
+    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
   };
 
   await runtimeAny.handleTaskContinueMessage({
@@ -219,19 +231,23 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
 
 Deno.test("AgentRuntime turns broker exec approval requirements into canonical INPUT_REQUIRED", async () => {
   const broker = createBrokerStub();
-  broker.complete = () => Promise.resolve({
-    content: "",
-    toolCalls: [
-      {
-        id: "tool-1",
-        type: "function",
-        function: {
-          name: "shell",
-          arguments: JSON.stringify({ command: "git status", dry_run: false }),
+  broker.complete = () =>
+    Promise.resolve({
+      content: "",
+      toolCalls: [
+        {
+          id: "tool-1",
+          type: "function",
+          function: {
+            name: "shell",
+            arguments: JSON.stringify({
+              command: "git status",
+              dry_run: false,
+            }),
+          },
         },
-      },
-    ],
-  });
+      ],
+    });
   broker.execTool = (_tool, _args, correlation) => {
     broker.lastExecCorrelation = correlation;
     return Promise.resolve({
@@ -244,7 +260,8 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
           binary: "git",
           reason: "always-ask",
         },
-        recovery: "Resume the canonical task with approval metadata to continue",
+        recovery:
+          "Resume the canonical task with approval metadata to continue",
       },
     });
   };
@@ -252,7 +269,7 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
   const runtimeAny = runtime as unknown as {
-    handleTaskSubmitMessage(msg: BrokerEnvelope): Promise<void>;
+    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
   };
 
   await runtimeAny.handleTaskSubmitMessage({
@@ -262,7 +279,6 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
     type: "task_submit",
     timestamp: new Date().toISOString(),
     payload: {
-      targetAgent: "agent-beta",
       taskId: "task-approval",
       contextId: "ctx-approval",
       message: {
@@ -293,4 +309,31 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
     "assistant",
     "tool",
   ]);
+});
+
+Deno.test("AgentRuntime rejects non-canonical broker envelopes fail-fast", async () => {
+  const broker = createBrokerStub();
+  const memory = new MemoryStub();
+  const runtime = createRuntime(broker, memory);
+
+  await assertRejects(
+    async () => {
+      await runtime.handleIncomingMessage({
+        id: "msg-noop",
+        from: "broker",
+        to: "agent-beta",
+        type: "tool_response",
+        timestamp: new Date().toISOString(),
+        payload: {
+          success: true,
+          output: "noop",
+        },
+      } as never);
+    },
+    Error,
+    "INVALID_BROKER_MESSAGE",
+  );
+
+  assertEquals(broker.reportedTasks.length, 0);
+  assertEquals(memory.getMessages().length, 0);
 });

@@ -1,10 +1,10 @@
 import { assertEquals } from "@std/assert";
 import { AgentError } from "../shared/errors.ts";
 import {
-  executeCanonicalWorkerTask,
   type CanonicalWorkerTaskRequest,
+  executeCanonicalWorkerTask,
 } from "./worker_entrypoint.ts";
-import type { AgentLoopLike, AgentLoopFactoryContext } from "./loop.ts";
+import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import type { ApprovalRequest } from "../shared/types.ts";
@@ -25,9 +25,11 @@ class StubLoop implements AgentLoopLike {
   }
 }
 
-function createRequest(overrides: Partial<CanonicalWorkerTaskRequest> = {}): CanonicalWorkerTaskRequest {
+function createRequest(
+  overrides: Partial<CanonicalWorkerTaskRequest> = {},
+): CanonicalWorkerTaskRequest {
   return {
-    type: "process",
+    type: "run",
     requestId: "req-1",
     sessionId: "session-1",
     message: "hello",
@@ -41,14 +43,22 @@ Deno.test("executeCanonicalWorkerTask maps local work into canonical A2A lifecyc
   const updates: string[] = [];
 
   const result = await executeCanonicalWorkerTask(createRequest(), {
-    createLoop: () => new StubLoop(() => Promise.resolve({ content: "done", finishReason: "stop" })),
-    onTaskUpdate: (task: Task) => { updates.push(task.status.state); },
+    createLoop: () =>
+      new StubLoop(() =>
+        Promise.resolve({ content: "done", finishReason: "stop" })
+      ),
+    onTaskUpdate: (task: Task) => {
+      updates.push(task.status.state);
+    },
   });
 
   assertEquals(updates, ["SUBMITTED", "WORKING", "COMPLETED"]);
   assertEquals(result.task.id, "req-1");
   assertEquals(result.task.contextId, "session-1");
-  assertEquals(result.task.artifacts[0].parts[0], { kind: "text", text: "done" });
+  assertEquals(result.task.artifacts[0].parts[0], {
+    kind: "text",
+    text: "done",
+  });
   assertEquals(result.response, { content: "done", finishReason: "stop" });
 });
 
@@ -74,23 +84,40 @@ Deno.test("executeCanonicalWorkerTask surfaces approval pauses as INPUT_REQUIRED
         approvals.push(request);
         return Promise.resolve({ approved: true });
       },
-      onTaskUpdate: (task: Task) => { updates.push(task.status.state); },
+      onTaskUpdate: (task: Task) => {
+        updates.push(task.status.state);
+      },
     },
   );
 
   assertEquals(approvals.length, 1);
-  assertEquals(updates, ["SUBMITTED", "WORKING", "INPUT_REQUIRED", "WORKING", "COMPLETED"]);
+  assertEquals(updates, [
+    "SUBMITTED",
+    "WORKING",
+    "INPUT_REQUIRED",
+    "WORKING",
+    "COMPLETED",
+  ]);
   assertEquals(result.task.status.state, "COMPLETED");
 });
 
 Deno.test("executeCanonicalWorkerTask classifies user refusals as REJECTED", async () => {
   const updates: string[] = [];
 
-  const result = await executeCanonicalWorkerTask(createRequest({ message: "rm -rf /" }), {
-    createLoop: () =>
-      new StubLoop(() => Promise.reject(new AgentError("USER_DENIED", { command: "rm -rf /" }, "denied"))),
-    onTaskUpdate: (task: Task) => { updates.push(task.status.state); },
-  });
+  const result = await executeCanonicalWorkerTask(
+    createRequest({ message: "rm -rf /" }),
+    {
+      createLoop: () =>
+        new StubLoop(() =>
+          Promise.reject(
+            new AgentError("USER_DENIED", { command: "rm -rf /" }, "denied"),
+          )
+        ),
+      onTaskUpdate: (task: Task) => {
+        updates.push(task.status.state);
+      },
+    },
+  );
 
   assertEquals(updates, ["SUBMITTED", "WORKING", "REJECTED"]);
   assertEquals(result.task.status.state, "REJECTED");
@@ -103,7 +130,9 @@ Deno.test("executeCanonicalWorkerTask maps runtime errors to FAILED", async () =
   const result = await executeCanonicalWorkerTask(createRequest(), {
     createLoop: () =>
       new StubLoop(() => Promise.reject(new Error("network timeout"))),
-    onTaskUpdate: (task: Task) => { updates.push(task.status.state); },
+    onTaskUpdate: (task: Task) => {
+      updates.push(task.status.state);
+    },
   });
 
   assertEquals(updates, ["SUBMITTED", "WORKING", "FAILED"]);

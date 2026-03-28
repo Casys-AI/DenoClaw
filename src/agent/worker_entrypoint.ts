@@ -13,7 +13,11 @@
  */
 
 import { AgentLoop } from "./loop.ts";
-import type { AgentLoopLike, AgentLoopFactoryContext, AskApprovalFn } from "./loop.ts";
+import type {
+  AgentLoopFactoryContext,
+  AgentLoopLike,
+  AskApprovalFn,
+} from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
@@ -23,17 +27,17 @@ import { log } from "../shared/log.ts";
 import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
-  mapLocalTextInputToTask,
-  mapTaskResultToCompletion,
-  mapTaskErrorToTerminalStatus,
   mapApprovalPauseToInputRequiredTask,
+  mapLocalTextInputToTask,
+  mapTaskErrorToTerminalStatus,
+  mapTaskResultToCompletion,
 } from "../messaging/a2a/task_mapping.ts";
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
-  WorkerRunRequest,
   WorkerRequest,
   WorkerResponse,
+  WorkerRunRequest,
 } from "./worker_protocol.ts";
 
 // ── Canonical A2A task execution (Task 3.2) ──────────────
@@ -98,24 +102,24 @@ export async function executeCanonicalWorkerTask(
   // Build approval wrapper that surfaces pauses in A2A lifecycle
   const wrappedAskApproval: AskApprovalFn | undefined = deps.askApproval
     ? async (req: ApprovalRequest): Promise<ApprovalResponse> => {
-        // Transition to INPUT_REQUIRED
-        task = mapApprovalPauseToInputRequiredTask(task, {
-          command: req.command,
-          binary: req.binary,
-          prompt: `Awaiting approval for ${req.binary}: ${req.command}`,
-          continuationToken: req.requestId,
-        });
-        deps.onTaskUpdate?.(task);
+      // Transition to INPUT_REQUIRED
+      task = mapApprovalPauseToInputRequiredTask(task, {
+        command: req.command,
+        binary: req.binary,
+        prompt: `Awaiting approval for ${req.binary}: ${req.command}`,
+        continuationToken: req.requestId,
+      });
+      deps.onTaskUpdate?.(task);
 
-        // Transport the approval request
-        const response = await deps.askApproval!(req);
+      // Transport the approval request
+      const response = await deps.askApproval!(req);
 
-        // Resume to WORKING
-        task = transitionTask(task, "WORKING");
-        deps.onTaskUpdate?.(task);
+      // Resume to WORKING
+      task = transitionTask(task, "WORKING");
+      deps.onTaskUpdate?.(task);
 
-        return response;
-      }
+      return response;
+    }
     : undefined;
 
   // Create the loop with canonical context
@@ -172,7 +176,14 @@ function emitTaskStarted(
   taskId?: string,
   contextId?: string,
 ): void {
-  respond({ type: "task_started", requestId, sessionId, traceId, taskId, contextId });
+  respond({
+    type: "task_started",
+    requestId,
+    sessionId,
+    traceId,
+    taskId,
+    contextId,
+  });
 }
 
 function emitTaskCompleted(requestId: string): void {
@@ -333,7 +344,10 @@ const broadcast = new BroadcastChannel("denoclaw");
 broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
     drainAskPending();
-    if (sharedKv) { sharedKv.close(); sharedKv = null; }
+    if (sharedKv) {
+      sharedKv.close();
+      sharedKv = null;
+    }
     broadcast.close();
     workerGlobal.close();
   }
@@ -398,7 +412,10 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         sharedKv = await Deno.openKv(msg.kvPaths.shared);
         traceWriter = new TraceWriter(sharedKv);
       } catch (e) {
-        log.warn("Shared KV unavailable — tracing disabled", e instanceof Error ? e.message : String(e));
+        log.warn(
+          "Shared KV unavailable — tracing disabled",
+          e instanceof Error ? e.message : String(e),
+        );
       }
       respond({ type: "ready", agentId });
       break;
@@ -433,14 +450,15 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             contextId,
           },
           {
-            createLoop: (ctx) => createAgentLoop(
-              ctx.sessionId,
-              ctx.model,
-              ctx.traceId,
-              ctx.taskId,
-              ctx.contextId,
-              ctx.askApproval,
-            ),
+            createLoop: (ctx) =>
+              createAgentLoop(
+                ctx.sessionId,
+                ctx.model,
+                ctx.traceId,
+                ctx.taskId,
+                ctx.contextId,
+                ctx.askApproval,
+              ),
             askApproval,
             onTaskUpdate: (task) => {
               emitTaskObservation(
@@ -615,7 +633,10 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
     case "shutdown": {
       drainAskPending();
-      if (sharedKv) { sharedKv.close(); sharedKv = null; }
+      if (sharedKv) {
+        sharedKv.close();
+        sharedKv = null;
+      }
       broadcast.close();
       workerGlobal.close();
       break;

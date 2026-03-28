@@ -1,5 +1,16 @@
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { BrokerServer } from "./broker.ts";
+import { AuthManager } from "./auth.ts";
+import {
+  DENOCLAW_TUNNEL_PROTOCOL,
+  getAcceptedTunnelProtocol,
+  WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
+} from "./tunnel_protocol.ts";
 import {
   createAwaitedInputMetadata,
   createResumePayloadMetadata,
@@ -418,11 +429,14 @@ Deno.test("BrokerServer returns EXEC_APPROVAL_REQUIRED for broker-backed shell t
 
     const replyPromise = waitForQueuedMessage(
       kv,
-      (message) => message.type === "tool_response" && message.to === "agent-alpha",
+      (message) =>
+        message.type === "tool_response" && message.to === "agent-alpha",
     );
 
     await (broker as unknown as {
-      handleToolRequest(msg: Extract<BrokerMessage, { type: "tool_request" }>): Promise<void>;
+      handleToolRequest(
+        msg: Extract<BrokerMessage, { type: "tool_request" }>,
+      ): Promise<void>;
     }).handleToolRequest({
       id: "tool-req-1",
       from: "agent-alpha",
@@ -436,7 +450,10 @@ Deno.test("BrokerServer returns EXEC_APPROVAL_REQUIRED for broker-backed shell t
       },
     });
 
-    const reply = await replyPromise as Extract<BrokerMessage, { type: "tool_response" }>;
+    const reply = await replyPromise as Extract<
+      BrokerMessage,
+      { type: "tool_response" }
+    >;
     assertEquals(reply.payload.error?.code, "EXEC_APPROVAL_REQUIRED");
     assertEquals(reply.payload.error?.context, {
       taskId: "task-approval",
@@ -499,7 +516,10 @@ Deno.test("BrokerServer consumes one approved continuation to allow the next bro
     await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
       message: createMessage("Approved"),
-      metadata: createResumePayloadMetadata({ kind: "approval", approved: true }),
+      metadata: createResumePayloadMetadata({
+        kind: "approval",
+        approved: true,
+      }),
     });
 
     const firstCheck = await (broker as unknown as {
@@ -603,7 +623,10 @@ Deno.test("BrokerServer rejects grant consumption when command does not match", 
     await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
       message: createMessage("Approved"),
-      metadata: createResumePayloadMetadata({ kind: "approval", approved: true }),
+      metadata: createResumePayloadMetadata({
+        kind: "approval",
+        approved: true,
+      }),
     });
 
     // Try to consume with a DIFFERENT command — must be rejected
@@ -658,5 +681,158 @@ Deno.test("BrokerServer rejects grant consumption when command does not match", 
   } finally {
     kv.close();
     await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("Broker tunnel protocol negotiation prefers the canonical subprotocol", () => {
+  assertEquals(
+    getAcceptedTunnelProtocol(
+      `${DENOCLAW_TUNNEL_PROTOCOL}, legacy-protocol`,
+    ),
+    DENOCLAW_TUNNEL_PROTOCOL,
+  );
+  assertEquals(getAcceptedTunnelProtocol("legacy-protocol"), undefined);
+  assertEquals(getAcceptedTunnelProtocol(null), undefined);
+});
+
+Deno.test("BrokerServer rejects tunnel upgrades without the canonical subprotocol", async () => {
+  const broker = new BrokerServer(createConfig(), {
+    // deno-lint-ignore no-explicit-any
+    metrics: { recordAgentMessage: async () => {} } as any,
+  });
+
+  try {
+    const res = await (broker as unknown as {
+      handleTunnelUpgrade(req: Request): Promise<Response>;
+    }).handleTunnelUpgrade(
+      new Request("http://localhost/tunnel", {
+        headers: {
+          upgrade: "websocket",
+        },
+      }),
+    );
+
+    assertEquals(res.status, 426);
+    assertEquals(
+      await res.text(),
+      `Expected WebSocket subprotocol: ${DENOCLAW_TUNNEL_PROTOCOL}`,
+    );
+  } finally {
+    await broker.stop();
+  }
+});
+
+Deno.test("BrokerServer rejects tunnel upgrades without Authorization bearer auth", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  const broker = new BrokerServer(createConfig(), {
+    kv,
+    // deno-lint-ignore no-explicit-any
+    metrics: { recordAgentMessage: async () => {} } as any,
+  });
+  (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+
+  try {
+    const res = await (broker as unknown as {
+      handleTunnelUpgrade(req: Request): Promise<Response>;
+    }).handleTunnelUpgrade(
+      new Request("http://localhost/tunnel", {
+        headers: {
+          upgrade: "websocket",
+          "sec-websocket-protocol": DENOCLAW_TUNNEL_PROTOCOL,
+        },
+      }),
+    );
+
+    assertEquals(res.status, 401);
+    assertEquals(await res.json(), {
+      error: {
+        code: "UNAUTHORIZED",
+        recovery: "Add Authorization: Bearer <invite-or-session-token> header",
+      },
+    });
+  } finally {
+    await broker.stop();
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer tunnel auth does not fall back to static API tokens", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  const broker = new BrokerServer(createConfig(), {
+    kv,
+    // deno-lint-ignore no-explicit-any
+    metrics: { recordAgentMessage: async () => {} } as any,
+  });
+  (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+  const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+  Deno.env.set("DENOCLAW_API_TOKEN", "static-token");
+
+  try {
+    const res = await (broker as unknown as {
+      handleTunnelUpgrade(req: Request): Promise<Response>;
+    }).handleTunnelUpgrade(
+      new Request("http://localhost/tunnel", {
+        headers: {
+          upgrade: "websocket",
+          "sec-websocket-protocol": DENOCLAW_TUNNEL_PROTOCOL,
+          authorization: "Bearer static-token",
+        },
+      }),
+    );
+
+    assertEquals(res.status, 401);
+    assertEquals(await res.json(), {
+      error: {
+        code: "AUTH_FAILED",
+        recovery: "Reconnect with a valid tunnel invite or session token",
+      },
+    });
+  } finally {
+    if (previousStaticToken === undefined) {
+      Deno.env.delete("DENOCLAW_API_TOKEN");
+    } else {
+      Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+    }
+    await broker.stop();
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer routeToTunnel rejects saturated tunnels", async () => {
+  const broker = new BrokerServer(createConfig(), {
+    // deno-lint-ignore no-explicit-any
+    metrics: { recordAgentMessage: async () => {} } as any,
+  });
+
+  try {
+    const saturatedSocket = {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: WS_BUFFERED_AMOUNT_HIGH_WATERMARK + 1,
+      send: () => {
+        throw new Error("send should not be called for saturated tunnel");
+      },
+    } as unknown as WebSocket;
+
+    assertThrows(
+      () =>
+        (broker as unknown as {
+          routeToTunnel(ws: WebSocket, msg: BrokerMessage): void;
+        }).routeToTunnel(saturatedSocket, {
+          id: "msg-backpressure",
+          from: "broker",
+          to: "agent-beta",
+          type: "task_result",
+          payload: { task: null },
+          timestamp: new Date().toISOString(),
+        }),
+      Error,
+      "Tunnel is saturated",
+    );
+  } finally {
+    await broker.stop();
   }
 });

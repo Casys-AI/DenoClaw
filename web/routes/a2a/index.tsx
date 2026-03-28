@@ -5,10 +5,10 @@ import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../../lib/dashboard-auth.ts";
-import type { AgentTaskEntry } from "../../lib/types.ts";
+import type { TaskObservationEntry } from "../../lib/types.ts";
 
 interface A2AData {
-  tasks: AgentTaskEntry[];
+  tasks: TaskObservationEntry[];
   brokerUrl: string;
   statusFilter: string;
   searchQuery: string;
@@ -23,12 +23,12 @@ export const handler = {
     const brokerUrl = dashboard.brokerUrl;
     const statusFilter = ctx.url.searchParams.get("status") || "all";
     const searchQuery = ctx.url.searchParams.get("q") || "";
-    let tasks: AgentTaskEntry[] = [];
+    let tasks: TaskObservationEntry[] = [];
     try {
       const headers: HeadersInit = dashboard.token
         ? { "Authorization": `Bearer ${dashboard.token}` }
         : {};
-      const res = await fetch(`${brokerUrl}/agents/tasks`, { headers });
+      const res = await fetch(`${brokerUrl}/tasks/observations`, { headers });
       if (res.ok) tasks = await res.json();
     } catch { /* gateway not running */ }
 
@@ -164,7 +164,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
               />
             </svg>
             <span>
-              No A2A tasks recorded yet. Agents communicate via the{" "}
+              No task observations recorded yet. Agents communicate via the{" "}
               <code class="font-data">send_to_agent</code> tool.
             </span>
           </div>

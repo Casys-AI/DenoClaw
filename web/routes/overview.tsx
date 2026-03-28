@@ -18,8 +18,8 @@ import { AlertStrip } from "../components/AlertStrip.tsx";
 import type {
   AgentMetrics,
   AgentStatusEntry,
-  AgentTaskEntry,
   MetricsSummary,
+  TaskObservationEntry,
 } from "../lib/types.ts";
 
 interface OverviewData {
@@ -27,7 +27,7 @@ interface OverviewData {
   summary: MetricsSummary;
   agents: AgentStatusEntry[];
   metrics: AgentMetrics[];
-  tasks: AgentTaskEntry[];
+  tasks: TaskObservationEntry[];
   selectedInstance: string;
   tunnelCount: number;
 }
@@ -66,14 +66,14 @@ export const handler = {
       } catch { /* skip */ }
     }
 
-    // Fetch recent A2A tasks
-    let tasks: AgentTaskEntry[] = [];
+    // Fetch recent task observations
+    let tasks: TaskObservationEntry[] = [];
     try {
       const brokerUrl = filtered[0]?.instance.url ?? dashboard.brokerUrl;
       const headers: HeadersInit = dashboard.token
         ? { "Authorization": `Bearer ${dashboard.token}` }
         : {};
-      const res = await fetch(`${brokerUrl}/agents/tasks`, { headers });
+      const res = await fetch(`${brokerUrl}/tasks/observations`, { headers });
       if (res.ok) {
         const body = await res.json();
         tasks = Array.isArray(body) ? body.slice(0, 5) : [];
@@ -263,7 +263,7 @@ export default function Overview({ data }: { data: OverviewData }) {
           </div>
         </div>
 
-        {/* Recent A2A tasks — 2/5 */}
+        {/* Recent task observations — 2/5 */}
         <div class="lg:col-span-2">
           <div class="card bg-base-200 h-full">
             <div class="card-body">

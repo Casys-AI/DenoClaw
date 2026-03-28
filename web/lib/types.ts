@@ -62,7 +62,7 @@ export interface CronJob {
   nextRun?: string;
 }
 
-export interface AgentTaskEntry {
+export interface TaskObservationEntry {
   taskId: string;
   from: string;
   to: string;

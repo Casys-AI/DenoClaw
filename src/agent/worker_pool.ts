@@ -1,18 +1,23 @@
 import type { AgentResponse } from "./types.ts";
 import type {
+  WorkerAskApprovalMessage,
   WorkerConfig,
+  WorkerPeerResponseRequest,
+  WorkerPeerSendMessage,
   WorkerRequest,
   WorkerResponse,
+  WorkerRunRequest,
+  WorkerTaskObserveMessage,
 } from "./worker_protocol.ts";
 import { log } from "../shared/log.ts";
 import {
   generateId,
-  getAgentRuntimeDir,
   getAgentMemoryPath,
+  getAgentRuntimeDir,
 } from "../shared/helpers.ts";
 import { ensureDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry, ApprovalReason } from "../shared/types.ts";
 
 interface PendingRequest {
   resolve: (value: AgentResponse) => void;
@@ -39,8 +44,8 @@ export interface WorkerPoolCallbacks {
     requestId: string,
     command: string,
     binary: string,
-    reason: string,
-  ) => Promise<{ approved: boolean; allowAlways?: boolean }>; // reason narrowed by caller via WorkerResponse type
+    reason: ApprovalReason,
+  ) => Promise<{ approved: boolean; allowAlways?: boolean }>;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -176,7 +181,7 @@ export class WorkerPool {
 
   private handleWorkerMessage(fromAgentId: string, msg: WorkerResponse): void {
     switch (msg.type) {
-      case "result": {
+      case "run_result": {
         const req = this.pending.get(msg.requestId);
         if (req) {
           clearTimeout(req.timer);
@@ -186,7 +191,7 @@ export class WorkerPool {
         break;
       }
 
-      case "error": {
+      case "run_error": {
         const req = this.pending.get(msg.requestId);
         if (req) {
           clearTimeout(req.timer);
@@ -204,28 +209,20 @@ export class WorkerPool {
         break;
       }
 
-      case "agent_send": {
-        this.routeAgentMessage(
-          fromAgentId,
-          msg.toAgent,
-          msg.message,
-          msg.requestId,
-          msg.taskId,
-          msg.contextId,
-          msg.traceId,
-        );
+      case "peer_send": {
+        this.routeAgentMessage(fromAgentId, msg);
         break;
       }
 
-      case "agent_result": {
+      case "peer_result": {
         const pendingReq = this.agentPending.get(msg.requestId);
         if (pendingReq) {
           clearTimeout(pendingReq.timer);
           this.agentPending.delete(msg.requestId);
           const source = this.agents.get(pendingReq.fromAgent);
           if (source) {
-            const response: WorkerRequest = {
-              type: "agent_response",
+            const response: WorkerPeerResponseRequest = {
+              type: "peer_response",
               requestId: pendingReq.sourceRequestId,
               content: msg.content,
               error: msg.error,
@@ -252,8 +249,8 @@ export class WorkerPool {
         break;
       }
 
-      case "agent_task": {
-        this.writeAgentTask(msg);
+      case "task_observe": {
+        this.writeTaskObservation(msg);
         break;
       }
 
@@ -276,7 +273,7 @@ export class WorkerPool {
 
   private async handleAskApproval(
     agentId: string,
-    msg: { requestId: string; command: string; binary: string; reason: string },
+    msg: WorkerAskApprovalMessage,
   ): Promise<void> {
     const entry = this.agents.get(agentId);
     if (!entry) return;
@@ -358,8 +355,8 @@ export class WorkerPool {
 
       this.pending.set(requestId, { resolve, reject, timer });
 
-      const msg: WorkerRequest = {
-        type: "process",
+      const msg: WorkerRunRequest = {
+        type: "run",
         requestId,
         sessionId,
         message,
@@ -466,23 +463,14 @@ export class WorkerPool {
     );
   }
 
-  private writeAgentTask(
-    msg: {
-      taskId: string;
-      from: string;
-      to: string;
-      message: string;
-      status: string;
-      result?: string;
-      traceId?: string;
-      contextId?: string;
-    },
+  private writeTaskObservation(
+    msg: WorkerTaskObserveMessage,
   ): void {
     if (!this.sharedKv) return;
     const task = { ...msg, timestamp: new Date().toISOString() };
     this.sharedKv.atomic()
-      .set(["agent_tasks", msg.taskId], task)
-      .set(["_dashboard", "agent_task_update"], task)
+      .set(["task_observations", msg.taskId], task)
+      .set(["_dashboard", "task_observation_update"], task)
       .commit()
       .catch(() => {/* best-effort */});
   }
@@ -491,27 +479,22 @@ export class WorkerPool {
 
   private routeAgentMessage(
     fromAgent: string,
-    toAgent: string,
-    message: string,
-    sourceRequestId: string,
-    taskId?: string,
-    contextId?: string,
-    traceId?: string,
+    msg: WorkerPeerSendMessage,
   ): void {
     // Peer check
     const registry = this.config.agents.registry;
     if (registry) {
       const sender = registry[fromAgent];
-      const target = registry[toAgent];
+      const target = registry[msg.toAgent];
 
       // Closed by default (ADR-006): undefined/empty = deny all, must explicitly list peers
       const senderPeers = sender?.peers ?? [];
-      if (!senderPeers.includes(toAgent) && !senderPeers.includes("*")) {
+      if (!senderPeers.includes(msg.toAgent) && !senderPeers.includes("*")) {
         this.rejectAgentRequest(
           fromAgent,
-          sourceRequestId,
+          msg.requestId,
           "PEER_NOT_ALLOWED",
-          `Agent "${fromAgent}" cannot send to "${toAgent}" (not in peers)`,
+          `Agent "${fromAgent}" cannot send to "${msg.toAgent}" (not in peers)`,
         );
         return;
       }
@@ -519,28 +502,28 @@ export class WorkerPool {
       if (!targetAccept.includes(fromAgent) && !targetAccept.includes("*")) {
         this.rejectAgentRequest(
           fromAgent,
-          sourceRequestId,
+          msg.requestId,
           "PEER_REJECTED",
-          `Agent "${toAgent}" does not accept from "${fromAgent}"`,
+          `Agent "${msg.toAgent}" does not accept from "${fromAgent}"`,
         );
         return;
       }
     }
 
     // Target worker exists?
-    const targetEntry = this.agents.get(toAgent);
+    const targetEntry = this.agents.get(msg.toAgent);
     if (!targetEntry || !targetEntry.ready) {
       this.rejectAgentRequest(
         fromAgent,
-        sourceRequestId,
+        msg.requestId,
         "NO_WORKER",
-        `Agent "${toAgent}" not found or not ready`,
+        `Agent "${msg.toAgent}" not found or not ready`,
       );
       return;
     }
 
     // Callback for metrics/logging
-    this.callbacks.onAgentMessage?.(fromAgent, toAgent, message);
+    this.callbacks.onAgentMessage?.(fromAgent, msg.toAgent, msg.message);
 
     // Route to target Worker with timeout
     const deliverRequestId = generateId();
@@ -548,32 +531,32 @@ export class WorkerPool {
       this.agentPending.delete(deliverRequestId);
       this.rejectAgentRequest(
         fromAgent,
-        sourceRequestId,
+        msg.requestId,
         "AGENT_MSG_TIMEOUT",
-        `Agent "${toAgent}" did not respond within 120s`,
+        `Agent "${msg.toAgent}" did not respond within 120s`,
       );
     }, DEFAULT_TIMEOUT_MS);
     this.agentPending.set(deliverRequestId, {
       fromAgent,
-      sourceRequestId,
-      taskId,
-      contextId,
-      traceId,
+      sourceRequestId: msg.requestId,
+      taskId: msg.taskId,
+      contextId: msg.contextId,
+      traceId: msg.traceId,
       timer,
     });
 
     const deliverMsg: WorkerRequest = {
-      type: "agent_deliver",
+      type: "peer_deliver",
       requestId: deliverRequestId,
       fromAgent,
-      message,
-      traceId,
-      taskId,
-      contextId,
+      message: msg.message,
+      traceId: msg.traceId,
+      taskId: msg.taskId,
+      contextId: msg.contextId,
     };
     targetEntry.worker.postMessage(deliverMsg);
 
-    log.info(`Agent message: ${fromAgent} → ${toAgent}`);
+    log.info(`Agent message: ${fromAgent} → ${msg.toAgent}`);
   }
 
   private rejectAgentRequest(
@@ -585,7 +568,7 @@ export class WorkerPool {
     const source = this.agents.get(fromAgent);
     if (source) {
       const response: WorkerRequest = {
-        type: "agent_response",
+        type: "peer_response",
         requestId: sourceRequestId,
         content: `[${code}] ${message}`,
         error: true,

@@ -4,7 +4,10 @@ import {
   createSSEResponse,
   kvEntryToDashboardEvent,
 } from "./monitoring.ts";
-import type { AgentStatusValue, AgentTaskEntry } from "../shared/types.ts";
+import type {
+  AgentStatusValue,
+  TaskObservationEntry,
+} from "../shared/types.ts";
 
 // ── buildWatchKeys ─────────────────────────────────────────
 
@@ -16,7 +19,7 @@ Deno.test({
     // Must contain at least the two dashboard sentinels
     const flat = keys.map((k) => k.join("/"));
     assertEquals(flat.includes("_dashboard/agents_list"), true);
-    assertEquals(flat.includes("_dashboard/agent_task_update"), true);
+    assertEquals(flat.includes("_dashboard/task_observation_update"), true);
   },
 });
 
@@ -60,7 +63,10 @@ function makeEntry(
 Deno.test({
   name: "kvEntryToDashboardEvent — agents_list key → agents_list_updated",
   fn() {
-    const entry = makeEntry(["_dashboard", "agents_list"], ["agent-a", "agent-b"]);
+    const entry = makeEntry(["_dashboard", "agents_list"], [
+      "agent-a",
+      "agent-b",
+    ]);
     const event = kvEntryToDashboardEvent(entry);
 
     assertEquals(event?.type, "agents_list_updated");
@@ -71,7 +77,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "kvEntryToDashboardEvent — agents_list null value → empty agentIds array",
+  name:
+    "kvEntryToDashboardEvent — agents_list null value → empty agentIds array",
   fn() {
     const entry: Deno.KvEntryMaybe<unknown> = {
       key: ["_dashboard", "agents_list"],
@@ -88,31 +95,33 @@ Deno.test({
 });
 
 Deno.test({
-  name: "kvEntryToDashboardEvent — agent_task_update key with value → agent_task",
+  name:
+    "kvEntryToDashboardEvent — task_observation_update key with value → task_observation",
   fn() {
-    const task: AgentTaskEntry = {
-      id: "t1",
+    const task: TaskObservationEntry = {
+      taskId: "t1",
       from: "alice",
       to: "bob",
       message: "hello",
       status: "pending",
       timestamp: "2026-01-01T00:00:00.000Z",
     };
-    const entry = makeEntry(["_dashboard", "agent_task_update"], task);
+    const entry = makeEntry(["_dashboard", "task_observation_update"], task);
     const event = kvEntryToDashboardEvent(entry);
 
-    assertEquals(event?.type, "agent_task");
-    if (event?.type === "agent_task") {
+    assertEquals(event?.type, "task_observation");
+    if (event?.type === "task_observation") {
       assertEquals(event.task, task);
     }
   },
 });
 
 Deno.test({
-  name: "kvEntryToDashboardEvent — agent_task_update with null value → null",
+  name:
+    "kvEntryToDashboardEvent — task_observation_update with null value → null",
   fn() {
     const entry: Deno.KvEntryMaybe<unknown> = {
-      key: ["_dashboard", "agent_task_update"],
+      key: ["_dashboard", "task_observation_update"],
       value: null,
       versionstamp: null,
     };

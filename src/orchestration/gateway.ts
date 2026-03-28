@@ -13,8 +13,8 @@ import {
   createSSEResponse,
   getAgentStatus,
   listAgentStatuses,
-  listAgentTasks,
   listCronJobs,
+  listTaskObservations,
 } from "./monitoring.ts";
 import {
   getTrace,
@@ -24,9 +24,97 @@ import {
 import { RateLimiter } from "./rate_limit.ts";
 import { GitHubOAuth } from "./github_oauth.ts";
 import { AgentStore } from "./agent_store.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 
 export type DashboardAuthMode = "local-open" | "token" | "github-oauth";
+export const GATEWAY_WS_IDLE_TIMEOUT_SECONDS = 30;
+const GATEWAY_WS_MAX_BUFFERED_AMOUNT = 1_000_000;
+
+export interface GatewayWsChatPayload {
+  type: "chat";
+  message: string;
+  agentId: string;
+  sessionId?: string;
+}
+
+export function parseGatewayWsChatPayload(raw: string): GatewayWsChatPayload {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "payload", expected: "valid JSON string" },
+      'Send a JSON payload like {"type":"chat","agentId":"...","message":"..."}',
+    );
+  }
+
+  if (typeof data !== "object" || data === null) {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "payload", expected: "object" },
+      "Send a JSON object payload",
+    );
+  }
+
+  const record = data as Record<string, unknown>;
+  if (record.type !== "chat") {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "type", expected: "chat" },
+      'Only {"type":"chat", ...} messages are accepted on /ws',
+    );
+  }
+  if (
+    typeof record.agentId !== "string" || record.agentId.trim().length === 0
+  ) {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "agentId" },
+      "Provide a non-empty 'agentId' in the message",
+    );
+  }
+  if (
+    typeof record.message !== "string" || record.message.trim().length === 0
+  ) {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "message" },
+      "Provide a non-empty 'message' in the payload",
+    );
+  }
+  if (record.sessionId !== undefined && typeof record.sessionId !== "string") {
+    throw new DenoClawError(
+      "INVALID_INPUT",
+      { field: "sessionId" },
+      "Provide 'sessionId' as a string when present",
+    );
+  }
+
+  return {
+    type: "chat",
+    agentId: record.agentId,
+    message: record.message,
+    ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+  };
+}
+
+function sendGatewayWsJson(socket: WebSocket, payload: unknown): void {
+  if (socket.readyState !== WebSocket.OPEN) return;
+  if (socket.bufferedAmount > GATEWAY_WS_MAX_BUFFERED_AMOUNT) {
+    socket.close(1013, "Gateway WebSocket saturated");
+    throw new DenoClawError(
+      "WS_BACKPRESSURE",
+      {
+        bufferedAmount: socket.bufferedAmount,
+        maxBufferedAmount: GATEWAY_WS_MAX_BUFFERED_AMOUNT,
+      },
+      "Reconnect after the WebSocket send buffer drains",
+    );
+  }
+  socket.send(JSON.stringify(payload));
+}
 
 export function getDashboardAuthMode(): DashboardAuthMode {
   const raw = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
@@ -260,7 +348,10 @@ export class Gateway {
           ? await this.githubOAuth.verifySession(req)
           : null;
         if (!user) {
-          const loginUrl = new URL(`${this.dashboardBasePath}/login`, url.origin);
+          const loginUrl = new URL(
+            `${this.dashboardBasePath}/login`,
+            url.origin,
+          );
           loginUrl.searchParams.set("next", `${url.pathname}${url.search}`);
           return Response.redirect(loginUrl.toString(), 302);
         }
@@ -433,7 +524,9 @@ export class Gateway {
       }
 
       const token = url.searchParams.get("token") || crypto.randomUUID();
-      const { socket, response } = Deno.upgradeWebSocket(req);
+      const { socket, response } = Deno.upgradeWebSocket(req, {
+        idleTimeout: GATEWAY_WS_IDLE_TIMEOUT_SECONDS,
+      });
 
       socket.onopen = () => {
         this.wsClients.set(token, socket);
@@ -442,54 +535,46 @@ export class Gateway {
 
       socket.onmessage = async (e) => {
         try {
-          const data = JSON.parse(e.data as string) as {
-            type: string;
-            message?: string;
-            sessionId?: string;
-            agentId?: string;
-          };
-
-          if (data.type === "chat" && data.message) {
-            if (!data.agentId) {
-              socket.send(
-                JSON.stringify({
-                  type: "error",
-                  error: {
-                    code: "INVALID_INPUT",
-                    context: { field: "agentId" },
-                    recovery: "Provide 'agentId' in the message",
-                  },
-                }),
-              );
-              return;
-            }
-            const sessionId = data.sessionId || `ws-${token}`;
-            await this.session.getOrCreate(sessionId, token, "websocket");
-
-            const result = await this.workerPool.send(
-              data.agentId,
-              sessionId,
-              data.message,
+          if (typeof e.data !== "string") {
+            throw new DenoClawError(
+              "INVALID_INPUT",
+              { field: "payload", expected: "text frame" },
+              "Binary WebSocket frames are not supported on /ws",
             );
-            socket.send(JSON.stringify({
-              type: "response",
-              sessionId,
-              content: result.content,
-            }));
           }
+
+          const data = parseGatewayWsChatPayload(e.data);
+          const sessionId = data.sessionId || `ws-${token}`;
+          await this.session.getOrCreate(sessionId, token, "websocket");
+
+          const result = await this.workerPool.send(
+            data.agentId,
+            sessionId,
+            data.message,
+          );
+          sendGatewayWsJson(socket, {
+            type: "response",
+            sessionId,
+            content: result.content,
+          });
         } catch (err) {
           log.error("Erreur WebSocket message", err);
-          const msg = err instanceof Error ? err.message : String(err);
-          socket.send(
-            JSON.stringify({
+          if (err instanceof DenoClawError) {
+            sendGatewayWsJson(socket, {
               type: "error",
-              error: {
-                code: "WS_MESSAGE_FAILED",
-                context: { message: msg },
-                recovery: "Check message format",
-              },
-            }),
-          );
+              error: err.toStructured(),
+            });
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          sendGatewayWsJson(socket, {
+            type: "error",
+            error: {
+              code: "WS_MESSAGE_FAILED",
+              context: { message: msg },
+              recovery: "Check message format",
+            },
+          });
         }
       };
 
@@ -533,11 +618,11 @@ export class Gateway {
       return Response.json(await this.metrics.getAllMetrics());
     }
 
-    // ── Agent task endpoints (before the /agents/ wildcard) ──
+    // ── Task observation endpoints (before the /agents/ wildcard) ──
 
-    if (url.pathname === "/agents/tasks") {
+    if (url.pathname === "/tasks/observations") {
       if (!this.kv) return Response.json([]);
-      return Response.json(await listAgentTasks(this.kv));
+      return Response.json(await listTaskObservations(this.kv));
     }
 
     if (

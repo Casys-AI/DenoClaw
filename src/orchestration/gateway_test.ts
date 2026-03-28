@@ -1,7 +1,9 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import {
+  GATEWAY_WS_IDLE_TIMEOUT_SECONDS,
   getDashboardAllowedUsers,
   getDashboardAuthMode,
+  parseGatewayWsChatPayload,
 } from "./gateway.ts";
 
 // ── getDashboardAuthMode ───────────────────────────────────
@@ -23,7 +25,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAuthMode — returns github-oauth when DENO_DEPLOYMENT_ID is set",
+  name:
+    "getDashboardAuthMode — returns github-oauth when DENO_DEPLOYMENT_ID is set",
   fn() {
     const prevAuth = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
     const prevDeploy = Deno.env.get("DENO_DEPLOYMENT_ID");
@@ -55,7 +58,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=github → github-oauth",
+  name:
+    "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=github → github-oauth",
   fn() {
     const prev = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
     Deno.env.set("DENOCLAW_DASHBOARD_AUTH_MODE", "github");
@@ -69,7 +73,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=oauth → github-oauth",
+  name:
+    "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=oauth → github-oauth",
   fn() {
     const prev = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
     Deno.env.set("DENOCLAW_DASHBOARD_AUTH_MODE", "oauth");
@@ -83,7 +88,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=github-oauth → github-oauth",
+  name:
+    "getDashboardAuthMode — DENOCLAW_DASHBOARD_AUTH_MODE=github-oauth → github-oauth",
   fn() {
     const prev = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
     Deno.env.set("DENOCLAW_DASHBOARD_AUTH_MODE", "github-oauth");
@@ -97,7 +103,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAuthMode — unknown value falls back to DENO_DEPLOYMENT_ID logic",
+  name:
+    "getDashboardAuthMode — unknown value falls back to DENO_DEPLOYMENT_ID logic",
   fn() {
     const prevAuth = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
     const prevDeploy = Deno.env.get("DENO_DEPLOYMENT_ID");
@@ -132,7 +139,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "getDashboardAllowedUsers — parses comma-separated list from primary var",
+  name:
+    "getDashboardAllowedUsers — parses comma-separated list from primary var",
   fn() {
     const prev1 = Deno.env.get("DENOCLAW_DASHBOARD_GITHUB_ALLOWED_USERS");
     const prev2 = Deno.env.get("GITHUB_ALLOWED_USERS");
@@ -208,5 +216,88 @@ Deno.test({
 
     if (prev) Deno.env.set("DENOCLAW_DASHBOARD_GITHUB_ALLOWED_USERS", prev);
     else Deno.env.delete("DENOCLAW_DASHBOARD_GITHUB_ALLOWED_USERS");
+  },
+});
+
+// ── parseGatewayWsChatPayload ─────────────────────────────
+
+Deno.test({
+  name: "parseGatewayWsChatPayload — accepts strict chat payload",
+  fn() {
+    const payload = parseGatewayWsChatPayload(JSON.stringify({
+      type: "chat",
+      agentId: "agent-alpha",
+      sessionId: "session-1",
+      message: "hello",
+    }));
+
+    assertEquals(payload, {
+      type: "chat",
+      agentId: "agent-alpha",
+      sessionId: "session-1",
+      message: "hello",
+    });
+  },
+});
+
+Deno.test({
+  name: "parseGatewayWsChatPayload — rejects unknown message types",
+  fn() {
+    const err = (() => {
+      try {
+        parseGatewayWsChatPayload(JSON.stringify({
+          type: "ping",
+          agentId: "agent-alpha",
+          message: "hello",
+        }));
+      } catch (error) {
+        return error as Error;
+      }
+      return null;
+    })();
+
+    assertEquals(err?.message.includes("INVALID_INPUT"), true);
+  },
+});
+
+Deno.test({
+  name:
+    "parseGatewayWsChatPayload — rejects empty message and non-string sessionId",
+  fn() {
+    const emptyMessageErr = (() => {
+      try {
+        parseGatewayWsChatPayload(JSON.stringify({
+          type: "chat",
+          agentId: "agent-alpha",
+          message: "",
+        }));
+      } catch (error) {
+        return error as Error;
+      }
+      return null;
+    })();
+    assertEquals(emptyMessageErr?.message.includes("INVALID_INPUT"), true);
+
+    const badSessionErr = (() => {
+      try {
+        parseGatewayWsChatPayload(JSON.stringify({
+          type: "chat",
+          agentId: "agent-alpha",
+          message: "ok",
+          sessionId: 42,
+        }));
+      } catch (error) {
+        return error as Error;
+      }
+      return null;
+    })();
+    assertEquals(badSessionErr?.message.includes("INVALID_INPUT"), true);
+  },
+});
+
+Deno.test({
+  name: "gateway WS idle timeout remains explicit and non-zero",
+  fn() {
+    assertEquals(GATEWAY_WS_IDLE_TIMEOUT_SECONDS > 0, true);
   },
 });

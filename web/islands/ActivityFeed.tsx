@@ -54,12 +54,12 @@ function parseSSEEvent(
         detail: `Status → ${(status?.status as string) ?? "unknown"}`,
       };
     }
-    case "agent_task": {
+    case "task_observation": {
       const task = data.task as Record<string, unknown>;
       return {
         id: ++counterRef.current,
         time,
-        type: "A2A",
+        type: "task",
         color: "badge-accent",
         agent: `${task?.from} → ${task?.to}`,
         detail: `${task?.status}: ${
@@ -96,7 +96,7 @@ const FLUSH_INTERVAL_MS = 250;
 const INITIAL_VISIBLE_EVENTS = 50;
 const LOAD_MORE_EVENTS = 50;
 
-const FILTER_TYPES = ["All", "status", "A2A", "snapshot", "registry"] as const;
+const FILTER_TYPES = ["All", "status", "task", "snapshot", "registry"] as const;
 
 export default function ActivityFeed() {
   const [filter, setFilter] = useState<string>("All");

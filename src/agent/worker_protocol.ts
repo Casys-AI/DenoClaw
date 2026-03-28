@@ -5,12 +5,12 @@
  *
  * Each message type is classified as either:
  * - **infra** — runtime/lifecycle plumbing that must remain in the worker protocol
- * - **bridge** — compatibility shim for task-shaped messages that will migrate
- *   to canonical A2A task operations (submit/continue/cancel/stream)
+ * - **execution** — local run/delegation plumbing that remains internal to the
+ *   worker transport and does not define a second task contract
  *
  * The canonical task contract lives in `src/messaging/a2a/`. The worker protocol
  * handles only runtime coordination: init, ready, shutdown, approval transport,
- * and observability hooks. Task semantics (submit, result, delegation) are
+ * and observability hooks. Task semantics (submit, continue, result) are
  * routed through `executeCanonicalWorkerTask()` in worker_entrypoint.ts.
  */
 import type { AgentDefaults, ToolsConfig } from "./types.ts";
@@ -37,18 +37,26 @@ export interface WorkerKvPaths {
 
 /** infra: Messages that are strictly runtime/lifecycle coordination. */
 export type InfraRequestType = "init" | "ask_response" | "shutdown";
-export type InfraResponseType = "ready" | "ask_approval" | "task_started" | "task_completed";
+export type InfraResponseType =
+  | "ready"
+  | "ask_approval"
+  | "task_started"
+  | "task_completed";
 
-// ── Bridge message types (compatibility, slated for A2A migration) ──
+// ── Execution message types (internal runtime/delegation plumbing) ──
 
 /**
- * bridge: Messages that carry task-model semantics through the worker protocol.
- * These exist as a compatibility layer during the migration to canonical A2A
- * task operations. They delegate into executeCanonicalWorkerTask() internally
- * and will be replaced by A2A RuntimePort adapters.
+ * execution: Messages that trigger local task execution or peer delegation
+ * through the worker transport. They remain internal plumbing, while the
+ * canonical task contract continues to live in A2A.
  */
-export type BridgeRequestType = "process" | "agent_deliver" | "agent_response";
-export type BridgeResponseType = "result" | "error" | "agent_send" | "agent_result" | "agent_task";
+export type ExecutionRequestType = "run" | "peer_deliver" | "peer_response";
+export type ExecutionResponseType =
+  | "run_result"
+  | "run_error"
+  | "peer_send"
+  | "peer_result"
+  | "task_observe";
 
 // ── Main → Worker ────────────────────────────────────────
 
@@ -69,9 +77,9 @@ export type WorkerRequest =
   }
   // infra: graceful shutdown
   | { type: "shutdown" }
-  // bridge: task submission — delegates to executeCanonicalWorkerTask()
+  // execution: local task execution request
   | {
-    type: "process";
+    type: "run";
     requestId: string;
     sessionId: string;
     message: string;
@@ -80,9 +88,9 @@ export type WorkerRequest =
     taskId?: string;
     contextId?: string;
   }
-  // bridge: inter-agent task delegation
+  // execution: main process delivers a peer request to a target worker
   | {
-    type: "agent_deliver";
+    type: "peer_deliver";
     requestId: string;
     fromAgent: string;
     message: string;
@@ -90,9 +98,9 @@ export type WorkerRequest =
     taskId?: string;
     contextId?: string;
   }
-  // bridge: inter-agent response relay
+  // execution: main process relays a peer response back to the source worker
   | {
-    type: "agent_response";
+    type: "peer_response";
     requestId: string;
     content: string;
     error?: boolean;
@@ -122,18 +130,18 @@ export type WorkerResponse =
     contextId?: string;
   }
   | { type: "task_completed"; requestId: string }
-  // bridge: task result — will be replaced by A2A task completion events
+  // execution: local run result returned to main process
   | {
-    type: "result";
+    type: "run_result";
     requestId: string;
     content: string;
     finishReason?: string;
   }
-  // bridge: task error — will be replaced by A2A task failure events
-  | { type: "error"; requestId: string; code: string; message: string }
-  // bridge: inter-agent send request
+  // execution: local run error returned to main process
+  | { type: "run_error"; requestId: string; code: string; message: string }
+  // execution: source worker asks main process to route a peer request
   | {
-    type: "agent_send";
+    type: "peer_send";
     requestId: string;
     toAgent: string;
     message: string;
@@ -141,16 +149,16 @@ export type WorkerResponse =
     taskId?: string;
     contextId?: string;
   }
-  // bridge: inter-agent result
+  // execution: target worker returns peer result to main process
   | {
-    type: "agent_result";
+    type: "peer_result";
     requestId: string;
     content: string;
     error?: boolean;
   }
-  // bridge: inter-agent task observability
+  // execution: worker emits task-level observability to main process
   | {
-    type: "agent_task";
+    type: "task_observe";
     taskId: string;
     from: string;
     to: string;
@@ -161,6 +169,32 @@ export type WorkerResponse =
     contextId?: string;
   };
 
+export type WorkerRunRequest = Extract<WorkerRequest, { type: "run" }>;
+export type WorkerPeerDeliverRequest = Extract<
+  WorkerRequest,
+  { type: "peer_deliver" }
+>;
+export type WorkerPeerResponseRequest = Extract<
+  WorkerRequest,
+  { type: "peer_response" }
+>;
+export type WorkerAskApprovalMessage = Extract<
+  WorkerResponse,
+  { type: "ask_approval" }
+>;
+export type WorkerPeerSendMessage = Extract<
+  WorkerResponse,
+  { type: "peer_send" }
+>;
+export type WorkerPeerResultMessage = Extract<
+  WorkerResponse,
+  { type: "peer_result" }
+>;
+export type WorkerTaskObserveMessage = Extract<
+  WorkerResponse,
+  { type: "task_observe" }
+>;
+
 // ── Classification helpers ───────────────────────────────
 
 const INFRA_REQUEST_TYPES: ReadonlySet<InfraRequestType> = new Set([
@@ -169,10 +203,10 @@ const INFRA_REQUEST_TYPES: ReadonlySet<InfraRequestType> = new Set([
   "shutdown",
 ]);
 
-const BRIDGE_REQUEST_TYPES: ReadonlySet<BridgeRequestType> = new Set([
-  "process",
-  "agent_deliver",
-  "agent_response",
+const EXECUTION_REQUEST_TYPES: ReadonlySet<ExecutionRequestType> = new Set([
+  "run",
+  "peer_deliver",
+  "peer_response",
 ]);
 
 const INFRA_RESPONSE_TYPES: ReadonlySet<InfraResponseType> = new Set([
@@ -182,12 +216,12 @@ const INFRA_RESPONSE_TYPES: ReadonlySet<InfraResponseType> = new Set([
   "task_completed",
 ]);
 
-const BRIDGE_RESPONSE_TYPES: ReadonlySet<BridgeResponseType> = new Set([
-  "result",
-  "error",
-  "agent_send",
-  "agent_result",
-  "agent_task",
+const EXECUTION_RESPONSE_TYPES: ReadonlySet<ExecutionResponseType> = new Set([
+  "run_result",
+  "run_error",
+  "peer_send",
+  "peer_result",
+  "task_observe",
 ]);
 
 // test utilities
@@ -201,12 +235,12 @@ export function isInfraResponse(type: WorkerResponse["type"]): boolean {
   return INFRA_RESPONSE_TYPES.has(type as InfraResponseType);
 }
 
-/** Returns true if this request message type is a bridge (compatibility, slated for removal). */
-export function isBridgeRequest(type: WorkerRequest["type"]): boolean {
-  return BRIDGE_REQUEST_TYPES.has(type as BridgeRequestType);
+/** Returns true if this request message type is execution plumbing. */
+export function isExecutionRequest(type: WorkerRequest["type"]): boolean {
+  return EXECUTION_REQUEST_TYPES.has(type as ExecutionRequestType);
 }
 
-/** Returns true if this response message type is a bridge (compatibility, slated for removal). */
-export function isBridgeResponse(type: WorkerResponse["type"]): boolean {
-  return BRIDGE_RESPONSE_TYPES.has(type as BridgeResponseType);
+/** Returns true if this response message type is execution plumbing. */
+export function isExecutionResponse(type: WorkerResponse["type"]): boolean {
+  return EXECUTION_RESPONSE_TYPES.has(type as ExecutionResponseType);
 }

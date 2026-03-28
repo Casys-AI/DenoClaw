@@ -1,5 +1,5 @@
 import type {
-  BrokerMessage,
+  BrokerResponseMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
   BrokerTaskSubmitPayload,
@@ -47,7 +47,9 @@ export class BrokerClient implements AgentBrokerPort {
       new KvQueueTransport(agentId, { kv: deps.kv });
   }
 
-  private unwrapOrThrow(response: BrokerMessage): BrokerMessage {
+  private unwrapOrThrow(
+    response: BrokerResponseMessage,
+  ): Exclude<BrokerResponseMessage, { type: "error" }> {
     if (isBrokerErrorMessage(response)) {
       throw new DenoClawError(
         response.payload.code,
@@ -168,7 +170,11 @@ export class BrokerClient implements AgentBrokerPort {
 
   async continueTask(payload: BrokerTaskContinuePayload): Promise<Task | null> {
     const response = this.unwrapOrThrow(
-      await this.transport.send({ to: "broker", type: "task_continue", payload }),
+      await this.transport.send({
+        to: "broker",
+        type: "task_continue",
+        payload,
+      }),
     );
 
     if (response.type !== "task_result") {

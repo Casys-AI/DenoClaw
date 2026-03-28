@@ -1,10 +1,16 @@
 import type { BrokerMessage } from "./types.ts";
-import type { ToolResult } from "../shared/types.ts";
+import type { SandboxPermission, ToolResult } from "../shared/types.ts";
 import { ToolRegistry } from "../agent/tools/registry.ts";
 import { ShellTool } from "../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../agent/tools/file.ts";
 import { WebFetchTool } from "../agent/tools/web.ts";
 import { log } from "../shared/log.ts";
+import {
+  createTunnelRegisterMessage,
+  DENOCLAW_TUNNEL_PROTOCOL,
+  parseTunnelControlMessage,
+  WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
+} from "./tunnel_protocol.ts";
 
 interface LocalRelayConfig {
   brokerUrl: string;
@@ -14,6 +20,67 @@ interface LocalRelayConfig {
   };
   allowedAgents?: string[];
   autoApprove?: boolean;
+}
+
+type DenoWebSocketWithHeaders = {
+  new (
+    url: string,
+    options: {
+      headers: Record<string, string>;
+      protocols: string[];
+    },
+  ): WebSocket;
+};
+
+export function buildRelaySocketOptions(authToken: string): {
+  headers: Record<string, string>;
+  protocols: string[];
+} {
+  return {
+    headers: {
+      authorization: `Bearer ${authToken}`,
+    },
+    protocols: [DENOCLAW_TUNNEL_PROTOCOL],
+  };
+}
+
+export function resolveRelayAuthToken(
+  inviteToken: string,
+  sessionToken?: string | null,
+): string {
+  return sessionToken ?? inviteToken;
+}
+
+export function assertRelaySocketWritable(
+  socket: Pick<WebSocket, "readyState" | "bufferedAmount">,
+): void {
+  if (socket.readyState !== WebSocket.OPEN) {
+    throw new Error("Relay WebSocket is not open");
+  }
+  if (socket.bufferedAmount > WS_BUFFERED_AMOUNT_HIGH_WATERMARK) {
+    throw new Error("Relay WebSocket send buffer is saturated");
+  }
+}
+
+export function buildRelayRegistrationMessage(input: {
+  tools: string[];
+  toolPermissions?: Record<string, SandboxPermission[]>;
+  allowedAgents?: string[];
+}) {
+  return createTunnelRegisterMessage({
+    tunnelType: "local",
+    tools: input.tools,
+    toolPermissions: input.toolPermissions,
+    allowedAgents: input.allowedAgents,
+  });
+}
+
+function createRelaySocket(
+  url: string,
+  authToken: string,
+): WebSocket {
+  const DenoWebSocket = WebSocket as unknown as DenoWebSocketWithHeaders;
+  return new DenoWebSocket(url, buildRelaySocketOptions(authToken));
 }
 
 /**
@@ -26,6 +93,7 @@ export class LocalRelay {
   private config: LocalRelayConfig;
   private ws: WebSocket | null = null;
   private tools: ToolRegistry;
+  private sessionToken: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
 
@@ -55,46 +123,75 @@ export class LocalRelay {
   }
 
   async connect(): Promise<void> {
-    const url = `${this.config.brokerUrl}?token=${this.config.inviteToken}`;
+    const url = this.config.brokerUrl;
+    const authToken = resolveRelayAuthToken(
+      this.config.inviteToken,
+      this.sessionToken,
+    );
     log.info(`Relay: connexion à ${this.config.brokerUrl}...`);
 
-    this.ws = new WebSocket(url);
+    this.ws = createRelaySocket(url, authToken);
 
     this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      log.info("Relay: connecté au broker");
+      if (this.ws?.protocol !== DENOCLAW_TUNNEL_PROTOCOL) {
+        log.error(
+          `Relay: subprotocol invalide (attendu ${DENOCLAW_TUNNEL_PROTOCOL}, reçu ${
+            this.ws?.protocol || "aucun"
+          })`,
+        );
+        this.ws?.close(1002, "Expected denoclaw tunnel subprotocol");
+        return;
+      }
 
-      // Register capabilities (ADR-005 : inclut les permissions de chaque outil)
-      const registration = {
-        type: "register" as const,
-        tunnelId: "",
-        tunnelType: "local" as const,
+      this.reconnectAttempts = 0;
+      log.info(`Relay: connecté au broker (${this.ws.protocol})`);
+
+      const registration = buildRelayRegistrationMessage({
         tools: this.config.capabilities.tools,
         toolPermissions: this.tools.getToolPermissions(),
-        supportsAuth: true,
         allowedAgents: this.config.allowedAgents || [],
-      };
-
-      this.ws!.send(JSON.stringify(registration));
+      });
+      this.sendJson(registration);
     };
 
     this.ws.onmessage = async (e) => {
       try {
-        const msg = JSON.parse(e.data as string);
+        if (typeof e.data !== "string") {
+          this.ws?.close(1003, "Tunnel control frames must be text JSON");
+          throw new Error("Relay: broker sent a non-text tunnel frame");
+        }
 
-        if (msg.type === "registered") {
-          log.info(`Relay: enregistré (id: ${msg.tunnelId})`);
+        const raw = JSON.parse(e.data);
+        const control = parseTunnelControlMessage(raw);
+        if (control) {
+          if (control.type === "session_token") {
+            this.sessionToken = control.token;
+            log.info(
+              `Relay: session token reçu (expire: ${control.expiresAt})`,
+            );
+            return;
+          }
+
+          log.info(
+            `Relay: enregistré (id: ${control.tunnelId}, protocol: ${
+              this.ws?.protocol || "unknown"
+            })`,
+          );
           return;
         }
 
-        await this.handleBrokerMessage(msg as BrokerMessage);
+        await this.handleBrokerMessage(raw as BrokerMessage);
       } catch (err) {
         log.error("Relay: erreur traitement message", err);
       }
     };
 
-    this.ws.onclose = () => {
-      log.warn("Relay: déconnecté du broker");
+    this.ws.onclose = (e) => {
+      log.warn(
+        `Relay: déconnecté du broker (code=${e.code}, reason=${
+          e.reason || "none"
+        })`,
+      );
       this.attemptReconnect();
     };
 
@@ -149,7 +246,7 @@ export class LocalRelay {
         return;
     }
 
-    this.ws?.send(JSON.stringify(response));
+    this.sendJson(response);
   }
 
   private async executeTool(
@@ -188,5 +285,13 @@ export class LocalRelay {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  private sendJson(payload: unknown): void {
+    if (!this.ws) {
+      throw new Error("Relay WebSocket is not initialized");
+    }
+    assertRelaySocketWritable(this.ws);
+    this.ws.send(JSON.stringify(payload));
   }
 }

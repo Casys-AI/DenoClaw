@@ -78,12 +78,18 @@ export interface BrokerTaskResultPayload {
 
 // ── Message envelope union ───────────────────────────────
 
-export type BrokerLLMRequestMessage = BrokerEnvelopeBase<"llm_request", LLMRequest>;
+export type BrokerLLMRequestMessage = BrokerEnvelopeBase<
+  "llm_request",
+  LLMRequest
+>;
 export type BrokerLLMResponseMessage = BrokerEnvelopeBase<
   "llm_response",
   LLMResponsePayload
 >;
-export type BrokerToolRequestMessage = BrokerEnvelopeBase<"tool_request", ToolRequest>;
+export type BrokerToolRequestMessage = BrokerEnvelopeBase<
+  "tool_request",
+  ToolRequest
+>;
 export type BrokerToolResponseMessage = BrokerEnvelopeBase<
   "tool_response",
   ToolResponsePayload
@@ -96,7 +102,10 @@ export type BrokerTaskContinueMessage = BrokerEnvelopeBase<
   "task_continue",
   BrokerTaskContinuePayload
 >;
-export type BrokerTaskGetMessage = BrokerEnvelopeBase<"task_get", BrokerTaskQueryPayload>;
+export type BrokerTaskGetMessage = BrokerEnvelopeBase<
+  "task_get",
+  BrokerTaskQueryPayload
+>;
 export type BrokerTaskCancelMessage = BrokerEnvelopeBase<
   "task_cancel",
   BrokerTaskQueryPayload
@@ -105,45 +114,90 @@ export type BrokerTaskResultMessage = BrokerEnvelopeBase<
   "task_result",
   BrokerTaskResultPayload
 >;
-export type BrokerHeartbeatMessage = BrokerEnvelopeBase<
-  "heartbeat",
-  Record<string, never>
->;
 export type BrokerErrorMessage = BrokerEnvelopeBase<"error", StructuredError>;
 
-export type BrokerMessage =
+/** Broker-level runtime operations that are not canonical task semantics. */
+export type BrokerRuntimeMessage =
   | BrokerLLMRequestMessage
   | BrokerLLMResponseMessage
   | BrokerToolRequestMessage
-  | BrokerToolResponseMessage
-  | BrokerEnvelopeBase<"agent_message", {
-    targetAgent?: string;
-    instruction: string;
-    data?: unknown;
-    taskId?: string;
-    contextId?: string;
-    metadata?: Record<string, unknown>;
-  }>
-  | BrokerEnvelopeBase<"agent_response", {
-    accepted: true;
-    targetAgent: string;
-    taskId?: string;
-    contextId?: string;
-  }>
+  | BrokerToolResponseMessage;
+
+/** Canonical task-oriented broker messages. */
+export type BrokerTaskMessage =
   | BrokerTaskSubmitMessage
   | BrokerTaskContinueMessage
   | BrokerTaskGetMessage
   | BrokerTaskCancelMessage
+  | BrokerTaskResultMessage;
+
+/**
+ * Client/broker requests sent through BrokerTransport.
+ *
+ * Note: `task_result` is intentionally duplex here. It is used both as an
+ * agent -> broker report and as a broker -> client canonical task reply.
+ */
+export type BrokerRequestMessage =
+  | BrokerLLMRequestMessage
+  | BrokerToolRequestMessage
+  | BrokerTaskMessage;
+
+/** Valid broker replies for BrokerTransport request/response flows. */
+export type BrokerResponseMessage =
+  | BrokerLLMResponseMessage
+  | BrokerToolResponseMessage
   | BrokerTaskResultMessage
-  | BrokerHeartbeatMessage
+  | BrokerErrorMessage;
+
+/**
+ * Broker transport envelope union.
+ *
+ * ADR-011 boundary:
+ * - task semantics live in canonical `task_*` operations / A2A payloads
+ * - runtime execution operations (`llm_*`, `tool_*`) remain broker-level plumbing
+ * - legacy task-shaped broker variants (`agent_message`, `agent_response`, `heartbeat`)
+ *   have been removed from the orchestration contract
+ */
+export type BrokerMessage =
+  | BrokerRuntimeMessage
+  | BrokerTaskMessage
   | BrokerErrorMessage;
 
 export type BrokerMessageType = BrokerMessage["type"];
+
+export function isBrokerRuntimeMessage(
+  message: BrokerMessage,
+): message is BrokerRuntimeMessage {
+  return message.type === "llm_request" || message.type === "llm_response" ||
+    message.type === "tool_request" || message.type === "tool_response";
+}
+
+export function isBrokerTaskMessage(
+  message: BrokerMessage,
+): message is BrokerTaskMessage {
+  return message.type === "task_submit" || message.type === "task_continue" ||
+    message.type === "task_get" || message.type === "task_cancel" ||
+    message.type === "task_result";
+}
 
 export function isBrokerErrorMessage(
   message: BrokerMessage,
 ): message is BrokerErrorMessage {
   return message.type === "error";
+}
+
+export function isBrokerRequestMessage(
+  message: BrokerMessage,
+): message is BrokerRequestMessage {
+  return message.type === "llm_request" || message.type === "tool_request" ||
+    isBrokerTaskMessage(message);
+}
+
+export function isBrokerResponseMessage(
+  message: BrokerMessage,
+): message is BrokerResponseMessage {
+  return message.type === "llm_response" || message.type === "tool_response" ||
+    message.type === "task_result" || isBrokerErrorMessage(message);
 }
 
 // ── Tunnel capabilities ──────────────────────────────────
@@ -153,11 +207,10 @@ export type TunnelType = "local" | "instance";
 export interface TunnelCapabilities {
   tunnelId: string;
   type: TunnelType;
-  // Local tunnel: expose tools + auth flow
+  // Local tunnel: expose tools
   tools: string[];
   /** Permissions requises par chaque outil (ADR-005). Clé = nom outil, valeur = permissions. */
   toolPermissions?: Record<string, SandboxPermission[]>;
-  supportsAuth?: boolean;
   // Instance tunnel: expose remote agents via broker-to-broker
   agents?: string[];
   allowedAgents: string[];

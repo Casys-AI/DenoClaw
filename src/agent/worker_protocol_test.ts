@@ -1,9 +1,9 @@
 import { assertEquals } from "@std/assert";
 import {
+  isExecutionRequest,
+  isExecutionResponse,
   isInfraRequest,
   isInfraResponse,
-  isBridgeRequest,
-  isBridgeResponse,
 } from "./worker_protocol.ts";
 
 // ── Infra classification ─────────────────────────────────
@@ -21,43 +21,58 @@ Deno.test("worker protocol classifies ready, ask_approval, task_started, task_co
   assertEquals(isInfraResponse("task_completed"), true);
 });
 
-// ── Bridge classification ────────────────────────────────
+// ── Execution classification ─────────────────────────────
 
-Deno.test("worker protocol classifies process, agent_deliver, agent_response as bridge requests", () => {
-  assertEquals(isBridgeRequest("process"), true);
-  assertEquals(isBridgeRequest("agent_deliver"), true);
-  assertEquals(isBridgeRequest("agent_response"), true);
+Deno.test("worker protocol classifies run, peer_deliver, peer_response as execution requests", () => {
+  assertEquals(isExecutionRequest("run"), true);
+  assertEquals(isExecutionRequest("peer_deliver"), true);
+  assertEquals(isExecutionRequest("peer_response"), true);
 });
 
-Deno.test("worker protocol classifies result, error, agent_send, agent_result, agent_task as bridge responses", () => {
-  assertEquals(isBridgeResponse("result"), true);
-  assertEquals(isBridgeResponse("error"), true);
-  assertEquals(isBridgeResponse("agent_send"), true);
-  assertEquals(isBridgeResponse("agent_result"), true);
-  assertEquals(isBridgeResponse("agent_task"), true);
+Deno.test("worker protocol classifies run_result, run_error, peer_send, peer_result, task_observe as execution responses", () => {
+  assertEquals(isExecutionResponse("run_result"), true);
+  assertEquals(isExecutionResponse("run_error"), true);
+  assertEquals(isExecutionResponse("peer_send"), true);
+  assertEquals(isExecutionResponse("peer_result"), true);
+  assertEquals(isExecutionResponse("task_observe"), true);
 });
 
 // ── Mutual exclusion ─────────────────────────────────────
 
-Deno.test("worker protocol infra and bridge classifications are mutually exclusive for requests", () => {
+Deno.test("worker protocol infra and execution classifications are mutually exclusive for requests", () => {
   for (const type of ["init", "ask_response", "shutdown"] as const) {
     assertEquals(isInfraRequest(type), true);
-    assertEquals(isBridgeRequest(type), false);
+    assertEquals(isExecutionRequest(type), false);
   }
-  for (const type of ["process", "agent_deliver", "agent_response"] as const) {
+  for (const type of ["run", "peer_deliver", "peer_response"] as const) {
     assertEquals(isInfraRequest(type), false);
-    assertEquals(isBridgeRequest(type), true);
+    assertEquals(isExecutionRequest(type), true);
   }
 });
 
-Deno.test("worker protocol infra and bridge classifications are mutually exclusive for responses", () => {
-  for (const type of ["ready", "ask_approval", "task_started", "task_completed"] as const) {
+Deno.test("worker protocol infra and execution classifications are mutually exclusive for responses", () => {
+  for (
+    const type of [
+      "ready",
+      "ask_approval",
+      "task_started",
+      "task_completed",
+    ] as const
+  ) {
     assertEquals(isInfraResponse(type), true);
-    assertEquals(isBridgeResponse(type), false);
+    assertEquals(isExecutionResponse(type), false);
   }
-  for (const type of ["result", "error", "agent_send", "agent_result", "agent_task"] as const) {
+  for (
+    const type of [
+      "run_result",
+      "run_error",
+      "peer_send",
+      "peer_result",
+      "task_observe",
+    ] as const
+  ) {
     assertEquals(isInfraResponse(type), false);
-    assertEquals(isBridgeResponse(type), true);
+    assertEquals(isExecutionResponse(type), true);
   }
 });
 

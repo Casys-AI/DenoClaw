@@ -1,4 +1,9 @@
-import type { BrokerMessage } from "./types.ts";
+import type {
+  BrokerMessage,
+  BrokerRequestMessage,
+  BrokerResponseMessage,
+} from "./types.ts";
+import { isBrokerResponseMessage } from "./types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
@@ -18,9 +23,9 @@ export interface BrokerTransport {
    * Implementations handle correlation, timeout, and error unwrapping.
    */
   send(
-    message: Omit<BrokerMessage, "id" | "from" | "timestamp">,
+    message: Omit<BrokerRequestMessage, "id" | "from" | "timestamp">,
     timeoutMs?: number,
-  ): Promise<BrokerMessage>;
+  ): Promise<BrokerResponseMessage>;
 
   /** Stop listening and reject any pending requests. */
   close(): void;
@@ -44,7 +49,7 @@ export class KvQueueTransport implements BrokerTransport {
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
   private pendingRequests = new Map<string, {
-    resolve: (value: BrokerMessage) => void;
+    resolve: (value: BrokerResponseMessage) => void;
     reject: (reason: unknown) => void;
   }>();
   private listening = false;
@@ -71,16 +76,23 @@ export class KvQueueTransport implements BrokerTransport {
       try {
         const msg = raw as BrokerMessage;
         if (msg.to !== this.agentId) return;
+        if (!isBrokerResponseMessage(msg)) {
+          log.debug(`Message non-réponse ignoré : ${msg.type} (${msg.id})`);
+          return;
+        }
+        const response: BrokerResponseMessage = msg;
 
-        const pending = this.pendingRequests.get(msg.id);
+        const pending = this.pendingRequests.get(response.id);
         if (pending) {
-          this.pendingRequests.delete(msg.id);
-          pending.resolve(msg);
+          this.pendingRequests.delete(response.id);
+          pending.resolve(response);
         } else {
-          log.debug(`Message non attendu : ${msg.type} (${msg.id})`);
+          log.debug(`Message non attendu : ${response.type} (${response.id})`);
         }
       } catch (err) {
-        log.error(`KvQueueTransport: erreur dans listenQueue callback`, { err });
+        log.error(`KvQueueTransport: erreur dans listenQueue callback`, {
+          err,
+        });
       }
     });
 
@@ -88,9 +100,9 @@ export class KvQueueTransport implements BrokerTransport {
   }
 
   async send(
-    message: Omit<BrokerMessage, "id" | "from" | "timestamp">,
+    message: Omit<BrokerRequestMessage, "id" | "from" | "timestamp">,
     timeoutMs = 120_000,
-  ): Promise<BrokerMessage> {
+  ): Promise<BrokerResponseMessage> {
     if (!this.listening) {
       throw new DenoClawError(
         "TRANSPORT_NOT_STARTED",
@@ -107,9 +119,9 @@ export class KvQueueTransport implements BrokerTransport {
       id,
       from: this.agentId,
       timestamp: new Date().toISOString(),
-    } as BrokerMessage;
+    } as BrokerRequestMessage;
 
-    const promise = new Promise<BrokerMessage>((resolve, reject) => {
+    const promise = new Promise<BrokerResponseMessage>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
@@ -169,4 +181,3 @@ export class KvQueueTransport implements BrokerTransport {
     this.listening = false;
   }
 }
-

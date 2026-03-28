@@ -8,15 +8,14 @@ import type {
   ActiveTaskEntry,
   AgentStatusEntry,
   AgentStatusValue,
-  AgentTaskEntry,
+  TaskObservationEntry,
 } from "../shared/types.ts";
 
-// Re-export for backward compat
 export type {
   ActiveTaskEntry,
   AgentStatusEntry,
   AgentStatusValue,
-  AgentTaskEntry,
+  TaskObservationEntry,
 };
 
 // ── KV readers ─────────────────────────────────────────
@@ -96,16 +95,18 @@ export type DashboardEvent =
   | { type: "snapshot"; agents: AgentStatusEntry[] }
   | { type: "agent_status"; agentId: string; status: AgentStatusValue }
   | { type: "agents_list_updated"; agentIds: string[] }
-  | { type: "agent_task"; task: AgentTaskEntry }
+  | { type: "task_observation"; task: TaskObservationEntry }
   | { type: "keepalive" };
 
-export async function listAgentTasks(
+export async function listTaskObservations(
   kv: Deno.Kv,
   limit = 50,
-): Promise<AgentTaskEntry[]> {
-  const tasks: AgentTaskEntry[] = [];
+): Promise<TaskObservationEntry[]> {
+  const tasks: TaskObservationEntry[] = [];
   for await (
-    const entry of kv.list<AgentTaskEntry>({ prefix: ["agent_tasks"] })
+    const entry of kv.list<TaskObservationEntry>({
+      prefix: ["task_observations"],
+    })
   ) {
     if (entry.value) tasks.push(entry.value);
     if (tasks.length >= limit) break;
@@ -117,7 +118,7 @@ export async function listAgentTasks(
 export function buildWatchKeys(agentIds: string[]): Deno.KvKey[] {
   return [
     ["_dashboard", "agents_list"],
-    ["_dashboard", "agent_task_update"],
+    ["_dashboard", "task_observation_update"],
     ...agentIds.map((id) => ["agents", id, "status"] as Deno.KvKey),
   ];
 }
@@ -136,11 +137,15 @@ export function kvEntryToDashboardEvent(
     };
   }
 
-  // ["_dashboard", "agent_task_update"] → agent_task (sentinel updated by WorkerPool.writeAgentTask)
+  // ["_dashboard", "task_observation_update"] → task_observation
   if (
-    key[0] === "_dashboard" && key[1] === "agent_task_update" && entry.value
+    key[0] === "_dashboard" && key[1] === "task_observation_update" &&
+    entry.value
   ) {
-    return { type: "agent_task", task: entry.value as AgentTaskEntry };
+    return {
+      type: "task_observation",
+      task: entry.value as TaskObservationEntry,
+    };
   }
 
   // ["agents", agentId, "status"] → agent_status

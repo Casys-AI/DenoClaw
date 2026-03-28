@@ -150,7 +150,10 @@ export class AgentRuntime {
       if (taskId) {
         try {
           const port = this.broker as Partial<BrokerCanonicalTaskPort>;
-          if (typeof port.getTask === "function" && typeof port.reportTaskResult === "function") {
+          if (
+            typeof port.getTask === "function" &&
+            typeof port.reportTaskResult === "function"
+          ) {
             const existing = await port.getTask(taskId);
             if (existing) {
               const failed = mapTaskErrorToTerminalStatus(existing, e);
@@ -158,7 +161,10 @@ export class AgentRuntime {
             }
           }
         } catch (reportErr) {
-          log.error("Failed to report terminal FAILED state for task", reportErr);
+          log.error(
+            "Failed to report terminal FAILED state for task",
+            reportErr,
+          );
         }
       }
     }
@@ -169,7 +175,9 @@ export class AgentRuntime {
   ): Promise<void> {
     const payload = msg.payload;
     const inputText = this.extractTextFromMessage(payload.message);
-    log.info(`Tâche canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`);
+    log.info(
+      `Tâche canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`,
+    );
 
     await this.executeConversation({
       fromAgentId: msg.from,
@@ -203,7 +211,9 @@ export class AgentRuntime {
     await this.reportCanonicalTaskResult(resumed);
 
     const inputText = this.extractTextFromMessage(payload.message);
-    log.info(`Continuation canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`);
+    log.info(
+      `Continuation canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`,
+    );
 
     await this.executeConversation({
       fromAgentId: msg.from,
@@ -281,7 +291,8 @@ export class AgentRuntime {
             if (approvalPause) {
               await memory.addMessage({
                 role: "tool",
-                content: `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
+                content:
+                  `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
                 name: tc.function.name,
                 tool_call_id: tc.id,
               });
@@ -378,7 +389,14 @@ export class AgentRuntime {
 
   private extractApprovalPause(
     result: ToolResult,
-  ): { command: string; binary: string; reason: ApprovalReason; prompt: string } | null {
+  ):
+    | {
+      command: string;
+      binary: string;
+      reason: ApprovalReason;
+      prompt: string;
+    }
+    | null {
     if (result.success || result.error?.code !== "EXEC_APPROVAL_REQUIRED") {
       return null;
     }
@@ -386,7 +404,9 @@ export class AgentRuntime {
     const context = result.error.context;
     if (!context || typeof context !== "object") return null;
 
-    const command = typeof context.command === "string" ? context.command : null;
+    const command = typeof context.command === "string"
+      ? context.command
+      : null;
     const binary = typeof context.binary === "string" ? context.binary : null;
     const reason = typeof context.reason === "string"
       ? context.reason as ApprovalReason

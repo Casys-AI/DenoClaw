@@ -36,6 +36,13 @@ import {
   getResumePayloadMetadata,
 } from "../messaging/a2a/input_metadata.ts";
 import type { Task } from "../messaging/a2a/types.ts";
+import {
+  assertTunnelRegisterMessage,
+  DENOCLAW_TUNNEL_PROTOCOL,
+  getAcceptedTunnelProtocol,
+  TUNNEL_IDLE_TIMEOUT_SECONDS,
+  WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
+} from "./tunnel_protocol.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -74,12 +81,24 @@ interface BrokerTaskMetadata {
   pendingResumes?: PendingResumes;
 }
 
+interface TunnelConnection {
+  ws: WebSocket;
+  capabilities: TunnelCapabilities;
+  registered: boolean;
+}
+
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
   allowedCommands: [],
   ask: "on-miss",
   askFallback: "deny",
 };
+
+function extractBearerToken(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  return auth.slice(7);
+}
 
 export class BrokerServer {
   private config: Config;
@@ -92,7 +111,7 @@ export class BrokerServer {
   private taskStore: TaskStore;
   private tunnels = new Map<
     string,
-    { ws: WebSocket; capabilities: TunnelCapabilities; sessionToken?: string }
+    TunnelConnection
   >();
   private httpServer?: Deno.HttpServer;
 
@@ -121,6 +140,13 @@ export class BrokerServer {
     return this.kv;
   }
 
+  private async getAuth(): Promise<AuthManager> {
+    if (!this.auth) {
+      this.auth = new AuthManager(await this.getKv());
+    }
+    return this.auth;
+  }
+
   async start(port = 3000): Promise<void> {
     // Warning si pas de token configuré (ADR-003)
     if (!Deno.env.get("DENOCLAW_API_TOKEN")) {
@@ -129,10 +155,7 @@ export class BrokerServer {
       );
     }
 
-    const kv = await this.getKv();
-
-    // Initialiser AuthManager avec le KV partagé (une seule connexion)
-    this.auth = new AuthManager(kv);
+    await this.getAuth();
 
     // HTTP + WebSocket server — all messages arrive via HTTP or WebSocket
     this.httpServer = Deno.serve({ port }, (req) => this.handleHttp(req));
@@ -182,7 +205,7 @@ export class BrokerServer {
       const err = e instanceof Error ? e : new Error(String(e));
       log.error(`Message handler failed for ${msg.type} from ${msg.from}`, err);
       try {
-        this.sendStructuredError(msg.from, msg.id, {
+        await this.sendStructuredError(msg.from, msg.id, {
           code: "BROKER_ERROR",
           context: {
             messageType: msg.type,
@@ -247,7 +270,7 @@ export class BrokerServer {
       timestamp: new Date().toISOString(),
     };
 
-    this.sendReply(reply);
+    await this.sendReply(reply);
   }
 
   // ── Tool routing (ADR-005: permissions par intersection) ─
@@ -289,7 +312,7 @@ export class BrokerServer {
     if (denied.length > 0) {
       const toolPerms = this.resolveToolPermissions(req.tool);
       const agentAllowed = agentConfig.value?.sandbox?.allowedPermissions || [];
-      this.sendStructuredError(msg.from, msg.id, {
+      await this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_PERMISSION_DENIED",
         context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
         recovery: `Add ${
@@ -320,7 +343,7 @@ export class BrokerServer {
       this.config.agents?.defaults?.sandbox?.execPolicy,
     );
     if (approvalResult) {
-      this.replyToolResult(msg.from, msg.id, approvalResult);
+      await this.replyToolResult(msg.from, msg.id, approvalResult);
       await this.metrics.recordToolCall(
         msg.from,
         req.tool,
@@ -363,7 +386,7 @@ export class BrokerServer {
         performance.now() - toolStart,
       );
 
-      this.replyToolResult(msg.from, msg.id, {
+      await this.replyToolResult(msg.from, msg.id, {
         success: toolSuccess,
         output: result.stdout,
         error: !toolSuccess
@@ -375,7 +398,7 @@ export class BrokerServer {
           : undefined,
       });
     } catch (e) {
-      this.sendStructuredError(msg.from, msg.id, {
+      await this.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_CREATE_FAILED",
         context: { tool: req.tool, message: (e as Error).message },
         recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
@@ -426,7 +449,8 @@ export class BrokerServer {
             binary: check.binary ?? command,
             reason: check.reason ?? "not-in-allowlist",
           },
-          recovery: "Resume the canonical task with approval metadata to continue",
+          recovery:
+            "Resume the canonical task with approval metadata to continue",
         },
       };
     }
@@ -442,8 +466,9 @@ export class BrokerServer {
           binary: check.binary ?? command,
           reason: check.reason ?? "denied",
         },
-        recovery:
-          `Add '${check.binary ?? command}' to execPolicy.allowedCommands or use ask: 'on-miss'`,
+        recovery: `Add '${
+          check.binary ?? command
+        }' to execPolicy.allowedCommands or use ask: 'on-miss'`,
       },
     };
   }
@@ -482,11 +507,11 @@ export class BrokerServer {
     return result.ok;
   }
 
-  private replyToolResult(
+  private async replyToolResult(
     to: string,
     replyToId: string,
     payload: ToolResult,
-  ): void {
+  ): Promise<void> {
     const reply: BrokerMessage = {
       id: replyToId,
       from: "broker",
@@ -495,7 +520,7 @@ export class BrokerServer {
       payload,
       timestamp: new Date().toISOString(),
     };
-    this.sendReply(reply);
+    await this.sendReply(reply);
   }
 
   /**
@@ -540,7 +565,9 @@ export class BrokerServer {
         const dryRun = args.dry_run !== false;
         if (dryRun) {
           return `console.log(${
-            JSON.stringify(`[dry_run] Would execute: ${command}\nSet dry_run=false to execute.`)
+            JSON.stringify(
+              `[dry_run] Would execute: ${command}\nSet dry_run=false to execute.`,
+            )
           });`;
         }
         const parts = command.trim().split(/\s+/);
@@ -564,7 +591,13 @@ if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
         const writeDryRun = args.dry_run !== false;
         if (writeDryRun) {
           return `console.log(${
-            JSON.stringify(`[dry_run] Would write ${String(args.content || "").length} bytes to ${String(args.path || "")}\nSet dry_run=false to write.`)
+            JSON.stringify(
+              `[dry_run] Would write ${
+                String(args.content || "").length
+              } bytes to ${
+                String(args.path || "")
+              }\nSet dry_run=false to write.`,
+            )
           });`;
         }
         return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${
@@ -593,35 +626,35 @@ console.log(await r.text());`;
     msg: Extract<BrokerMessage, { type: "task_submit" }>,
   ): Promise<void> {
     const task = await this.submitAgentTask(msg.from, msg.payload);
-    this.sendTaskResult(msg.from, msg.id, task);
+    await this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskGet(
     msg: Extract<BrokerMessage, { type: "task_get" }>,
   ): Promise<void> {
     const task = await this.getTask(msg.payload);
-    this.sendTaskResult(msg.from, msg.id, task);
+    await this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskContinue(
     msg: Extract<BrokerMessage, { type: "task_continue" }>,
   ): Promise<void> {
     const task = await this.continueAgentTask(msg.from, msg.payload);
-    this.sendTaskResult(msg.from, msg.id, task);
+    await this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskCancel(
     msg: Extract<BrokerMessage, { type: "task_cancel" }>,
   ): Promise<void> {
     const task = await this.cancelTask(msg.payload);
-    this.sendTaskResult(msg.from, msg.id, task);
+    await this.sendTaskResult(msg.from, msg.id, task);
   }
 
   private async handleTaskResult(
     msg: Extract<BrokerMessage, { type: "task_result" }>,
   ): Promise<void> {
     const task = await this.recordTaskResult(msg.from, msg.payload);
-    this.sendTaskResult(msg.from, msg.id, task);
+    await this.sendTaskResult(msg.from, msg.id, task);
   }
 
   async submitAgentTask(
@@ -842,7 +875,9 @@ console.log(await r.text());`;
       : {};
   }
 
-  private getPendingResumes(brokerMetadata: BrokerTaskMetadata): PendingResumes {
+  private getPendingResumes(
+    brokerMetadata: BrokerTaskMetadata,
+  ): PendingResumes {
     return brokerMetadata.pendingResumes ?? {};
   }
 
@@ -889,22 +924,27 @@ console.log(await r.text());`;
   private async routeBrokerMessageToAgent(
     targetAgentId: string,
     message: Extract<BrokerMessage, {
-      type: "task_submit" | "task_continue"
+      type: "task_submit" | "task_continue";
     }>,
   ): Promise<void> {
     await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
     const tunnel = this.findTunnelByAgentId(targetAgentId);
-    if (!tunnel) {
-      throw new DenoClawError(
-        "NO_TUNNEL_FOR_AGENT",
-        { targetAgentId, messageType: message.type },
-        `Agent "${targetAgentId}" has no active tunnel connection`,
+    if (tunnel) {
+      this.routeToTunnel(tunnel, message);
+      log.info(
+        `A2A routé via tunnel : ${message.from} → ${targetAgentId} (${message.type})`,
       );
+      return;
     }
 
-    this.routeToTunnel(tunnel, message);
-    log.info(`A2A routé : ${message.from} → ${targetAgentId} (${message.type})`);
+    // Local-mode transport: canonical task messages are delivered over KV Queue
+    // when no WebSocket tunnel is active for the target agent.
+    const kv = await this.getKv();
+    await kv.enqueue(message);
+    log.info(
+      `A2A routé via KV Queue : ${message.from} → ${targetAgentId} (${message.type})`,
+    );
   }
 
   // ── Tunnel management ───────────────────────────────
@@ -917,7 +957,7 @@ console.log(await r.text());`;
 
   private findTunnelForTool(tool: string): WebSocket | null {
     for (const [_, t] of this.tunnels) {
-      if (t.capabilities.tools.includes(tool)) {
+      if (t.registered && t.capabilities.tools.includes(tool)) {
         return t.ws;
       }
     }
@@ -927,6 +967,7 @@ console.log(await r.text());`;
   private findTunnelForAgent(agentId: string): WebSocket | null {
     for (const [_, t] of this.tunnels) {
       if (
+        t.registered &&
         t.capabilities.type === "instance" &&
         t.capabilities.agents?.includes(agentId)
       ) {
@@ -942,6 +983,13 @@ console.log(await r.text());`;
         readyState: ws.readyState,
         msgId: msg.id,
       }, "Tunnel disconnected. Reconnect and retry.");
+    }
+    if (ws.bufferedAmount > WS_BUFFERED_AMOUNT_HIGH_WATERMARK) {
+      throw new DenoClawError("TUNNEL_BACKPRESSURE", {
+        bufferedAmount: ws.bufferedAmount,
+        maxBufferedAmount: WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
+        msgId: msg.id,
+      }, "Tunnel is saturated. Retry after the relay drains pending messages.");
     }
     ws.send(JSON.stringify(msg));
   }
@@ -1004,14 +1052,15 @@ console.log(await r.text());`;
 
     // Invite token generation — admin endpoint
     if (req.method === "POST" && url.pathname === "/auth/invite") {
-      const authResult = await this.auth.checkRequest(req);
+      const auth = await this.getAuth();
+      const authResult = await auth.checkRequest(req);
       if (!authResult.ok) {
         return Response.json({
           error: { code: authResult.code, recovery: authResult.recovery },
         }, { status: 401 });
       }
       const body = await req.json().catch(() => ({})) as { tunnelId?: string };
-      const invite = await this.auth.generateInviteToken(body.tunnelId);
+      const invite = await auth.generateInviteToken(body.tunnelId);
       return Response.json({
         token: invite.token,
         expiresAt: invite.expiresAt,
@@ -1019,7 +1068,8 @@ console.log(await r.text());`;
     }
 
     // Tous les autres endpoints nécessitent auth (ADR-003)
-    const authResult = await this.auth.checkRequest(req);
+    const auth = await this.getAuth();
+    const authResult = await auth.checkRequest(req);
     if (!authResult.ok) {
       return Response.json(
         { error: { code: authResult.code, recovery: authResult.recovery } },
@@ -1045,7 +1095,7 @@ console.log(await r.text());`;
     if (url.pathname === "/events") {
       const kv = await this.getKv();
       const agentIds = [...this.tunnels.values()]
-        .filter((t) => t.capabilities.agents)
+        .filter((t) => t.registered && t.capabilities.agents)
         .flatMap((t) => t.capabilities.agents ?? []);
       return createSSEResponse(kv, agentIds);
     }
@@ -1059,53 +1109,71 @@ console.log(await r.text());`;
       return new Response("Expected WebSocket", { status: 426 });
     }
 
-    const url = new URL(req.url);
-    const inviteTokenParam = url.searchParams.get("token");
-
-    // Vérifier le token d'invitation (ADR-003)
-    if (inviteTokenParam) {
-      const inviteResult = await this.auth.verifyInviteToken(inviteTokenParam);
-      if (!inviteResult.ok) {
-        return Response.json(
-          {
-            error: { code: inviteResult.code, recovery: inviteResult.recovery },
-          },
-          { status: 401 },
-        );
-      }
-    } else {
-      const authResult = await this.auth.checkRequest(req);
-      if (!authResult.ok) {
-        return Response.json(
-          { error: { code: authResult.code, recovery: authResult.recovery } },
-          { status: 401 },
-        );
-      }
+    const bearerToken = extractBearerToken(req);
+    const negotiatedProtocol = getAcceptedTunnelProtocol(
+      req.headers.get("sec-websocket-protocol"),
+    );
+    if (!negotiatedProtocol) {
+      return new Response(
+        `Expected WebSocket subprotocol: ${DENOCLAW_TUNNEL_PROTOCOL}`,
+        { status: 426 },
+      );
     }
 
-    const { socket, response } = Deno.upgradeWebSocket(req);
-    const tunnelId = url.searchParams.get("id") || generateId();
+    const auth = await this.getAuth();
 
-    // Pré-créer l'entrée tunnel pour que onopen puisse y attacher le session token
+    if (!bearerToken) {
+      return Response.json(
+        {
+          error: {
+            code: "UNAUTHORIZED",
+            recovery:
+              "Add Authorization: Bearer <invite-or-session-token> header",
+          },
+        },
+        { status: 401 },
+      );
+    }
+
+    const inviteResult = await auth.verifyInviteToken(bearerToken);
+    const sessionResult = inviteResult.ok
+      ? inviteResult
+      : await auth.verifySessionToken(bearerToken);
+    if (!sessionResult.ok) {
+      return Response.json(
+        {
+          error: {
+            code: "AUTH_FAILED",
+            recovery: "Reconnect with a valid tunnel invite or session token",
+          },
+        },
+        { status: 401 },
+      );
+    }
+
+    const { socket, response } = Deno.upgradeWebSocket(req, {
+      protocol: negotiatedProtocol,
+      idleTimeout: TUNNEL_IDLE_TIMEOUT_SECONDS,
+    });
+    const tunnelId = sessionResult.identity;
+
     const placeholderCaps: TunnelCapabilities = {
       tunnelId,
       type: "local",
       tools: [],
       allowedAgents: [],
     };
-    this.tunnels.set(tunnelId, { ws: socket, capabilities: placeholderCaps });
+    this.tunnels.set(tunnelId, {
+      ws: socket,
+      capabilities: placeholderCaps,
+      registered: false,
+    });
 
     socket.onopen = async () => {
-      log.info(`Tunnel connecté : ${tunnelId}`);
+      log.info(`Tunnel connecté : ${tunnelId} (${negotiatedProtocol})`);
 
       try {
-        // Émettre un session token éphémère pour ce tunnel (ADR-003)
-        const session = await this.auth.generateSessionToken(tunnelId);
-        // Stocker le token pour révocation à la déconnexion
-        const entry = this.tunnels.get(tunnelId);
-        if (entry) {
-          this.tunnels.set(tunnelId, { ...entry, sessionToken: session.token });
-        }
+        const session = await auth.generateSessionToken(tunnelId);
         socket.send(
           JSON.stringify({
             type: "session_token",
@@ -1128,31 +1196,47 @@ console.log(await r.text());`;
 
     socket.onmessage = async (e) => {
       try {
-        const data = JSON.parse(e.data as string);
+        if (typeof e.data !== "string") {
+          socket.close(1003, "Tunnel messages must be text JSON");
+          return;
+        }
 
-        // First message = capabilities registration (met à jour l'entrée placeholder)
-        if (data.type === "register") {
+        const data = JSON.parse(e.data);
+        const entry = this.tunnels.get(tunnelId);
+        if (!entry) {
+          socket.close(1011, "Tunnel state missing");
+          return;
+        }
+
+        if (!entry.registered) {
+          const registration = assertTunnelRegisterMessage(data);
           const caps: TunnelCapabilities = {
             tunnelId,
-            type: data.tunnelType || "local",
-            tools: data.tools || [],
-            toolPermissions: data.toolPermissions,
-            supportsAuth: data.supportsAuth || false,
-            agents: data.agents || [],
-            allowedAgents: data.allowedAgents || [],
+            type: registration.tunnelType,
+            tools: registration.tools,
+            toolPermissions: registration.toolPermissions,
+            agents: registration.agents,
+            allowedAgents: registration.allowedAgents,
           };
-          const existing = this.tunnels.get(tunnelId);
           this.tunnels.set(tunnelId, {
             ws: socket,
             capabilities: caps,
-            sessionToken: existing?.sessionToken,
+            registered: true,
           });
           log.info(
             `Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${
               caps.agents || []
-            })`,
+            }, protocol: ${socket.protocol})`,
           );
           socket.send(JSON.stringify({ type: "registered", tunnelId }));
+          return;
+        }
+
+        if (
+          typeof data === "object" && data !== null &&
+          "type" in data && data.type === "register"
+        ) {
+          socket.close(1002, "Tunnel is already registered");
           return;
         }
 
@@ -1160,15 +1244,11 @@ console.log(await r.text());`;
         await this.handleTunnelMessage(tunnelId, e.data as string);
       } catch (err) {
         log.error(`Erreur tunnel ${tunnelId}`, err);
+        socket.close(1002, "Invalid tunnel control message");
       }
     };
 
-    socket.onclose = async () => {
-      // Révoquer le session token (ADR-003)
-      const tunnel = this.tunnels.get(tunnelId);
-      if (tunnel?.sessionToken) {
-        await this.auth.revokeSessionToken(tunnel.sessionToken);
-      }
+    socket.onclose = () => {
       this.tunnels.delete(tunnelId);
       log.info(`Tunnel déconnecté : ${tunnelId}`);
     };
@@ -1179,16 +1259,21 @@ console.log(await r.text());`;
   // ── Helpers ─────────────────────────────────────────
 
   /**
-   * Send a reply to an agent via its WebSocket tunnel.
-   * All agents (local and remote) connect to the broker via WebSocket.
+   * Send a broker reply to an agent.
+   * Prefer an active WebSocket tunnel; otherwise fall back to the local KV Queue transport.
    */
-  private sendReply(reply: BrokerMessage): void {
+  private async sendReply(reply: BrokerMessage): Promise<void> {
     const tunnel = this.findTunnelByAgentId(reply.to);
-    if (!tunnel) {
-      log.warn(`No tunnel for agent ${reply.to} — reply dropped (${reply.type})`);
+    if (tunnel) {
+      this.routeToTunnel(tunnel, reply);
       return;
     }
-    this.routeToTunnel(tunnel, reply);
+
+    const kv = await this.getKv();
+    await kv.enqueue(reply);
+    log.info(
+      `Reponse routee via KV Queue : broker -> ${reply.to} (${reply.type})`,
+    );
   }
 
   private findTunnelByAgentId(agentId: string): WebSocket | null {
@@ -1198,18 +1283,22 @@ console.log(await r.text());`;
 
     // Check local tunnels (agents connected locally)
     for (const [_, t] of this.tunnels) {
-      if (t.capabilities.type === "local" && t.capabilities.allowedAgents.includes(agentId)) {
+      if (
+        t.registered &&
+        t.capabilities.type === "local" &&
+        t.capabilities.allowedAgents.includes(agentId)
+      ) {
         return t.ws;
       }
     }
     return null;
   }
 
-  private sendTaskResult(
+  private async sendTaskResult(
     to: string,
     requestId: string,
     task: Task | null,
-  ): void {
+  ): Promise<void> {
     const reply: Extract<BrokerMessage, { type: "task_result" }> = {
       id: requestId,
       from: "broker",
@@ -1218,14 +1307,14 @@ console.log(await r.text());`;
       payload: { task },
       timestamp: new Date().toISOString(),
     };
-    this.sendReply(reply);
+    await this.sendReply(reply);
   }
 
-  private sendStructuredError(
+  private async sendStructuredError(
     to: string,
     requestId: string,
     error: StructuredError,
-  ): void {
+  ): Promise<void> {
     const reply: Extract<BrokerMessage, { type: "error" }> = {
       id: requestId,
       from: "broker",
@@ -1234,7 +1323,7 @@ console.log(await r.text());`;
       payload: error,
       timestamp: new Date().toISOString(),
     };
-    this.sendReply(reply);
+    await this.sendReply(reply);
   }
 
   async stop(): Promise<void> {

@@ -1,14 +1,16 @@
 /**
  * Worker entrypoint — chargé par new Worker().
- * Reçoit config via postMessage "init", traite les messages via "process".
+ * Reçoit config via postMessage "init" et conserve quelques messages bridge
+ * pendant la migration, mais l'exécution locale réelle passe désormais par
+ * la sémantique canonique de tâche A2A.
  * Supporte la communication inter-agents via le main process (Broker local).
  *
  * Le Worker n'écrit JAMAIS dans le shared KV — il émet des messages au main process
  * qui se charge des écritures. Cela rend le Worker transport-agnostic (deploy-compatible).
  *
  * Task 3.2: All local worker execution now routes through canonical A2A task semantics
- * via executeCanonicalWorkerTask(). The "process" handler delegates to this function,
- * which wraps AgentLoop in a canonical task lifecycle (SUBMITTED → WORKING → terminal).
+ * via executeCanonicalWorkerTask(). The legacy "process" message is only a narrow
+ * compatibility bridge into that canonical path.
  */
 
 import { AgentLoop } from "./loop.ts";
@@ -39,15 +41,10 @@ import type {
  * Minimal request shape for canonical task execution.
  * Maps directly from the worker protocol "process" message.
  */
-export interface CanonicalWorkerTaskRequest {
-  requestId: string;
-  sessionId: string;
-  message: string;
-  model?: string;
-  traceId?: string;
-  taskId?: string;
-  contextId?: string;
-}
+export type CanonicalWorkerTaskRequest = Extract<
+  WorkerRequest,
+  { type: "process" }
+>;
 
 /**
  * Dependencies injected into executeCanonicalWorkerTask.
@@ -223,8 +220,8 @@ const askPending = new Map<string, {
 }>();
 
 function askApproval(
-  req: { requestId: string; command: string; binary: string; reason: string },
-): Promise<{ approved: boolean; allowAlways?: boolean }> {
+  req: ApprovalRequest,
+): Promise<ApprovalResponse> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       askPending.delete(req.requestId);

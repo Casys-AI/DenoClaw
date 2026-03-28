@@ -163,35 +163,49 @@ export type WorkerResponse =
 
 // ── Classification helpers ───────────────────────────────
 
-const INFRA_REQUEST_TYPES: ReadonlySet<string> = new Set<InfraRequestType>([
+const INFRA_REQUEST_TYPES: ReadonlySet<InfraRequestType> = new Set([
   "init",
   "ask_response",
   "shutdown",
 ]);
 
-const INFRA_RESPONSE_TYPES: ReadonlySet<string> = new Set<InfraResponseType>([
+const BRIDGE_REQUEST_TYPES: ReadonlySet<BridgeRequestType> = new Set([
+  "process",
+  "agent_deliver",
+  "agent_response",
+]);
+
+const INFRA_RESPONSE_TYPES: ReadonlySet<InfraResponseType> = new Set([
   "ready",
   "ask_approval",
   "task_started",
   "task_completed",
 ]);
 
+const BRIDGE_RESPONSE_TYPES: ReadonlySet<BridgeResponseType> = new Set([
+  "result",
+  "error",
+  "agent_send",
+  "agent_result",
+  "agent_task",
+]);
+
 /** Returns true if this request message type is infra (permanent runtime plumbing). */
-export function isInfraRequest(type: string): boolean {
-  return INFRA_REQUEST_TYPES.has(type);
+export function isInfraRequest(type: WorkerRequest["type"]): boolean {
+  return INFRA_REQUEST_TYPES.has(type as InfraRequestType);
 }
 
 /** Returns true if this response message type is infra (permanent runtime plumbing). */
-export function isInfraResponse(type: string): boolean {
-  return INFRA_RESPONSE_TYPES.has(type);
+export function isInfraResponse(type: WorkerResponse["type"]): boolean {
+  return INFRA_RESPONSE_TYPES.has(type as InfraResponseType);
 }
 
 /** Returns true if this request message type is a bridge (compatibility, slated for removal). */
-export function isBridgeRequest(type: string): boolean {
-  return !INFRA_REQUEST_TYPES.has(type);
+export function isBridgeRequest(type: WorkerRequest["type"]): boolean {
+  return BRIDGE_REQUEST_TYPES.has(type as BridgeRequestType);
 }
 
 /** Returns true if this response message type is a bridge (compatibility, slated for removal). */
-export function isBridgeResponse(type: string): boolean {
-  return !INFRA_RESPONSE_TYPES.has(type);
+export function isBridgeResponse(type: WorkerResponse["type"]): boolean {
+  return BRIDGE_RESPONSE_TYPES.has(type as BridgeResponseType);
 }

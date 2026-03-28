@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { AgentLoop } from "./loop.ts";
+import type { AgentLoopLike } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type {
@@ -255,17 +256,14 @@ Deno.test({
 });
 
 Deno.test({
-  name: "AgentLoop implements the canonical worker task interface shape",
+  name: "AgentLoop satisfies the canonical worker loop interface",
   fn() {
     const loop = new AgentLoop("session-interface", minimalConfig);
-
-    const processMessage: (message: string) => Promise<AgentResponse> = loop.processMessage.bind(loop);
-    const maybeAskApproval = (loop as AgentLoop & {
-      askApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
-    }).askApproval;
+    const loopPort: AgentLoopLike = loop;
+    const processMessage: (message: string) => Promise<AgentResponse> =
+      loopPort.processMessage.bind(loopPort);
 
     assertEquals(typeof processMessage, "function");
-    assertEquals(maybeAskApproval, undefined);
 
     loop.close();
   },

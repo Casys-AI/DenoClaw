@@ -195,6 +195,18 @@ denoclaw tunnel wss://mon-broker.deno.dev/tunnel
 denoclaw tunnel wss://instance-a.deno.dev/tunnel
 ```
 
+#### Contrat wire actuel
+
+Le handshake tunnel est strict et versionné :
+
+- auth via `Authorization: Bearer <invite-or-session-token>`
+- subprotocol obligatoire `denoclaw.tunnel.v1`
+- `idleTimeout` explicite côté broker
+- rejet fail-fast des sockets saturées plutôt que buffering implicite
+
+Les query parameters d'auth et les handshakes sans subprotocol ne font pas
+partie du contrat accepté sur `/tunnel`.
+
 #### Capabilities
 
 Chaque tunnel déclare ce qu'il expose :
@@ -202,9 +214,10 @@ Chaque tunnel déclare ce qu'il expose :
 ```typescript
 // Noeud VPS/machine avec outils
 {
-  type: "node",
+  tunnelType: "local",
   tools: ["shell", "fs_read", "fs_write"],
-  supportsAuth: true,
+  agents: [],
+  allowedAgents: ["planner", "operator"],
 }
 
 // Broker B (inter-instance, fédération)
@@ -217,7 +230,7 @@ Chaque tunnel déclare ce qu'il expose :
 {
   type: "local",
   tools: ["shell", "fs_read", "fs_write"],
-  supportsAuth: true,
+  allowedAgents: ["planner", "operator"],
 }
 ```
 
@@ -275,7 +288,6 @@ Chaque tunnel déclare au broker ce qu'il expose :
 {
   tunnelId: "machine-erwan",
   tools: ["shell", "fs_read", "fs_write"],    // outils locaux exécutables
-  supportsAuth: true,                          // peut recevoir des auth requests (ouvre navigateur)
   allowedAgents: ["agent-123", "agent-456"],  // qui peut m'utiliser
 }
 ```
@@ -283,7 +295,8 @@ Chaque tunnel déclare au broker ce qu'il expose :
 Le broker maintient un registre des tunnels actifs. Quand un agent demande un
 outil, le broker cherche un tunnel qui a la capability.
 
-BrokerClient délègue à une interface pluggable `BrokerTransport` (`KvQueueTransport` en local, HTTP/SSE sur le réseau).
+BrokerClient délègue à une interface pluggable `BrokerTransport`
+(`KvQueueTransport` en local, HTTP/SSE sur le réseau).
 
 ## Auth OAuth LLM via tunnel
 
@@ -295,7 +308,7 @@ machine locale :
    etc.)
 2. Il émet
    `{ type: "auth_request", url: "https://auth.anthropic.com/...", code: "ABCD-1234" }`
-3. Le tunnel route vers une machine locale avec `supportsAuth: true`
+3. Le tunnel route vers une machine locale explicitement autorisée pour ce flux
 4. La machine locale ouvre le navigateur avec l'URL
 5. L'utilisateur se connecte
 6. Le token OAuth remonte : tunnel → Broker
@@ -310,7 +323,8 @@ flow d'auth.
 Les agents ne se parlent JAMAIS directement (network isolation). Tout passe par
 le Broker qui route via HTTP.
 
-Autrement dit : **A2A over HTTP + SSE, persisted in KV, correlated by task/context ids.**
+Autrement dit : **A2A over HTTP + SSE, persisted in KV, correlated by
+task/context ids.**
 
 ```typescript
 // Agent A veut déléguer une tâche à Agent B — il soumet une tâche au Broker

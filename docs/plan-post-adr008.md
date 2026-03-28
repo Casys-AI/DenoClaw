@@ -19,18 +19,18 @@
 ## Phase 1.5 — A2A routing + KV partagé + observabilité ✅ DONE
 
 - [x] SendToAgentTool — tool A2A avec callback injecté (transport-agnostic)
-- [x] Protocol Worker étendu (agent_send, agent_deliver, agent_result,
-      agent_response, task_started, task_completed, agent_task)
+- [x] Protocol Worker étendu (`run`, `peer_deliver`, `peer_result`,
+      `peer_response`, `task_started`, `task_completed`, `task_observe`)
 - [x] WorkerPool routing A2A avec peer check (peers/acceptFrom fermé par défaut)
 - [x] Worker n'écrit plus dans le shared KV — émet des messages, main process
       écrit (deploy-compatible)
-- [x] Types observabilité déplacés dans shared/ (AgentTaskEntry,
+- [x] Types observabilité déplacés dans shared/ (`TaskObservationEntry`,
       AgentStatusEntry, etc.)
-- [x] Gateway routes : /agents/tasks, /agents/:name/task,
+- [x] Gateway routes : /tasks/observations, /agents/:name/task,
       /.well-known/agent-card.json
-- [x] KV watch SSE étendu avec agent_task events
-- [x] Naming harmonisé : agent_tasks KV, agent_task_update sentinel,
-      AGENT_TASK_FAILED
+- [x] KV watch SSE étendu avec `task_observation` events
+- [x] Naming harmonisé : `task_observations` KV, `task_observation_update`
+      sentinel
 - [x] AgentCard URL alignée avec les vrais endpoints
 - [x] SendToAgentTool préserve les erreurs structurées (DenoClawError
       passthrough)

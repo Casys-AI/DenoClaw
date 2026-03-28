@@ -138,9 +138,9 @@ Chaque tunnel déclare ses capabilities :
 ```typescript
 // Noeud VPS avec outils
 {
-  type: "node",
+  type: "local",
   tools: ["shell", "fs_read", "fs_write"],
-  supportsAuth: true,
+  allowedAgents: ["planner", "operator"],
 }
 
 // Broker B (inter-instance)
@@ -153,7 +153,7 @@ Chaque tunnel déclare ses capabilities :
 {
   type: "local",
   tools: ["shell", "fs_read", "fs_write"],
-  supportsAuth: true,
+  allowedAgents: ["planner", "operator"],
 }
 ```
 
@@ -178,5 +178,5 @@ Chaque tunnel déclare ses capabilities :
 - Le broker stocke les tokens OAuth en KV (ou Secret Manager) — rotation
   automatique possible
 - Les agents ont une interface unique : `broker.complete()` pour le LLM,
-  `broker.toolExec()` pour les outils, `broker.submitTask()` / `broker.sendTextTask()` pour
-  l'inter-agents
+  `broker.toolExec()` pour les outils, `broker.submitTask()` /
+  `broker.sendTextTask()` pour l'inter-agents

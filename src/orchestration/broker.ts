@@ -523,32 +523,55 @@ export class BrokerServer {
   }
 
   /**
-   * Build Deno code to execute a tool inside a Sandbox.
+   * Build self-contained Deno code to execute a tool inside a cloud Sandbox.
+   *
+   * Mirrors the same safety conventions as the local tool_executor.ts:
+   * - shell: dry_run=true by default (AX-2), direct binary execution (no sh -c)
+   * - write_file: dry_run=true by default (AX-2)
+   * - Structured output on stdout, errors on stderr
    */
   private buildSandboxCode(
     tool: string,
     args: Record<string, unknown>,
   ): string {
     switch (tool) {
-      case "shell":
+      case "shell": {
+        const command = String(args.command || "");
+        const dryRun = args.dry_run !== false;
+        if (dryRun) {
+          return `console.log(${
+            JSON.stringify(`[dry_run] Would execute: ${command}\nSet dry_run=false to execute.`)
+          });`;
+        }
+        const parts = command.trim().split(/\s+/);
+        const binary = parts[0] || "";
+        const cmdArgs = parts.slice(1);
         return `
-const cmd = new Deno.Command("sh", {
-  args: ["-c", ${JSON.stringify(args.command || "")}],
+const cmd = new Deno.Command(${JSON.stringify(binary)}, {
+  args: ${JSON.stringify(cmdArgs)},
   stdout: "piped", stderr: "piped",
 });
 const { stdout, stderr } = await cmd.output();
 console.log(new TextDecoder().decode(stdout));
 if (stderr.length > 0) console.error(new TextDecoder().decode(stderr));
 `;
+      }
       case "read_file":
         return `console.log(await Deno.readTextFile(${
           JSON.stringify(args.path || "")
         }));`;
-      case "write_file":
+      case "write_file": {
+        const writeDryRun = args.dry_run !== false;
+        if (writeDryRun) {
+          return `console.log(${
+            JSON.stringify(`[dry_run] Would write ${String(args.content || "").length} bytes to ${String(args.path || "")}\nSet dry_run=false to write.`)
+          });`;
+        }
         return `await Deno.writeTextFile(${JSON.stringify(args.path || "")}, ${
           JSON.stringify(args.content || "")
         });
 console.log("Written: " + ${JSON.stringify(String(args.path || ""))});`;
+      }
       case "web_fetch": {
         const method = (args.method as string) || "GET";
         return `const r = await fetch(${

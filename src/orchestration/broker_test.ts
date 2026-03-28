@@ -1,8 +1,4 @@
-import {
-  assertEquals,
-  assertExists,
-  assertRejects,
-} from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { BrokerServer } from "./broker.ts";
 import { createResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
 import type { BrokerMessage } from "./types.ts";
@@ -71,7 +67,8 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards leg
     });
     const forwardedPromise = waitForQueuedMessage(
       kv,
-      (message) => message.type === "agent_message" && message.to === "agent-beta",
+      (message) =>
+        message.type === "agent_message" && message.to === "agent-beta",
     );
 
     const task = await broker.submitAgentTask("agent-alpha", {
@@ -103,7 +100,123 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards leg
     assertEquals(forwarded.payload.taskId, "task-1");
     assertEquals(forwarded.payload.contextId, "ctx-1");
     assertEquals(forwarded.payload.instruction, "Summarise this");
-    assertEquals(forwarded.payload.metadata, { bridge: "legacy-agent_message" });
+    assertEquals(forwarded.payload.metadata, {
+      bridge: "legacy-agent_message",
+    });
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer.recordTaskResult persists canonical execution progress and completion", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const submitted = await broker.submitAgentTask("agent-alpha", {
+      targetAgent: "agent-beta",
+      taskId: "task-runtime",
+      contextId: "ctx-runtime",
+      message: createMessage("Handle this"),
+    });
+
+    const working = await broker.recordTaskResult("agent-beta", {
+      task: {
+        ...submitted,
+        status: {
+          state: "WORKING",
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+    assertExists(working);
+    assertEquals(working?.status.state, "WORKING");
+
+    const completed = await broker.recordTaskResult("agent-beta", {
+      task: {
+        ...submitted,
+        status: {
+          state: "COMPLETED",
+          timestamp: new Date().toISOString(),
+          message: {
+            messageId: crypto.randomUUID(),
+            role: "agent",
+            parts: [{ kind: "text", text: "Done" }],
+          },
+        },
+        artifacts: [
+          {
+            artifactId: "task-runtime:result",
+            name: "result",
+            parts: [{ kind: "text", text: "Done" }],
+          },
+        ],
+      },
+    });
+
+    assertExists(completed);
+    assertEquals(completed?.status.state, "COMPLETED");
+    assertEquals(completed?.artifacts[0]?.parts[0], {
+      kind: "text",
+      text: "Done",
+    });
+    assertEquals(completed?.metadata?.broker, {
+      submittedBy: "agent-alpha",
+      targetAgent: "agent-beta",
+    });
+
+    const persisted = await broker.getTask({ taskId: submitted.id });
+    assertEquals(persisted?.status.state, "COMPLETED");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer.recordTaskResult rejects updates from non-target agents", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const submitted = await broker.submitAgentTask("agent-alpha", {
+      targetAgent: "agent-beta",
+      taskId: "task-forbidden",
+      message: createMessage("Handle this"),
+    });
+
+    await assertRejects(
+      () =>
+        broker.recordTaskResult("agent-gamma", {
+          task: {
+            ...submitted,
+            status: {
+              state: "WORKING",
+              timestamp: new Date().toISOString(),
+            },
+          },
+        }),
+      Error,
+      'Only "agent-beta" can report the result',
+    );
 
     await broker.stop();
   } finally {
@@ -144,7 +257,10 @@ Deno.test("BrokerServer.continueAgentTask resumes paused task and appends histor
     const resumed = await broker.continueAgentTask("agent-alpha", {
       taskId: paused.id,
       message: createMessage("Approved, continue"),
-      metadata: createResumePayloadMetadata({ kind: "approval", approved: true }),
+      metadata: createResumePayloadMetadata({
+        kind: "approval",
+        approved: true,
+      }),
     });
 
     assertExists(resumed);
@@ -190,7 +306,10 @@ Deno.test("BrokerServer.continueAgentTask classifies explicit refusal as REJECTE
     const rejected = await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
       message: createMessage("No"),
-      metadata: createResumePayloadMetadata({ kind: "approval", approved: false }),
+      metadata: createResumePayloadMetadata({
+        kind: "approval",
+        approved: false,
+      }),
     });
 
     assertExists(rejected);
@@ -209,7 +328,9 @@ Deno.test("BrokerServer.submitAgentTask enforces peer policy", async () => {
 
   try {
     await kv.set(["agents", "agent-alpha", "config"], { peers: [] });
-    await kv.set(["agents", "agent-beta", "config"], { acceptFrom: ["agent-alpha"] });
+    await kv.set(["agents", "agent-beta", "config"], {
+      acceptFrom: ["agent-alpha"],
+    });
 
     const broker = new BrokerServer(createConfig(), {
       kv,

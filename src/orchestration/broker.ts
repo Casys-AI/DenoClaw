@@ -3,6 +3,7 @@ import type {
   BrokerMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
+  BrokerTaskResultPayload,
   BrokerTaskSubmitPayload,
   TunnelCapabilities,
 } from "./types.ts";
@@ -23,7 +24,11 @@ import { generateId } from "../shared/helpers.ts";
 import { createSSEResponse } from "./monitoring.ts";
 import { log } from "../shared/log.ts";
 import { TaskStore } from "../messaging/a2a/tasks.ts";
-import { transitionTask } from "../messaging/a2a/internal_contract.ts";
+import {
+  assertValidTaskTransition,
+  isTerminalTaskState,
+  transitionTask,
+} from "../messaging/a2a/internal_contract.ts";
 import { getResumePayloadMetadata } from "../messaging/a2a/input_metadata.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 
@@ -135,6 +140,9 @@ export class BrokerServer {
           break;
         case "task_cancel":
           await this.handleTaskCancel(msg);
+          break;
+        case "task_result":
+          await this.handleTaskResult(msg);
           break;
         default:
           log.warn(`Type de message inconnu : ${msg.type}`);
@@ -452,6 +460,13 @@ console.log(await r.text());`;
     await this.sendTaskResult(msg.from, msg.id, task);
   }
 
+  private async handleTaskResult(
+    msg: Extract<BrokerMessage, { type: "task_result" }>,
+  ): Promise<void> {
+    const task = await this.recordTaskResult(msg.from, msg.payload);
+    await this.sendTaskResult(msg.from, msg.id, task);
+  }
+
   async submitAgentTask(
     fromAgentId: string,
     payload: BrokerTaskSubmitPayload,
@@ -523,6 +538,82 @@ console.log(await r.text());`;
 
   async cancelTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
     return await this.taskStore.cancel(payload.taskId);
+  }
+
+  async recordTaskResult(
+    fromAgentId: string,
+    payload: BrokerTaskResultPayload,
+  ): Promise<Task | null> {
+    const incomingTask = payload.task;
+    if (!incomingTask) return null;
+
+    const existing = await this.taskStore.get(incomingTask.id);
+    if (!existing) {
+      throw new DenoClawError(
+        "TASK_NOT_FOUND",
+        { taskId: incomingTask.id, fromAgentId },
+        "Submit the task through the broker before reporting a result",
+      );
+    }
+
+    const brokerMetadata = this.getTaskBrokerMetadata(existing);
+    const targetAgentId = typeof brokerMetadata.targetAgent === "string"
+      ? brokerMetadata.targetAgent
+      : undefined;
+    if (!targetAgentId) {
+      throw new DenoClawError(
+        "TASK_TARGET_UNKNOWN",
+        { taskId: existing.id, brokerMetadata },
+        "Broker task metadata is missing targetAgent",
+      );
+    }
+    if (targetAgentId !== fromAgentId) {
+      throw new DenoClawError(
+        "TASK_RESULT_FORBIDDEN",
+        { taskId: existing.id, expected: targetAgentId, actual: fromAgentId },
+        `Only \"${targetAgentId}\" can report the result for task \"${existing.id}\"`,
+      );
+    }
+    if (incomingTask.contextId !== existing.contextId) {
+      throw new DenoClawError(
+        "TASK_CONTEXT_MISMATCH",
+        {
+          taskId: existing.id,
+          expected: existing.contextId,
+          actual: incomingTask.contextId,
+        },
+        "Preserve the canonical task/context correlation ids when reporting results",
+      );
+    }
+
+    if (existing.status.state !== incomingTask.status.state) {
+      if (isTerminalTaskState(existing.status.state)) {
+        throw new DenoClawError(
+          "TASK_ALREADY_TERMINAL",
+          {
+            taskId: existing.id,
+            existingState: existing.status.state,
+            incomingState: incomingTask.status.state,
+          },
+          "Task is already terminal; ignore duplicate terminal updates",
+        );
+      }
+      assertValidTaskTransition(
+        existing.status.state,
+        incomingTask.status.state,
+      );
+    }
+
+    const persisted: Task = {
+      ...incomingTask,
+      metadata: {
+        ...(incomingTask.metadata ?? {}),
+        broker: brokerMetadata,
+      },
+    };
+
+    await this.writeTask(persisted);
+    return persisted;
   }
 
   private async persistTaskMetadata(

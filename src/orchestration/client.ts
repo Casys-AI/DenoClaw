@@ -3,8 +3,8 @@ import type {
   BrokerMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
-  BrokerTaskSubmitPayload,
   BrokerTaskSubmitMessage,
+  BrokerTaskSubmitPayload,
   LLMRequest,
   ToolRequest,
   ToolResponsePayload,
@@ -263,6 +263,34 @@ export class BrokerClient implements AgentBrokerPort {
 
   async cancelTask(taskId: string): Promise<Task | null> {
     return await this.requestTaskResult({ taskId }, "task_cancel");
+  }
+
+  async reportTaskResult(task: Task): Promise<Task> {
+    const response = this.unwrapOrThrow(
+      await this.request({
+        to: "broker",
+        type: "task_result",
+        payload: { task },
+      }),
+    );
+
+    if (response.type !== "task_result") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "task_result", actual: response.type },
+        "Check broker/client task contract",
+      );
+    }
+
+    if (!response.payload.task) {
+      throw new DenoClawError(
+        "TASK_NOT_FOUND",
+        { taskId: task.id },
+        "Broker did not return a persisted task",
+      );
+    }
+
+    return response.payload.task;
   }
 
   private async requestTaskResult(

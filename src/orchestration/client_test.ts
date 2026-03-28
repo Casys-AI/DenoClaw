@@ -87,6 +87,16 @@ function startBrokerResponder(kv: Deno.Kv): void {
           timestamp: new Date().toISOString(),
         };
         break;
+      case "task_result":
+        response = {
+          id: message.id,
+          from: "broker",
+          to: message.from,
+          type: "task_result",
+          payload: { task: message.payload.task },
+          timestamp: new Date().toISOString(),
+        };
+        break;
       case "agent_message":
         response = {
           id: message.id,
@@ -159,6 +169,44 @@ Deno.test("BrokerClient submit/get/continue/cancel use canonical task operations
     const canceled = await client.cancelTask("task-1");
     assertExists(canceled);
     assertEquals(canceled?.status.state, "CANCELED");
+
+    client.close();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerClient.reportTaskResult round-trips canonical task updates", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    startBrokerResponder(kv);
+    const client = new BrokerClient("agent-beta", { kv });
+    await client.startListening();
+
+    const completed = await client.reportTaskResult({
+      ...createTask("task-report"),
+      status: {
+        state: "COMPLETED",
+        timestamp: new Date().toISOString(),
+      },
+      artifacts: [
+        {
+          artifactId: "task-report:result",
+          name: "result",
+          parts: [{ kind: "text", text: "done" }],
+        },
+      ],
+    });
+
+    assertEquals(completed.id, "task-report");
+    assertEquals(completed.status.state, "COMPLETED");
+    assertEquals(completed.artifacts[0]?.parts[0], {
+      kind: "text",
+      text: "done",
+    });
 
     client.close();
   } finally {

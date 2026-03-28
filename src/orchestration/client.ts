@@ -1,21 +1,31 @@
 import type {
   AgentMessagePayload,
   BrokerMessage,
+  BrokerTaskContinuePayload,
+  BrokerTaskQueryPayload,
+  BrokerTaskSubmitPayload,
+  BrokerTaskSubmitMessage,
   LLMRequest,
   ToolRequest,
   ToolResponsePayload,
 } from "./types.ts";
+import { isBrokerErrorMessage } from "./types.ts";
 import type {
   AgentBrokerPort,
+  BrokerEnvelope,
   LLMResponse,
   Message,
-  StructuredError,
   ToolDefinition,
   ToolResult,
 } from "../shared/types.ts";
+import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
+
+export interface BrokerClientDeps {
+  kv?: Deno.Kv;
+}
 
 /**
  * BrokerClient — used by agents in Subhosting to communicate with the Broker on Deploy.
@@ -26,14 +36,17 @@ import { log } from "../shared/log.ts";
 export class BrokerClient implements AgentBrokerPort {
   private agentId: string;
   private kv: Deno.Kv | null = null;
+  private ownsKv: boolean;
   private pendingRequests = new Map<string, {
     resolve: (value: BrokerMessage) => void;
     reject: (reason: unknown) => void;
   }>();
   private listening = false;
 
-  constructor(agentId: string) {
+  constructor(agentId: string, deps: BrokerClientDeps = {}) {
     this.agentId = agentId;
+    this.kv = deps.kv ?? null;
+    this.ownsKv = !deps.kv;
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -68,48 +81,63 @@ export class BrokerClient implements AgentBrokerPort {
   }
 
   /**
-   * Send a message to the broker and wait for a response.
+   * Send a typed message to the broker and wait for a correlated response.
    */
-  private async request(
-    to: string,
-    type: BrokerMessage["type"],
-    payload: unknown,
+  private async request<TRequest extends BrokerMessage>(
+    message: Omit<TRequest, "id" | "from" | "timestamp">,
     timeoutMs = 120_000,
   ): Promise<BrokerMessage> {
     const kv = await this.getKv();
     const id = generateId();
 
-    const msg: BrokerMessage = {
+    const msg = {
+      ...message,
       id,
       from: this.agentId,
-      to,
-      type,
-      payload,
       timestamp: new Date().toISOString(),
-    };
+    } as BrokerMessage;
 
     const promise = new Promise<BrokerMessage>((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-
-      // Timeout
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(
             new DenoClawError(
               "BROKER_TIMEOUT",
-              { type, to, timeoutMs },
+              { type: msg.type, to: msg.to, timeoutMs },
               "Broker did not respond in time. Check broker is running.",
             ),
           );
         }
       }, timeoutMs);
+
+      this.pendingRequests.set(id, {
+        resolve: (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        reject: (reason) => {
+          clearTimeout(timeoutId);
+          reject(reason);
+        },
+      });
     });
 
     await kv.enqueue(msg);
-    log.debug(`Requête envoyée au broker : ${type} (${id})`);
+    log.debug(`Requête envoyée au broker : ${msg.type} (${id})`);
 
     return promise;
+  }
+
+  private unwrapOrThrow(response: BrokerMessage): BrokerMessage {
+    if (isBrokerErrorMessage(response)) {
+      throw new DenoClawError(
+        response.payload.code,
+        response.payload.context,
+        response.payload.recovery,
+      );
+    }
+    return response;
   }
 
   // ── LLM ─────────────────────────────────────────────
@@ -132,11 +160,16 @@ export class BrokerClient implements AgentBrokerPort {
       maxTokens,
       tools,
     };
-    const response = await this.request("broker", "llm_request", payload);
+    const response = this.unwrapOrThrow(
+      await this.request({ to: "broker", type: "llm_request", payload }),
+    );
 
-    if (response.type === "error") {
-      const err = response.payload as StructuredError;
-      throw new DenoClawError(err.code, err.context, err.recovery);
+    if (response.type !== "llm_response") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "llm_response", actual: response.type },
+        "Check broker/client message contract",
+      );
     }
 
     return response.payload as LLMResponse;
@@ -153,18 +186,102 @@ export class BrokerClient implements AgentBrokerPort {
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     const payload: ToolRequest = { tool, args };
-    const response = await this.request("broker", "tool_request", payload);
+    const response = await this.request({
+      to: "broker",
+      type: "tool_request",
+      payload,
+    });
 
     if (response.type === "error") {
-      const err = response.payload as StructuredError;
       return {
         success: false,
         output: "",
-        error: { code: err.code, context: err.context, recovery: err.recovery },
+        error: response.payload,
       };
     }
 
+    if (response.type !== "tool_response") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "tool_response", actual: response.type },
+        "Check broker/client message contract",
+      );
+    }
+
     return response.payload as ToolResponsePayload;
+  }
+
+  // ── Canonical task operations ───────────────────────
+
+  async submitTask(payload: BrokerTaskSubmitPayload): Promise<Task> {
+    const response = this.unwrapOrThrow(
+      await this.request<BrokerTaskSubmitMessage>({
+        to: "broker",
+        type: "task_submit",
+        payload,
+      }),
+    );
+
+    if (response.type !== "task_result") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "task_result", actual: response.type },
+        "Check broker/client task contract",
+      );
+    }
+
+    if (!response.payload.task) {
+      throw new DenoClawError(
+        "TASK_NOT_FOUND",
+        { taskId: payload.taskId },
+        "Task submission did not return a persisted task",
+      );
+    }
+
+    return response.payload.task;
+  }
+
+  async getTask(taskId: string): Promise<Task | null> {
+    return await this.requestTaskResult({ taskId }, "task_get");
+  }
+
+  async continueTask(payload: BrokerTaskContinuePayload): Promise<Task | null> {
+    const response = this.unwrapOrThrow(
+      await this.request({ to: "broker", type: "task_continue", payload }),
+    );
+
+    if (response.type !== "task_result") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "task_result", actual: response.type },
+        "Check broker/client task contract",
+      );
+    }
+
+    return response.payload.task;
+  }
+
+  async cancelTask(taskId: string): Promise<Task | null> {
+    return await this.requestTaskResult({ taskId }, "task_cancel");
+  }
+
+  private async requestTaskResult(
+    payload: BrokerTaskQueryPayload,
+    type: "task_get" | "task_cancel",
+  ): Promise<Task | null> {
+    const response = this.unwrapOrThrow(
+      await this.request({ to: "broker", type, payload }),
+    );
+
+    if (response.type !== "task_result") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "task_result", actual: response.type },
+        "Check broker/client task contract",
+      );
+    }
+
+    return response.payload.task;
   }
 
   // ── Inter-agent ─────────────────────────────────────
@@ -176,11 +293,49 @@ export class BrokerClient implements AgentBrokerPort {
     targetAgentId: string,
     instruction: string,
     data?: unknown,
-  ): Promise<BrokerMessage> {
+  ): Promise<BrokerEnvelope> {
     const payload: AgentMessagePayload = { instruction, data };
-    return await this.request("broker", "agent_message", {
+    const response = this.unwrapOrThrow(
+      await this.request({
+        to: "broker",
+        type: "agent_message",
+        payload: {
+          targetAgent: targetAgentId,
+          ...payload,
+        },
+      }),
+    );
+
+    if (response.type !== "agent_response") {
+      throw new DenoClawError(
+        "BROKER_PROTOCOL_ERROR",
+        { expected: "agent_response", actual: response.type },
+        "Check broker/client message contract",
+      );
+    }
+
+    return response;
+  }
+
+  async sendTextTask(
+    targetAgentId: string,
+    instruction: string,
+    options: {
+      taskId?: string;
+      contextId?: string;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): Promise<Task> {
+    return await this.submitTask({
       targetAgent: targetAgentId,
-      ...payload,
+      taskId: options.taskId ?? generateId(),
+      contextId: options.contextId,
+      metadata: options.metadata,
+      message: {
+        messageId: generateId(),
+        role: "user",
+        parts: [{ kind: "text", text: instruction }],
+      } as A2AMessage,
     });
   }
 
@@ -197,7 +352,7 @@ export class BrokerClient implements AgentBrokerPort {
       );
     }
     this.pendingRequests.clear();
-    if (this.kv) {
+    if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
     }

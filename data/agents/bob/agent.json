@@ -1,11 +1,11 @@
 {
-  "$schema": "../../../schemas/agent.schema.json",
-  "description": "Agent exécuteur — lecture, écriture, exécution",
+  "description": "Agent exécuteur",
   "sandbox": {
     "allowedPermissions": [
       "read",
       "write",
-      "run"
+      "run",
+      "net"
     ],
     "execPolicy": {
       "security": "allowlist",
@@ -14,9 +14,11 @@
         "ls",
         "cat",
         "date",
-        "uname"
+        "deno",
+        "node",
+        "python3"
       ],
-      "ask": "on-miss"
+      "ask": "off"
     }
   },
   "peers": [

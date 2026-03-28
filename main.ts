@@ -11,7 +11,6 @@ import { MessageBus } from "./src/messaging/bus.ts";
 import { SessionManager } from "./src/messaging/session.ts";
 import {
   publishAgent,
-  publishGateway,
   setupAgent,
   setupChannel,
   setupProvider,
@@ -394,17 +393,24 @@ try {
       }
       break;
 
+    case "deploy":
+      if (subcommand === "agent") {
+        const agentName = args._[2] as string;
+        const brokerUrl = (args.broker as string) || Deno.env.get("DENOCLAW_BROKER_URL");
+        await publishAgent(agentName, { brokerUrl });
+      } else {
+        console.log("Usage: denoclaw deploy agent <name> --broker <url>");
+      }
+      break;
+
+    // Legacy alias
     case "publish":
-      switch (subcommand) {
-        case "agent":
-          await publishAgent();
-          break;
-        case "gateway":
-          await publishGateway();
-          break;
-        default:
-          console.log("Usage: denoclaw publish [agent|gateway]");
-          break;
+      if (subcommand === "agent") {
+        const agentName = args._[2] as string;
+        const brokerUrl = (args.broker as string) || Deno.env.get("DENOCLAW_BROKER_URL");
+        await publishAgent(agentName, { brokerUrl });
+      } else {
+        console.log("Usage: denoclaw deploy agent <name> --broker <url>");
       }
       break;
 

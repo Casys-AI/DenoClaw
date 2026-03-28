@@ -169,3 +169,79 @@ export class KvQueueTransport implements BrokerTransport {
     this.listening = false;
   }
 }
+
+// ── HTTP transport (Subhosting → Broker on VPS) ─────────
+
+/**
+ * BrokerTransport backed by HTTP POST to a remote broker.
+ *
+ * Used by agents deployed on Subhosting to communicate with
+ * a broker running on a VPS. Request/response over HTTP — no
+ * KV Queue, no WebSocket, no shared state.
+ */
+export class HttpBrokerTransport implements BrokerTransport {
+  private agentId: string;
+  private brokerUrl: string;
+  private apiToken: string;
+  private started = false;
+
+  constructor(agentId: string, brokerUrl: string, apiToken?: string) {
+    this.agentId = agentId;
+    this.brokerUrl = brokerUrl.replace(/\/$/, "");
+    this.apiToken = apiToken ?? Deno.env.get("DENOCLAW_API_TOKEN") ?? "";
+  }
+
+  async start(): Promise<void> {
+    this.started = true;
+    log.info(`HttpBrokerTransport: connecté au broker ${this.brokerUrl} (agent: ${this.agentId})`);
+    await Promise.resolve();
+  }
+
+  async send(
+    message: Omit<BrokerMessage, "id" | "from" | "timestamp">,
+    timeoutMs = 120_000,
+  ): Promise<BrokerMessage> {
+    if (!this.started) {
+      throw new DenoClawError(
+        "TRANSPORT_NOT_STARTED",
+        {},
+        "Call start() before send()",
+      );
+    }
+
+    const id = generateId();
+    const msg = {
+      ...message,
+      id,
+      from: this.agentId,
+      timestamp: new Date().toISOString(),
+    } as BrokerMessage;
+
+    const res = await fetch(`${this.brokerUrl}/api/broker`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {}),
+      },
+      body: JSON.stringify(msg),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new DenoClawError(
+        "BROKER_HTTP_ERROR",
+        { status: res.status, body: body.slice(0, 500), type: msg.type },
+        `Broker responded with ${res.status}. Check broker URL and token.`,
+      );
+    }
+
+    const response = await res.json() as BrokerMessage;
+    log.debug(`Réponse du broker : ${response.type} (${id})`);
+    return response;
+  }
+
+  close(): void {
+    this.started = false;
+  }
+}

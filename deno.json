@@ -48,5 +48,8 @@
     "noImplicitReturns": true,
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
+  },
+  "deploy": {
+    "org": "casys"
   }
 }

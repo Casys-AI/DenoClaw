@@ -9,7 +9,7 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from "./types.ts";
-import { A2A_ERRORS, TERMINAL_STATES } from "./types.ts";
+import { A2A_ERRORS } from "./types.ts";
 import { TaskStore } from "./tasks.ts";
 import { log } from "../../shared/log.ts";
 
@@ -123,7 +123,7 @@ export class A2AServer {
           this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
         );
       }
-      if (TERMINAL_STATES.includes(existing.status.state)) {
+      if (!this.store.canAcceptUpdates(existing)) {
         return Response.json(
           this.rpcError(
             rpc.id,
@@ -132,7 +132,7 @@ export class A2AServer {
           ),
         );
       }
-      await this.store.addMessage(params.taskId, params.message);
+      await this.store.appendHistoryMessage(params.taskId, params.message);
       task = existing;
     } else {
       // New task
@@ -141,14 +141,14 @@ export class A2AServer {
     }
 
     // Execute
-    await this.store.updateStatus(task.id, "WORKING");
+    await this.store.startWorking(task.id);
 
     try {
       await this.handler(task, params.message);
       const updated = await this.store.get(task.id);
       return Response.json(this.rpcSuccess(rpc.id, updated));
     } catch (e) {
-      await this.store.updateStatus(task.id, "FAILED", {
+      await this.store.failTask(task.id, {
         messageId: crypto.randomUUID(),
         role: "agent",
         parts: [{ kind: "text", text: (e as Error).message }],
@@ -178,7 +178,16 @@ export class A2AServer {
           this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
         );
       }
-      await this.store.addMessage(params.taskId, params.message);
+      if (!this.store.canAcceptUpdates(existing)) {
+        return Response.json(
+          this.rpcError(
+            rpc.id,
+            A2A_ERRORS.TASK_NOT_CANCELABLE,
+            "Task in terminal state",
+          ),
+        );
+      }
+      await this.store.appendHistoryMessage(params.taskId, params.message);
       task = existing;
     } else {
       task = await this.store.create(taskId, params.message);
@@ -194,11 +203,14 @@ export class A2AServer {
         this.sseEvent(controller, encoder, rpc.id, { kind: "task", ...task });
 
         // Working
-        await this.store.updateStatus(task.id, "WORKING");
+        const workingTask = await this.store.startWorking(task.id);
         this.sseEvent(controller, encoder, rpc.id, {
           kind: "taskStatusUpdate",
           taskId: task.id,
-          status: { state: "WORKING", timestamp: new Date().toISOString() },
+          status: workingTask?.status ?? {
+            state: "WORKING",
+            timestamp: new Date().toISOString(),
+          },
           final: false,
         } as TaskStatusUpdateEvent);
 
@@ -227,6 +239,11 @@ export class A2AServer {
             final: true,
           } as TaskStatusUpdateEvent);
         } catch (e) {
+          const failed = await this.store.failTask(task.id, {
+            messageId: crypto.randomUUID(),
+            role: "agent",
+            parts: [{ kind: "text", text: (e as Error).message }],
+          });
           this.sseEvent(
             controller,
             encoder,
@@ -234,7 +251,10 @@ export class A2AServer {
             {
               kind: "taskStatusUpdate",
               taskId: task.id,
-              status: { state: "FAILED", timestamp: new Date().toISOString() },
+              status: failed?.status ?? {
+                state: "FAILED",
+                timestamp: new Date().toISOString(),
+              },
               final: true,
             } as TaskStatusUpdateEvent & { error: string },
           );
@@ -287,7 +307,7 @@ export class A2AServer {
         this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
       );
     }
-    if (TERMINAL_STATES.includes(task.status.state)) {
+    if (!this.store.canAcceptUpdates(task)) {
       return Response.json(
         this.rpcError(
           rpc.id,
@@ -297,7 +317,7 @@ export class A2AServer {
       );
     }
 
-    const canceled = await this.store.cancel(taskId);
+    const canceled = await this.store.cancelTask(taskId);
     return Response.json(this.rpcSuccess(rpc.id, canceled));
   }
 
@@ -312,7 +332,7 @@ export class A2AServer {
       parts: [{ kind: "text", text }],
     };
     await this.store.addArtifact(taskId, artifact);
-    await this.store.updateStatus(taskId, "COMPLETED", {
+    await this.store.completeTask(taskId, {
       messageId: crypto.randomUUID(),
       role: "agent",
       parts: [{ kind: "text", text }],
@@ -323,7 +343,7 @@ export class A2AServer {
    * Fail a task with a message (call from handler).
    */
   async failTask(taskId: string, error: string): Promise<void> {
-    await this.store.updateStatus(taskId, "FAILED", {
+    await this.store.failTask(taskId, {
       messageId: crypto.randomUUID(),
       role: "agent",
       parts: [{ kind: "text", text: error }],

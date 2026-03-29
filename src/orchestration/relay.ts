@@ -1,9 +1,5 @@
 import type { BrokerMessage } from "./types.ts";
 import type { SandboxPermission, ToolResult } from "../shared/types.ts";
-import { ToolRegistry } from "../agent/tools/registry.ts";
-import { ShellTool } from "../agent/tools/shell.ts";
-import { ReadFileTool, WriteFileTool } from "../agent/tools/file.ts";
-import { WebFetchTool } from "../agent/tools/web.ts";
 import { log } from "../shared/log.ts";
 import {
   createTunnelRegisterMessage,
@@ -11,6 +7,8 @@ import {
   parseTunnelControlMessage,
   WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
 } from "./tunnel_protocol.ts";
+import type { ToolExecutionPort } from "./tool_execution_port.ts";
+import { LocalToolExecutionAdapter } from "./adapters/tool_execution_local.ts";
 
 interface LocalRelayConfig {
   brokerUrl: string;
@@ -20,6 +18,10 @@ interface LocalRelayConfig {
   };
   allowedAgents?: string[];
   autoApprove?: boolean;
+}
+
+interface LocalRelayDeps {
+  toolExecution?: ToolExecutionPort;
 }
 
 type DenoWebSocketWithHeaders = {
@@ -92,34 +94,15 @@ function createRelaySocket(
 export class LocalRelay {
   private config: LocalRelayConfig;
   private ws: WebSocket | null = null;
-  private tools: ToolRegistry;
+  private toolExecution: ToolExecutionPort;
   private sessionToken: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
 
-  constructor(config: LocalRelayConfig) {
+  constructor(config: LocalRelayConfig, deps?: LocalRelayDeps) {
     this.config = config;
-    this.tools = new ToolRegistry();
-
-    // Register local tools based on capabilities
-    if (config.capabilities.tools.includes("shell")) {
-      this.tools.register(new ShellTool());
-    }
-    if (
-      config.capabilities.tools.includes("read_file") ||
-      config.capabilities.tools.includes("fs_read")
-    ) {
-      this.tools.register(new ReadFileTool());
-    }
-    if (
-      config.capabilities.tools.includes("write_file") ||
-      config.capabilities.tools.includes("fs_write")
-    ) {
-      this.tools.register(new WriteFileTool());
-    }
-    if (config.capabilities.tools.includes("web_fetch")) {
-      this.tools.register(new WebFetchTool());
-    }
+    this.toolExecution = deps?.toolExecution ??
+      LocalToolExecutionAdapter.forRelay(config.capabilities.tools);
   }
 
   async connect(): Promise<void> {
@@ -148,7 +131,7 @@ export class LocalRelay {
 
       const registration = buildRelayRegistrationMessage({
         tools: this.config.capabilities.tools,
-        toolPermissions: this.tools.getToolPermissions(),
+        toolPermissions: this.toolExecution.getToolPermissions(),
         allowedAgents: this.config.allowedAgents || [],
       });
       this.sendJson(registration);
@@ -260,7 +243,7 @@ export class LocalRelay {
       log.warn(`Relay: manual approval not implemented, executing — ${tool}`);
     }
 
-    return await this.tools.execute(tool, args);
+    return await this.toolExecution.executeTool({ tool, args });
   }
 
   private attemptReconnect(): void {

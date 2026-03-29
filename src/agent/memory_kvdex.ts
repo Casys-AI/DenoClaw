@@ -39,9 +39,9 @@ function openDb(kv: Deno.Kv) {
 type DbType = ReturnType<typeof openDb>;
 
 /**
- * Mémoire agent structurée via kvdex.
- * Collections indexées : conversations (par sessionId) + faits long-terme (par topic).
- * Cache in-memory synchronisé pour getMessages() sync.
+ * Agent memory structured via kvdex.
+ * Indexed collections: conversations (by sessionId) + long-term facts (by topic).
+ * Synchronized in-memory cache for sync getMessages().
  */
 export class KvdexMemory implements MemoryPort {
   private _agentId: string;
@@ -111,10 +111,10 @@ export class KvdexMemory implements MemoryPort {
       }
 
       log.debug(
-        `KvdexMemory chargée : ${this.cache.length} messages (${this.sessionId})`,
+        `KvdexMemory loaded: ${this.cache.length} messages (${this.sessionId})`,
       );
     } catch (e) {
-      log.error(`Échec chargement KvdexMemory (${this.sessionId})`, e);
+      log.error(`Failed to load KvdexMemory (${this.sessionId})`, e);
       this.cache = [];
       this.seq = 0;
     }
@@ -147,7 +147,7 @@ export class KvdexMemory implements MemoryPort {
       };
       await db.convMessages.add(doc);
     } catch (e) {
-      log.error(`Échec écriture KvdexMemory (${this.sessionId})`, e);
+      log.error(`Failed to write KvdexMemory (${this.sessionId})`, e);
     }
   }
 
@@ -168,7 +168,7 @@ export class KvdexMemory implements MemoryPort {
         filter: (doc) => doc.value.sessionId === this.sessionId,
       });
     } catch (e) {
-      log.error(`Échec clear KvdexMemory (${this.sessionId})`, e);
+      log.error(`Failed to clear KvdexMemory (${this.sessionId})`, e);
     }
   }
 
@@ -187,9 +187,9 @@ export class KvdexMemory implements MemoryPort {
         timestamp: new Date().toISOString(),
       };
       await db.longTermFacts.add(doc);
-      log.debug(`Fait mémorisé [${fact.topic}]: ${fact.content.slice(0, 80)}`);
+      log.debug(`Remembered fact [${fact.topic}]: ${fact.content.slice(0, 80)}`);
     } catch (e) {
-      log.error(`Échec remember (${fact.topic})`, e);
+      log.error(`Failed to remember (${fact.topic})`, e);
     }
   }
 
@@ -211,7 +211,7 @@ export class KvdexMemory implements MemoryPort {
           timestamp: d.value!.timestamp,
         }));
     } catch (e) {
-      log.error(`Échec recall (${topic})`, e);
+      log.error(`Failed to recall (${topic})`, e);
       return [];
     }
   }
@@ -226,7 +226,7 @@ export class KvdexMemory implements MemoryPort {
       }
       return [...topics].sort();
     } catch (e) {
-      log.error("Échec listTopics", e);
+      log.error("Failed to list topics", e);
       return [];
     }
   }
@@ -237,9 +237,9 @@ export class KvdexMemory implements MemoryPort {
       await db.longTermFacts.deleteMany({
         filter: (doc) => doc.value.topic === topic,
       });
-      log.debug(`Faits oubliés [${topic}]`);
+      log.debug(`Forgot facts [${topic}]`);
     } catch (e) {
-      log.error(`Échec forgetTopic (${topic})`, e);
+      log.error(`Failed to forgetTopic (${topic})`, e);
     }
   }
 

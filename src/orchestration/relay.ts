@@ -128,15 +128,15 @@ export class LocalRelay {
       this.config.inviteToken,
       this.sessionToken,
     );
-    log.info(`Relay: connexion à ${this.config.brokerUrl}...`);
+    log.info(`Relay: connecting to ${this.config.brokerUrl}...`);
 
     this.ws = createRelaySocket(url, authToken);
 
     this.ws.onopen = () => {
       if (this.ws?.protocol !== DENOCLAW_TUNNEL_PROTOCOL) {
         log.error(
-          `Relay: subprotocol invalide (attendu ${DENOCLAW_TUNNEL_PROTOCOL}, reçu ${
-            this.ws?.protocol || "aucun"
+          `Relay: invalid subprotocol (expected ${DENOCLAW_TUNNEL_PROTOCOL}, received ${
+            this.ws?.protocol || "none"
           })`,
         );
         this.ws?.close(1002, "Expected denoclaw tunnel subprotocol");
@@ -144,7 +144,7 @@ export class LocalRelay {
       }
 
       this.reconnectAttempts = 0;
-      log.info(`Relay: connecté au broker (${this.ws.protocol})`);
+      log.info(`Relay: connected to broker (${this.ws.protocol})`);
 
       const registration = buildRelayRegistrationMessage({
         tools: this.config.capabilities.tools,
@@ -167,13 +167,13 @@ export class LocalRelay {
           if (control.type === "session_token") {
             this.sessionToken = control.token;
             log.info(
-              `Relay: session token reçu (expire: ${control.expiresAt})`,
+              `Relay: session token received (expires: ${control.expiresAt})`,
             );
             return;
           }
 
           log.info(
-            `Relay: enregistré (id: ${control.tunnelId}, protocol: ${
+            `Relay: registered (id: ${control.tunnelId}, protocol: ${
               this.ws?.protocol || "unknown"
             })`,
           );
@@ -182,13 +182,13 @@ export class LocalRelay {
 
         await this.handleBrokerMessage(raw as BrokerMessage);
       } catch (err) {
-        log.error("Relay: erreur traitement message", err);
+        log.error("Relay: message handling error", err);
       }
     };
 
     this.ws.onclose = (e) => {
       log.warn(
-        `Relay: déconnecté du broker (code=${e.code}, reason=${
+        `Relay: disconnected from broker (code=${e.code}, reason=${
           e.reason || "none"
         })`,
       );
@@ -196,7 +196,7 @@ export class LocalRelay {
     };
 
     this.ws.onerror = (e) => {
-      log.error("Relay: erreur WebSocket", e);
+      log.error("Relay: WebSocket error", e);
     };
 
     // Wait for connection
@@ -219,7 +219,7 @@ export class LocalRelay {
   }
 
   private async handleBrokerMessage(msg: BrokerMessage): Promise<void> {
-    log.info(`Relay: ${msg.type} de ${msg.from}`);
+    log.info(`Relay: ${msg.type} from ${msg.from}`);
 
     let response: BrokerMessage;
 
@@ -242,7 +242,7 @@ export class LocalRelay {
       }
 
       default:
-        log.warn(`Relay: type non géré — ${msg.type}`);
+        log.warn(`Relay: unhandled type — ${msg.type}`);
         return;
     }
 
@@ -254,9 +254,9 @@ export class LocalRelay {
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     if (this.config.autoApprove) {
-      log.info(`Relay: exécution locale (auto-approve) — ${tool}`);
+      log.info(`Relay: local execution (auto-approve) — ${tool}`);
     } else {
-      // TODO: implémenter le prompt interactif d'approbation
+      // TODO: implement the interactive approval prompt
       log.warn(`Relay: manual approval not implemented, executing — ${tool}`);
     }
 
@@ -265,18 +265,18 @@ export class LocalRelay {
 
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      log.error("Relay: max tentatives de reconnexion atteint");
+      log.error("Relay: maximum reconnect attempts reached");
       return;
     }
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30_000);
     log.info(
-      `Relay: reconnexion dans ${delay}ms (tentative ${this.reconnectAttempts})`,
+      `Relay: reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
     );
 
     setTimeout(() => {
-      this.connect().catch((e) => log.error("Relay: échec reconnexion", e));
+      this.connect().catch((e) => log.error("Relay: reconnect failed", e));
     }, delay);
   }
 

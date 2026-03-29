@@ -4,119 +4,144 @@
 
 # DenoClaw
 
-Agent AI Deno-natif. Zéro dépendance Node.js. Inspiré de
-[nano-claw](https://github.com/hustcc/nano-claw) et
-[PicoClaw](https://github.com/sipeed/picoclaw).
+DenoClaw is a Deno-native runtime for brokered multi-agent workflows. It runs
+the control plane on Deno Deploy, agent runtimes in Subhosting, and arbitrary
+code execution in Deno Sandbox.
 
-## Stack
+The architecture is intentionally split into three layers:
 
-Tout est natif Deno 2.7+ :
+```
+Deploy : Broker (Deno Deploy)  → Agents (Subhosting) → Code Execution (Sandbox)
+Local  : Process               → Workers             → Subprocess (`Deno.Command`)
+```
 
-| Besoin           | API Deno                                                |
-| ---------------- | ------------------------------------------------------- |
-| Persistence      | `Deno.openKv()`                                         |
-| Cron / Heartbeat | `Deno.cron()` (Broker/local only)                       |
-| File d'attente   | `kv.enqueue()` / `kv.listenQueue()` (Broker/local only) |
-| HTTP server      | `Deno.serve()`                                          |
-| WebSocket        | `Deno.upgradeWebSocket()`                               |
-| Shell            | `Deno.Command`                                          |
-| HTTP client      | `fetch()`                                               |
-| Tests            | `Deno.test()`                                           |
-| Observabilité    | OpenTelemetry intégré                                   |
+That split is the core of the system, not an implementation detail:
+
+- **Broker** is the control plane. It owns routing, auth, LLM proxying, cron,
+  tunnel coordination, and durable task state.
+- **Subhosting** runs the agent runtime. Agents are reactive HTTP services with
+  per-agent KV-backed state, not long-running daemons.
+- **Sandbox** executes arbitrary code and tool calls under an isolated runtime
+  boundary with explicit permissions.
+
+The local runtime mirrors the same model with a main process, one Worker per
+agent, and one subprocess per tool execution. The goal is the same semantics in
+dev and deploy, with transport and isolation swapped to the local equivalents.
+
+## Why this architecture
+
+### Deno Deploy for the Broker
+
+The Broker needs to stay awake, own public ingress, schedule cron jobs, hold
+durable coordination state, and mediate all agent-to-agent traffic. Deno Deploy
+fits that control-plane role well: HTTP-native, KV-native, and always-on.
+
+### Subhosting for agent runtimes
+
+Agents are a good match for Subhosting because they are request-driven, can
+benefit from warm isolate reuse, and need bound state, but they should not own
+schedulers or durable message transport. DenoClaw therefore treats Subhosting
+agents as reactive endpoints, not as daemon processes.
+
+### Sandbox for code execution
+
+Tool execution and arbitrary code are isolated from both the Broker and the
+agent runtime. This keeps the control plane clean, keeps agent logic portable,
+and makes the security boundary explicit. Sandbox permissions are derived from
+tool requirements intersected with agent policy.
+
+## Why Deno is a strong fit
+
+DenoClaw uses the same runtime family across local and deploy paths:
+
+| Need                | Deno primitive                         |
+| ------------------- | -------------------------------------- |
+| HTTP server         | `Deno.serve()`                         |
+| Durable state       | `Deno.openKv()`                        |
+| Scheduled work      | `Deno.cron()` (Broker/local only)      |
+| Local agent runtime | `new Worker()`                         |
+| Local code exec     | `Deno.Command`                         |
+| Cloud code exec     | Deno Sandbox                           |
+| Network I/O         | `fetch()` + `Deno.upgradeWebSocket()`  |
+| Observability       | built-in OpenTelemetry support         |
+| Tests               | `Deno.test()`                          |
+
+That matters because DenoClaw does not need a Node.js compatibility layer,
+separate deploy runtime, or a second language/runtime for orchestration. The
+same TypeScript codebase spans CLI, local workers, Deploy, Subhosting, and
+Sandbox-oriented execution paths.
+
+## Core architectural advantages
+
+- **One mental model across local and deploy.** Broker / Agent / Execution maps
+  cleanly to Process / Worker / Subprocess in local mode.
+- **Clear isolation boundaries.** Control plane, agent runtime, and code
+  execution are separate concerns.
+- **Centralized security and observability.** LLM calls, tool requests, A2A
+  routing, traces, and auth flow through the Broker.
+- **Reactive agents instead of hidden daemons.** The system does not depend on
+  unsupported Subhosting patterns such as `Deno.cron()` or `kv.listenQueue()`
+  inside agents.
+- **Deno-native end to end.** No Node.js dependency chain and no split runtime
+  model.
 
 ## Quickstart
 
 ```bash
-# Installer Deno 2.7+
+# Install Deno 2.7+
 curl -fsSL https://deno.land/install.sh | sh
 
-# Configurer un provider LLM (interactif)
+# Configure an LLM provider
 deno task start setup provider
 
-# Configurer Telegram
+# Configure a channel
 deno task start setup channel
 
-# Chat interactif
+# Run an interactive agent session
 deno task start agent
 
-# Message unique
-deno task start agent -- -m "Bonjour DenoClaw"
+# Send a one-off message
+deno task start agent -- -m "Hello DenoClaw"
 
-# Utiliser Ollama local
-deno task start agent -- --model ollama/nemotron-3-super
-
-# Utiliser Claude CLI
-deno task start agent -- --model claude-cli
-
-# Gateway multi-canal (HTTP + WebSocket + Telegram)
+# Start the local gateway
 deno task start gateway
 
-# Déployer sur Deno Deploy
+# Deploy the broker
 deno task start publish gateway
 ```
 
-## Architecture
-
-```
-Local  : Main process (broker) → Workers (agents) → Deno.Command (exécution)
-Deploy : Broker (Deno Deploy)  → Subhosting (agents) → Sandbox (exécution)
-```
-
-- **Broker** = orchestrateur central (LLM proxy, cron, tunnels, inter-agents).
-  Seul composant long-running.
-- **Subhosting** = héberge l'agent (warm-cached, KV pour état). Réactif — se
-  réveille sur HTTP du Broker.
-- **Sandbox** = exécute le code (éphémère, permissions hardened)
-- **Local** : Workers (= Subhosting) + `Deno.Command` (= Sandbox), même code,
-  `postMessage` au lieu de HTTP
-- **Tunnels** = mesh réseau (noeuds VPS/GPU, inter-brokers, machines locales) —
-  à la Tailscale
-
-Voir `docs/architecture-distributed.md` et les ADRs dans `docs/`.
-
-## Pattern AX (Agent Experience)
-
-Toute interface est conçue pour des agents, pas juste des humains :
-
-- Erreurs structurées : `{ code, context, recovery }`
-- Safe defaults : `dry_run: true` sur les écritures
-- Enums au lieu de strings libres
-- Boucle Plan → Scope → Act → Verify → Recover
-
-Voir `CLAUDE.md` pour les conventions complètes.
-
-## Développement
+## Development
 
 ```bash
-deno task dev       # Backend avec watch
-deno task dashboard # Dashboard Fresh/Vite avec HMR
-deno task test      # Tests
+deno task dev       # Backend with watch
+deno task dashboard # Dashboard dev server
+deno task test      # Test suite
 deno task check     # Type-check
 deno task lint      # Lint
 deno task fmt       # Format
 ```
 
-## Structure
+## Repository layout
 
 ```
 src/
-├── agent/          # Boucle ReAct, runtime, cron, mémoire (KV), skills, context
-│   └── tools/      # Shell, file, web, registry
-├── llm/            # Providers LLM : Anthropic, OpenAI, Ollama, CLI/OAuth
-├── messaging/      # Communication
-│   ├── a2a/        # Protocole A2A (JSON-RPC, SSE, AgentCards, Tasks)
-│   └── channels/   # Console, webhook, Telegram
-├── orchestration/  # Broker, gateway, auth, relay, sandbox, client
-├── cli/            # Commandes CLI (setup, agents, publish)
-├── config/         # Chargement, validation, env vars
-├── shared/         # Logger, helpers, erreurs structurées
-└── telemetry/      # OpenTelemetry
+├── agent/          # Agent loop, runtime, memory, skills, tools
+├── llm/            # LLM providers and routing
+├── messaging/      # Channels, sessions, A2A protocol
+├── orchestration/  # Broker, gateway, auth, relay, transports
+├── cli/            # CLI entrypoints and setup flows
+├── config/         # Config loading and validation
+├── shared/         # Shared errors, helpers, logging, types
+└── telemetry/      # Metrics and tracing
 docs/
 ├── architecture-distributed.md
-├── adr-001 → adr-012
-└── refactor-ddd.md
+├── adr-001-*.md → adr-014-*.md
+└── plans/
 ```
 
-## Licence
+See `docs/architecture-distributed.md`, the ADRs in `docs/`, and `CLAUDE.md`
+for the project conventions and architectural decisions.
+
+## License
 
 MIT

@@ -88,7 +88,7 @@ export class AgentRuntime {
   }
 
   async start(): Promise<void> {
-    log.info(`AgentRuntime démarré : ${this.agentId}`);
+    log.info(`AgentRuntime started: ${this.agentId}`);
 
     await this.skills.loadSkills();
     await this.broker.startListening();
@@ -124,7 +124,7 @@ export class AgentRuntime {
       if (!isRuntimeTaskMessage(msg)) return;
       await this.handleIncomingMessage(msg);
     });
-    log.info(`AgentRuntime: KV Queue intake démarrée (${this.agentId})`);
+    log.info(`AgentRuntime: KV Queue intake started (${this.agentId})`);
   }
 
   /**
@@ -176,7 +176,7 @@ export class AgentRuntime {
     const payload = msg.payload;
     const inputText = this.extractTextFromMessage(payload.message);
     log.info(
-      `Tâche canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`,
+      `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
     await this.executeConversation({
@@ -212,7 +212,7 @@ export class AgentRuntime {
 
     const inputText = this.extractTextFromMessage(payload.message);
     log.info(
-      `Continuation canonique reçue de ${msg.from}: ${inputText.slice(0, 100)}`,
+      `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
     await this.executeConversation({
@@ -306,7 +306,7 @@ export class AgentRuntime {
               );
               await this.reportCanonicalTaskResult(pausedTask);
               log.info(
-                `Tâche canonique en pause INPUT_REQUIRED pour ${options.fromAgentId}`,
+                `Canonical task paused in INPUT_REQUIRED for ${options.fromAgentId}`,
               );
               return;
             }
@@ -337,7 +337,7 @@ export class AgentRuntime {
         );
         await this.reportCanonicalTaskResult(completedTask);
         log.info(
-          `Tâche canonique terminée pour ${options.fromAgentId} (${iteration} itérations)`,
+          `Canonical task completed for ${options.fromAgentId} (${iteration} iterations)`,
         );
         return;
       }
@@ -440,6 +440,6 @@ export class AgentRuntime {
       this.kv.close();
       this.kv = null;
     }
-    log.info(`AgentRuntime arrêté : ${this.agentId}`);
+    log.info(`AgentRuntime stopped: ${this.agentId}`);
   }
 }

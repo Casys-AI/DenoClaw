@@ -16,7 +16,7 @@ export async function listAgents(): Promise<void> {
   const agents = Object.entries(registry);
 
   if (agents.length === 0) {
-    print("Aucun agent configuré. Utilisez 'denoclaw agent create <name>'.");
+    print("No agents configured. Use 'denoclaw agent create <name>'.");
     return;
   }
 
@@ -25,19 +25,19 @@ export async function listAgents(): Promise<void> {
     const isWorkspace = name in wsRegistry;
     const model = agent.model || config.agents.defaults.model;
     const perms = agent.sandbox?.allowedPermissions?.join(",") || "defaults";
-    const peers = agent.peers?.join(",") || "aucun";
-    const accept = agent.acceptFrom?.join(",") || "aucun";
-    const channels = agent.channels?.join(",") || "aucun";
+    const peers = agent.peers?.join(",") || "none";
+    const accept = agent.acceptFrom?.join(",") || "none";
+    const channels = agent.channels?.join(",") || "none";
 
     print(
       `  ${name}${agent.description ? ` — ${agent.description}` : ""}${
         isWorkspace ? " [workspace]" : " [legacy]"
       }`,
     );
-    print(`    Modèle   : ${model}`);
+    print(`    Model    : ${model}`);
     print(`    Sandbox  : [${perms}]`);
-    print(`    Peers    : [${peers}]     (peut envoyer à)`);
-    print(`    Accept   : [${accept}]    (accepte de)`);
+    print(`    Peers    : [${peers}]     (can send to)`);
+    print(`    Accept   : [${accept}]    (accepts from)`);
     print(`    Channels : [${channels}]`);
     print("");
   }
@@ -63,9 +63,9 @@ export async function createAgent(
     (!opts.description && !opts.model && !opts.systemPrompt &&
       !opts.permissions && !opts.peers && !opts.acceptFrom && !opts.force);
 
-  const agentName = name || (interactive ? await ask("Nom de l'agent") : "");
+  const agentName = name || (interactive ? await ask("Agent name") : "");
   if (!agentName) {
-    error("Nom requis.");
+    error("Name is required.");
     return;
   }
 
@@ -73,10 +73,10 @@ export async function createAgent(
     if (opts?.force) { /* overwrite */ }
     else if (interactive) {
       if (
-        !await confirm(`L'agent "${agentName}" existe déjà. Écraser ?`, false)
+        !await confirm(`Agent "${agentName}" already exists. Overwrite?`, false)
       ) return;
     } else {
-      error(`Agent "${agentName}" existe déjà. Utilisez --force pour écraser.`);
+      error(`Agent "${agentName}" already exists. Use --force to overwrite.`);
       return;
     }
   }
@@ -91,17 +91,17 @@ export async function createAgent(
   let channelRouting: ChannelRouting = "direct";
 
   if (interactive) {
-    print("\n── Identité ──\n");
-    description = await ask("Description (ce que fait cet agent)") || undefined;
-    model = await ask("Modèle LLM", config.agents.defaults.model);
-    systemPrompt = await ask("System prompt (vide = défaut)") || undefined;
+    print("\n── Identity ──\n");
+    description = await ask("Description (what this agent does)") || undefined;
+    model = await ask("LLM model", config.agents.defaults.model);
+    systemPrompt = await ask("System prompt (empty = default)") || undefined;
 
-    print("\n── Permissions Sandbox ──\n");
-    const permChoice = await choose("Profil de permissions", [
-      "read-only   — lecture seule (read)",
-      "standard    — lecture, écriture, exécution (read, write, run)",
-      "full        — tout (read, write, run, net)",
-      "custom      — choisir manuellement",
+    print("\n── Sandbox Permissions ──\n");
+    const permChoice = await choose("Permission profile", [
+      "read-only   — read only (read)",
+      "standard    — read, write, execute (read, write, run)",
+      "full        — everything (read, write, run, net)",
+      "custom      — choose manually",
     ]);
     const permKey = permChoice.split("—")[0].trim().split(/\s+/)[0];
     switch (permKey) {
@@ -124,24 +124,24 @@ export async function createAgent(
       }
     }
 
-    print("\n── Communication inter-agents (fermé par défaut) ──\n");
+    print("\n── Inter-Agent Communication (closed by default) ──\n");
     const existingAgents = await WorkspaceLoader.listAll();
     const otherAgents = existingAgents.filter((n) => n !== agentName);
     if (otherAgents.length > 0) {
-      print(`  Agents existants : ${otherAgents.join(", ")}`);
+      print(`  Existing agents: ${otherAgents.join(", ")}`);
       const peersInput = await ask(
-        "Peut envoyer des Tasks à (noms séparés par virgule, vide = aucun)",
+        "Can send tasks to (comma-separated names, empty = none)",
       );
       peers = peersInput ? peersInput.split(",").map((s) => s.trim()) : [];
       const acceptInput = await ask(
-        "Accepte des Tasks de (* = tous, vide = aucun)",
+        "Accepts tasks from (* = all, empty = none)",
       );
       acceptFrom = acceptInput
         ? acceptInput.split(",").map((s) => s.trim())
         : [];
     } else {
       print(
-        "  Aucun autre agent. Vous pourrez configurer les peers plus tard.",
+        "  No other agents yet. You can configure peers later.",
       );
     }
 
@@ -150,17 +150,17 @@ export async function createAgent(
       .filter(([_, ch]) => ch && "enabled" in ch && ch.enabled)
       .map(([n]) => n);
     if (enabledChannels.length > 0) {
-      print(`  Channels actifs : ${enabledChannels.join(", ")}`);
+      print(`  Active channels: ${enabledChannels.join(", ")}`);
       const chInput = await ask(
-        "Assigner à quels channels (virgule, vide = aucun)",
+        "Assign to which channels (comma-separated, empty = none)",
       );
       channels = chInput ? chInput.split(",").map((s) => s.trim()) : [];
       if (channels.length > 0) {
-        const routeChoice = await choose("Mode de routing", [
-          "direct     — cet agent reçoit tous les messages",
-          "by-intent  — un coordinateur route selon l'intention",
-          "round-robin — alternance avec d'autres agents sur le même channel",
-          "broadcast  — reçoit une copie de tous les messages",
+        const routeChoice = await choose("Routing mode", [
+          "direct      — this agent receives all messages",
+          "by-intent   — a coordinator routes by intent",
+          "round-robin — alternates with other agents on the same channel",
+          "broadcast   — receives a copy of every message",
         ]);
         channelRouting = routeChoice.split("—")[0].trim().split(
           /\s+/,
@@ -168,7 +168,7 @@ export async function createAgent(
       }
     } else {
       print(
-        "  Aucun channel configuré. Lancez 'denoclaw setup channel' d'abord.",
+        "  No channels configured. Run 'denoclaw setup channel' first.",
       );
     }
   } else {
@@ -205,7 +205,7 @@ export async function createAgent(
   }
   await saveConfig(config);
 
-  success(`Agent "${agentName}" créé (workspace + config).`);
+  success(`Agent "${agentName}" created (workspace + config).`);
 }
 
 export async function deleteAgent(
@@ -217,14 +217,14 @@ export async function deleteAgent(
   const registryAgents = Object.keys(config.agents.registry || {});
   const allAgents = [...new Set([...wsAgents, ...registryAgents])];
 
-  const agentName = name || await ask("Nom de l'agent à supprimer");
+  const agentName = name || await ask("Agent name to delete");
   if (!agentName || !allAgents.includes(agentName)) {
-    error(`Agent "${agentName}" introuvable.`);
-    print(`  Agents disponibles : ${allAgents.join(", ")}`);
+    error(`Agent "${agentName}" not found.`);
+    print(`  Available agents: ${allAgents.join(", ")}`);
     return;
   }
 
-  if (!opts?.yes && !await confirm(`Supprimer l'agent "${agentName}" ?`, false)) return;
+  if (!opts?.yes && !await confirm(`Delete agent "${agentName}"?`, false)) return;
 
   // Delete workspace
   await WorkspaceLoader.delete(agentName);
@@ -265,6 +265,6 @@ export async function deleteAgent(
 
   await saveConfig(config);
   success(
-    `Agent "${agentName}" supprimé (workspace + config, retiré des peers).`,
+    `Agent "${agentName}" deleted (workspace + config, removed from peers).`,
   );
 }

@@ -39,7 +39,7 @@ export class TaskStore {
     });
 
     await kv.set(["a2a_tasks", taskId], task);
-    log.debug(`A2A Task créée : ${taskId}`);
+    log.debug(`A2A Task created: ${taskId}`);
     return task;
   }
 

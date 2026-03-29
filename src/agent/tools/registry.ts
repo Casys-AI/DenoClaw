@@ -75,7 +75,7 @@ export class ToolRegistry {
 
   register(tool: BaseTool): void {
     this.tools.set(tool.name, tool);
-    log.debug(`Outil enregistré : ${tool.name}`);
+    log.debug(`Tool registered: ${tool.name}`);
   }
 
   getDefinitions(): ToolDefinition[] {
@@ -110,7 +110,7 @@ export class ToolRegistry {
     try {
       // ADR-010: tools with permissions execute via SandboxBackend
       if (this.backend && tool.permissions.length > 0) {
-        log.info(`Exécution outil (sandbox ${this.backend.kind}) : ${name}`);
+        log.info(`Tool execution (sandbox ${this.backend.kind}): ${name}`);
         return await this.backend.execute({
           tool: name,
           args,
@@ -122,10 +122,10 @@ export class ToolRegistry {
         });
       }
 
-      log.info(`Exécution outil : ${name}`);
+      log.info(`Tool execution: ${name}`);
       return await tool.execute(args);
     } catch (e) {
-      log.error(`Erreur outil ${name}`, e);
+      log.error(`Tool error ${name}`, e);
       return {
         success: false,
         output: "",

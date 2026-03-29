@@ -30,24 +30,24 @@ export class MessageBus {
 
   async init(): Promise<void> {
     if (this.kvReady && this.kv) {
-      // KV déjà injecté via constructeur — just start listening
+      // KV already injected via constructor — just start listening
       this.kv.listenQueue(async (raw: unknown) => {
         const message = raw as ChannelMessage;
-        log.debug(`KV Queue: message reçu (${message.id})`);
+        log.debug(`KV Queue: message received (${message.id})`);
         await this.dispatch(message);
       });
-      log.info("MessageBus: KV Queues activées (injecté)");
+      log.info("MessageBus: KV Queues enabled (injected)");
       return;
     }
 
     this.kv = await Deno.openKv();
     this.kv.listenQueue(async (raw: unknown) => {
       const message = raw as ChannelMessage;
-      log.debug(`KV Queue: message reçu (${message.id})`);
+      log.debug(`KV Queue: message received (${message.id})`);
       await this.dispatch(message);
     });
     this.kvReady = true;
-    log.info("MessageBus: KV Queues activées");
+    log.info("MessageBus: KV Queues enabled");
   }
 
   subscribe(channelType: string, handler: MessageHandler): void {
@@ -82,7 +82,7 @@ export class MessageBus {
           "Call bus.init() before publishing messages",
         );
       }
-      log.info(`Bus: message de ${message.channelType} (${message.id})`);
+      log.info(`Bus: message from ${message.channelType} (${message.id})`);
       await this.kv.enqueue(message);
     });
   }

@@ -16,14 +16,14 @@ export class ConsoleChannel extends BaseChannel {
   }
 
   async initialize(): Promise<void> {
-    log.debug("Console channel initialisé");
+    log.debug("Console channel initialized");
     await Promise.resolve();
   }
 
   async start(onMessage: OnMessage): Promise<void> {
     this.onMessage = onMessage;
     this.running = true;
-    log.info("Console channel démarré — tapez vos messages");
+    log.info("Console channel started — type your messages");
 
     const decoder = new TextDecoder();
     const buf = new Uint8Array(4096);

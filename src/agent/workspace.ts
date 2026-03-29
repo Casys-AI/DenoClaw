@@ -48,7 +48,7 @@ export class WorkspaceLoader {
         memoryPath: getAgentMemoryPath(agentId),
       };
     } catch (e) {
-      log.error(`Échec chargement workspace ${agentId}`, e);
+      log.error(`Failed to load workspace ${agentId}`, e);
       return null;
     }
   }
@@ -76,14 +76,14 @@ export class WorkspaceLoader {
 
     await ensureDir(getAgentSkillsDir(agentId));
     await ensureDir(getAgentMemoriesDir(agentId));
-    log.info(`Workspace créé : ${agentId}`);
+    log.info(`Workspace created: ${agentId}`);
   }
 
   static async delete(agentId: string): Promise<void> {
     const dir = getAgentDefDir(agentId);
     if (await fileExists(dir)) {
       await Deno.remove(dir, { recursive: true });
-      log.info(`Workspace supprimé : ${agentId}`);
+      log.info(`Workspace deleted: ${agentId}`);
     }
   }
 

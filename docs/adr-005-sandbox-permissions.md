@@ -1,32 +1,33 @@
-# ADR-005 : Permissions Sandbox — moindre privilège par intersection
+# ADR-005: Sandbox Permissions — Least Privilege by Intersection
 
-**Statut :** Accepté **Date :** 2026-03-27
+**Status:** Accepted **Date:** 2026-03-27
 
-## Contexte
+## Context
 
-Quand un agent exécute un outil (shell, file, web), le broker crée une Sandbox
-éphémère. La question : quelles permissions donner à cette Sandbox ?
+When an agent executes a tool (shell, file, web), the broker creates an
+ephemeral Sandbox. The question is: which permissions should that Sandbox
+receive?
 
-## Décision
+## Decision
 
-**Intersection tool × agent.** Chaque outil déclare les permissions dont il a
-besoin. Chaque agent déclare les permissions maximales qu'il autorise. La
-Sandbox reçoit l'intersection des deux.
+**Tool × agent intersection.** Each tool declares the permissions it needs.
+Each agent declares the maximum permissions it allows. The Sandbox receives the
+intersection of the two.
 
-## Permissions disponibles
+## Available Permissions
 
 | Permission | Description                | Deno flag       |
 | ---------- | -------------------------- | --------------- |
-| `read`     | Lire des fichiers          | `--allow-read`  |
-| `write`    | Écrire des fichiers        | `--allow-write` |
-| `run`      | Exécuter des commandes     | `--allow-run`   |
-| `net`      | Accès réseau               | `--allow-net`   |
-| `env`      | Variables d'environnement  | `--allow-env`   |
+| `read`     | Read files                 | `--allow-read`  |
+| `write`    | Write files                | `--allow-write` |
+| `run`      | Execute commands           | `--allow-run`   |
+| `net`      | Network access             | `--allow-net`   |
+| `env`      | Environment variables      | `--allow-env`   |
 | `ffi`      | Foreign Function Interface | `--allow-ffi`   |
 
-## Déclaration côté outil (AX : explicite)
+## Tool-Side Declaration (AX: explicit)
 
-Chaque outil déclare ses besoins dans sa définition :
+Each tool declares its requirements in its definition:
 
 ```typescript
 class ShellTool extends BaseTool {
@@ -50,9 +51,9 @@ class WebFetchTool extends BaseTool {
 }
 ```
 
-## Déclaration côté agent (config)
+## Agent-Side Declaration (config)
 
-Chaque agent a un ensemble de permissions maximales :
+Each agent has a set of maximum permissions:
 
 ```json
 {
@@ -69,19 +70,19 @@ Chaque agent a un ensemble de permissions maximales :
 }
 ```
 
-## Résolution au runtime (broker)
+## Runtime Resolution (broker)
 
 ```
-1. Agent demande : execTool("shell", { command: "ls" })
-2. Broker regarde :
-   - Shell a besoin de : ["run"]
-   - Agent autorise max : ["read", "write", "run", "net"]
-   - Intersection : ["run"]
-3. Broker crée la Sandbox avec : --allow-run
-4. Si l'outil demande une permission que l'agent n'autorise pas → refus
+1. Agent requests: execTool("shell", { command: "ls" })
+2. Broker checks:
+   - Shell needs: ["run"]
+   - Agent allows at most: ["read", "write", "run", "net"]
+   - Intersection: ["run"]
+3. Broker creates the Sandbox with: --allow-run
+4. If the tool asks for a permission the agent does not allow → reject
 ```
 
-## Refus explicite (AX : structured error)
+## Explicit Rejection (AX: structured error)
 
 ```typescript
 {
@@ -98,57 +99,56 @@ Chaque agent a un ensemble de permissions maximales :
 
 ## Network allowlist
 
-En plus des permissions Deno, la Sandbox a un **network allowlist** :
+In addition to Deno permissions, the Sandbox has a **network allowlist**:
 
-- Par défaut : seul le broker est accessible
-- L'agent peut ajouter des domaines spécifiques (API LLM, etc.)
-- Les domaines sont validés par le broker (pas de wildcard dangereux)
+- By default: only the broker is reachable
+- The agent can add specific domains (LLM APIs, etc.)
+- Domains are validated by the broker (no dangerous wildcards)
 
-## Flux complet
+## End-to-End Flow
 
 ```
-Agent (Subhosting)          Broker (Deploy)              Sandbox (éphémère)
+Agent (Subhosting)          Broker (Deploy)              Sandbox (ephemeral)
      │                           │                            │
      │ tool_request: "shell"     │                            │
      ├──────────────────────────►│                            │
-     │                           │ 1. Vérifie permissions     │
+     │                           │ 1. Verifies permissions    │
      │                           │    tool needs: [run]       │
      │                           │    agent allows: [run,read]│
      │                           │    → OK, intersection: [run]│
      │                           │                            │
-     │                           │ 2. Crée Sandbox            │
+     │                           │ 2. Creates Sandbox         │
      │                           ├───────────────────────────►│
      │                           │    --allow-run              │
      │                           │    network: [broker-url]    │
      │                           │    timeout: 30s             │
      │                           │                            │
-     │                           │ 3. Exécute le code         │
+     │                           │ 3. Executes the code       │
      │                           │                            │ ls -la
      │                           │◄───────────────────────────┤
-     │                           │    résultat                │
+     │                           │    result                  │
      │                           │                            │
-     │                           │ 4. Détruit Sandbox         │
+     │                           │ 4. Destroys Sandbox        │
      │                           │           ╳                │
      │◄──────────────────────────┤
      │ tool_response             │
 ```
 
-## Justification
+## Rationale
 
-- **Moindre privilège** — la sandbox n'a jamais plus que nécessaire
-- **AX : explicite** — chaque outil déclare ses besoins, pas de permission
-  implicite
-- **Défense en profondeur** — même si un outil est compromis, il ne peut pas
-  dépasser ses permissions déclarées
-- **Configurable par agent** — un agent "lecture seule" peut interdire `run` et
-  `write`
-- **Erreurs structurées** — le refus explique ce qui manque et comment corriger
+- **Least privilege** — the sandbox never gets more than necessary
+- **AX: explicit** — each tool declares its needs; there are no implicit
+  permissions
+- **Defense in depth** — even if a tool is compromised, it cannot exceed its
+  declared permissions
+- **Configurable per agent** — a "read-only" agent can forbid `run` and `write`
+- **Structured errors** — the rejection explains what is missing and how to fix
+  it
 
-## Conséquences
+## Consequences
 
-- Chaque `BaseTool` doit déclarer un champ `permissions`
-- Le type `Config` doit inclure `sandbox.allowedPermissions` dans la config
-  agent
-- Le broker doit calculer l'intersection et la passer à l'API Sandbox
-- Un outil qui oublie de déclarer ses permissions → refuse par défaut (safe
-  default AX)
+- Every `BaseTool` must declare a `permissions` field
+- The `Config` type must include `sandbox.allowedPermissions` in agent config
+- The broker must calculate the intersection and pass it to the Sandbox API
+- A tool that forgets to declare its permissions → denied by default (AX safe
+  default)

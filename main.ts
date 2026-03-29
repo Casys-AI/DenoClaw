@@ -55,22 +55,22 @@ async function agent(config: Config): Promise<void> {
   const registry = config.agents?.registry;
 
   if (!registry || Object.keys(registry).length === 0) {
-    console.log("Aucun agent configuré. Créez-en un d'abord :\n");
-    console.log("  denoclaw agent create <nom>\n");
+    console.log("No agents configured. Create one first:\n");
+    console.log("  denoclaw agent create <name>\n");
     return;
   }
 
   if (!agentId) {
     const names = Object.keys(registry);
-    console.log("Précise quel agent utiliser avec --agent <nom>.\n");
-    console.log(`  Agents disponibles : ${names.join(", ")}\n`);
-    console.log(`  Exemple : denoclaw agent -m "hello" --agent ${names[0]}\n`);
+    console.log("Specify which agent to use with --agent <name>.\n");
+    console.log(`  Available agents: ${names.join(", ")}\n`);
+    console.log(`  Example: denoclaw agent -m "hello" --agent ${names[0]}\n`);
     return;
   }
 
   if (!registry[agentId]) {
-    console.log(`Agent "${agentId}" introuvable.\n`);
-    console.log(`  Agents disponibles : ${Object.keys(registry).join(", ")}\n`);
+    console.log(`Agent "${agentId}" not found.\n`);
+    console.log(`  Available agents: ${Object.keys(registry).join(", ")}\n`);
     return;
   }
 
@@ -107,7 +107,7 @@ async function agent(config: Config): Promise<void> {
     return;
   }
 
-  // DI : wiring explicite
+  // DI: explicit wiring
   const bus = new MessageBus(agentKv);
   await bus.init();
   const session = new SessionManager(agentKv);
@@ -130,11 +130,11 @@ async function agent(config: Config): Promise<void> {
         msg.metadata,
       );
     } catch (e) {
-      log.error("Erreur traitement message", e);
+      log.error("Message handling error", e);
       await channels.send(
         msg.channelType,
         msg.userId,
-        "Désolé, une erreur s'est produite.",
+        "Sorry, an error occurred.",
         msg.metadata,
       );
     }
@@ -153,11 +153,11 @@ async function agent(config: Config): Promise<void> {
 }
 
 async function gateway(config: Config): Promise<void> {
-  // DI : wiring explicite
+  // DI: explicit wiring
   const agentIds = Object.keys(config.agents?.registry ?? {});
   if (agentIds.length === 0) {
     log.info(
-      "Aucun agent configuré — démarrage du gateway en mode vide.",
+      "No agents configured — starting the gateway in empty mode.",
     );
   }
 
@@ -237,12 +237,12 @@ async function init(): Promise<void> {
 `);
 
   // 1. Provider
-  console.log("Étape 1/3 — Provider LLM\n");
+  console.log("Step 1/3 — LLM provider\n");
   await setupProvider();
 
-  // 2. Channel (optionnel)
+  // 2. Channel (optional)
   const wantChannel = await confirm(
-    "Étape 2/3 — Configurer un channel (Telegram, webhook) ?",
+    "Step 2/3 — Configure a channel (Telegram, webhook)?",
     false,
   );
   if (wantChannel) {
@@ -251,7 +251,7 @@ async function init(): Promise<void> {
 
   // 3. Agent config
   const wantCustom = await confirm(
-    "Étape 3/3 — Personnaliser l'agent (modèle, température) ?",
+    "Step 3/3 — Customize the agent (model, temperature)?",
     false,
   );
   if (wantCustom) {
@@ -259,13 +259,13 @@ async function init(): Promise<void> {
   }
 
   console.log(`
-✓ Configuration terminée !
+✓ Setup complete!
 
-Pour démarrer :
-  denoclaw agent              Chat interactif
-  denoclaw agent -m "Hello"   Message unique
-  denoclaw gateway            Gateway multi-canal
-  denoclaw status             Voir l'état
+To start:
+  denoclaw agent              Interactive chat
+  denoclaw agent -m "Hello"   One-off message
+  denoclaw gateway            Multi-channel gateway
+  denoclaw status             Show system status
 `);
 }
 
@@ -274,7 +274,7 @@ async function broker(config: Config): Promise<void> {
   const srv = new BrokerServer(config);
   await srv.start(port);
 
-  console.log(`Broker démarré sur port ${port}`);
+  console.log(`Broker started on port ${port}`);
   console.log(`  Health: http://localhost:${port}/health`);
   console.log(`  Tunnel: ws://localhost:${port}/tunnel`);
 
@@ -293,8 +293,8 @@ async function broker(config: Config): Promise<void> {
 
 async function tunnel(): Promise<void> {
   const brokerUrl = args._[1] as string ||
-    await ask("URL du broker WebSocket", "ws://localhost:3000/tunnel");
-  const token = await ask("Token d'invitation", "dev-token");
+    await ask("Broker WebSocket URL", "ws://localhost:3000/tunnel");
+  const token = await ask("Invite token", "dev-token");
 
   const tools: string[] = ["shell", "read_file", "write_file"];
 
@@ -309,7 +309,7 @@ async function tunnel(): Promise<void> {
   });
 
   await relay.connect();
-  console.log("\nTunnel connecté. Ctrl+C pour déconnecter.");
+  console.log("\nTunnel connected. Press Ctrl+C to disconnect.");
 
   const ac = new AbortController();
   Deno.addSignalListener("SIGINT", () => ac.abort());
@@ -321,7 +321,7 @@ async function tunnel(): Promise<void> {
     });
   } catch {
     relay.disconnect();
-    console.log("Tunnel déconnecté.");
+    console.log("Tunnel disconnected.");
   }
 }
 
@@ -329,46 +329,46 @@ function help(): void {
   console.log(`
 DenoClaw — Agent IA Deno-natif
 
-Démarrage:
-  denoclaw init               Setup guidé (provider + channel + agent)
+Startup:
+  denoclaw init               Guided setup (provider + channel + agent)
 
 Setup:
-  denoclaw setup provider     Configurer un provider LLM
-  denoclaw setup channel      Configurer un channel (Telegram, webhook)
-  denoclaw setup agent        Configurer l'agent (modèle, température, etc.)
+  denoclaw setup provider     Configure an LLM provider
+  denoclaw setup channel      Configure a channel (Telegram, webhook)
+  denoclaw setup agent        Configure the agent (model, temperature, etc.)
 
 Agents:
-  denoclaw agent              Chat interactif (agent par défaut)
-  denoclaw agent -m "msg"     Message unique
-  denoclaw agent list         Lister tous les agents
-  denoclaw agent create <nom> Créer un agent (modèle, permissions, channel)
-  denoclaw agent delete <nom> Supprimer un agent
+  denoclaw agent              Interactive chat (default agent)
+  denoclaw agent -m "msg"     One-off message
+  denoclaw agent list         List all agents
+  denoclaw agent create <name> Create an agent (model, permissions, channel)
+  denoclaw agent delete <name> Delete an agent
 
 Usage:
-  denoclaw gateway            Lancer le gateway multi-canal
-  denoclaw status             Voir l'état du système
+  denoclaw gateway            Start the multi-channel gateway
+  denoclaw status             Show system status
 
 Infra:
-  denoclaw broker             Lancer le broker (LLM proxy + message router)
-  denoclaw tunnel             Connecter un tunnel local au broker
+  denoclaw broker             Start the broker (LLM proxy + message router)
+  denoclaw tunnel             Connect a local tunnel to the broker
 
 Publish:
-  denoclaw publish agent      Déployer un agent sur Deno Subhosting
-  denoclaw publish gateway    Déployer le gateway sur Deno Deploy
+  denoclaw publish agent      Deploy an agent to Deno Subhosting
+  denoclaw publish gateway    Deploy the gateway to Deno Deploy
 
 Options:
-  -m, --message    Envoyer un message unique
-  -s, --session    ID de session (défaut: "default")
-  --model          Surcharger le modèle LLM
+  -m, --message    Send a one-off message
+  -s, --session    Session ID (default: "default")
+  --model          Override the LLM model
 
-Exemples:
-  denoclaw setup provider                      # configurer Anthropic, Ollama, etc.
-  denoclaw setup channel                       # configurer Telegram
-  denoclaw agent -m "Bonjour"                  # message unique
-  denoclaw agent --model ollama/nemotron-3-super       # utiliser Ollama
-  denoclaw agent --model claude-cli            # utiliser Claude Code CLI
-  denoclaw gateway                             # lancer le serveur multi-canal
-  denoclaw publish gateway                     # déployer sur Deno Deploy
+Examples:
+  denoclaw setup provider                      # configure Anthropic, Ollama, etc.
+  denoclaw setup channel                       # configure Telegram
+  denoclaw agent -m "Hello"                    # one-off message
+  denoclaw agent --model ollama/nemotron-3-super       # use Ollama
+  denoclaw agent --model claude-cli            # use Claude Code CLI
+  denoclaw gateway                             # start the multi-channel server
+  denoclaw publish gateway                     # deploy to Deno Deploy
 `);
 }
 
@@ -434,7 +434,7 @@ try {
         p?.apiKey || p?.enabled
       );
       if (!hasProvider) {
-        console.log("Aucun provider configuré. Lançons la config initiale.\n");
+        console.log("No provider configured. Starting initial setup.\n");
         await init();
         break;
       }
@@ -455,7 +455,7 @@ try {
         p?.apiKey || p?.enabled
       );
       if (!hasProvider2) {
-        console.log("Aucun provider configuré. Lançons la config initiale.\n");
+        console.log("No provider configured. Starting initial setup.\n");
         await init();
         break;
       }
@@ -492,6 +492,6 @@ try {
       break;
   }
 } catch (e) {
-  log.error("Erreur fatale", e);
+  log.error("Fatal error", e);
   Deno.exit(1);
 }

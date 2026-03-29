@@ -1,125 +1,123 @@
-# ADR-004 : Zéro secret statique — GCP Secret Manager via Deno Deploy OIDC
+# ADR-004: Zero Static Secrets — GCP Secret Manager via Deno Deploy OIDC
 
-**Statut :** Accepté (optionnel — env vars Deploy suffisent pour commencer)
-**Date :** 2026-03-27
+**Status:** Accepted (optional — Deploy env vars are enough to get started)
+**Date:** 2026-03-27
 
-## Contexte
+## Context
 
-L'ADR-003 concluait que les clés API LLM (Anthropic, OpenAI, etc.) étaient le
-**seul secret statique** de l'architecture, stocké en env vars chiffrées sur
-Deno Deploy. Tout le reste utilisait OIDC ou credentials materialization.
+ADR-003 concluded that LLM API keys (Anthropic, OpenAI, etc.) were the
+**only static secret** left in the architecture, stored as encrypted env vars on
+Deno Deploy. Everything else used OIDC or credentials materialization.
 
-Or, Deno Deploy est un **OIDC provider natif**. Il peut émettre des tokens OIDC
-éphémères qui prouvent l'identité de l'app (organisation, projet, contexte). Ces
-tokens peuvent être échangés contre des credentials GCP via Workload Identity
+However, Deno Deploy is a **native OIDC provider**. It can issue ephemeral OIDC
+tokens that prove the app's identity (organization, project, context). Those
+tokens can be exchanged for GCP credentials through Workload Identity
 Federation.
 
-## Décision
+## Decision
 
-**Stocker les clés API LLM dans GCP Secret Manager.** Le broker les récupère via
-OIDC au runtime — aucun secret statique nulle part.
+**Store LLM API keys in GCP Secret Manager.** The broker retrieves them via
+runtime OIDC — no static secrets anywhere.
 
-## Flux
+## Flow
 
 ```
 Broker (Deno Deploy)                    GCP
      │                                    │
      │  @deno/oidc                        │
-     │  → token OIDC éphémère             │
-     │  "je suis denoclaw-broker,         │
-     │   org xyz, sur Deploy"             │
+     │  → ephemeral OIDC token            │
+     │  "I am denoclaw-broker,            │
+     │   org xyz, on Deploy"              │
      │                                    │
-     ├──── token OIDC ──────────────────►│
+     ├──── OIDC token ──────────────────►│
      │                                    │ Workload Identity Federation
-     │                                    │ vérifie le token
-     │                                    │ mappe vers un service account
-     │◄──── credentials GCP temporaires ──┤
+     │                                    │ verifies the token
+     │                                    │ maps to a service account
+     │◄──── temporary GCP credentials ────┤
      │                                    │
      ├──── Secret Manager API ───────────►│
-     │     "donne-moi ANTHROPIC_API_KEY"  │
+     │     "give me ANTHROPIC_API_KEY"    │
      │◄──── "sk-ant-..." ────────────────┤
      │                                    │
-     │  fetch() vers Anthropic API        │
-     │  avec la clé récupérée             │
+     │  fetch() to Anthropic API          │
+     │  using the retrieved key           │
 ```
 
-## Configuration GCP — Setup intégré dans la CLI
+## GCP Configuration — Setup integrated into the CLI
 
-La commande `denoclaw publish gateway` guide le setup en 3 étapes :
+The `denoclaw publish gateway` command guides setup in 3 steps:
 
-### Étape 1 : Deploy
+### Step 1: Deploy
 
 ```bash
 deployctl deploy --project=denoclaw-gateway --prod main.ts
 ```
 
-### Étape 2 : Connexion GCP OIDC (automatisé)
+### Step 2: GCP OIDC connection (automated)
 
 ```bash
-deno deploy setup-gcp --org=mon-org --app=denoclaw-gateway
+deno deploy setup-gcp --org=my-org --app=denoclaw-gateway
 ```
 
-Cette commande interactive configure :
+This interactive command configures:
 
-- **Workload Identity Pool** — trust Deno Deploy comme OIDC provider
-- **Service Account** — avec accès `secretmanager.secretAccessor`
-- Puis entrer le Workload Provider ID + Service Account Email dans le dashboard
-  Deploy
+- **Workload Identity Pool** — trusts Deno Deploy as an OIDC provider
+- **Service Account** — with `secretmanager.secretAccessor` access
+- Then enter the Workload Provider ID + Service Account Email in the Deploy
+  dashboard
 
-### Étape 3 : Secrets dans Secret Manager
+### Step 3: Secrets in Secret Manager
 
 ```bash
-# Token d'accès au gateway
-echo -n "mon-token" | gcloud secrets versions add DENOCLAW_API_TOKEN --data-file=-
+# Gateway access token
+echo -n "my-token" | gcloud secrets versions add DENOCLAW_API_TOKEN --data-file=-
 
-# Clés API LLM
+# LLM API keys
 echo -n "sk-ant-..." | gcloud secrets versions add ANTHROPIC_API_KEY --data-file=-
 echo -n "sk-..."     | gcloud secrets versions add OPENAI_API_KEY --data-file=-
 ```
 
-Secrets stockés :
+Stored secrets:
 
-- `DENOCLAW_API_TOKEN` — token d'accès au gateway
-- `ANTHROPIC_API_KEY` — clé API Anthropic
-- `OPENAI_API_KEY` — clé API OpenAI
+- `DENOCLAW_API_TOKEN` — gateway access token
+- `ANTHROPIC_API_KEY` — Anthropic API key
+- `OPENAI_API_KEY` — OpenAI API key
 - etc.
 
-## Résultat : zéro secret statique
+## Result: zero static secrets
 
-| Frontière            | ADR-003 (avant)             | ADR-004 (maintenant)                |
-| -------------------- | --------------------------- | ----------------------------------- |
-| Sandbox → Broker     | Credentials materialization | Inchangé                            |
-| Broker → Sandbox API | `@deno/oidc`                | Inchangé                            |
-| Tunnel → Broker      | OIDC éphémère               | Inchangé                            |
-| Broker → LLM API     | **Clé statique en env var** | **GCP Secret Manager via OIDC**     |
-| VPS CLI auth         | Token CLI local             | Inchangé (auth via tunnel one-shot) |
+| Boundary             | ADR-003 (before)            | ADR-004 (now)                    |
+| -------------------- | --------------------------- | -------------------------------- |
+| Sandbox → Broker     | Credentials materialization | Unchanged                        |
+| Broker → Sandbox API | `@deno/oidc`                | Unchanged                        |
+| Tunnel → Broker      | Ephemeral OIDC              | Unchanged                        |
+| Broker → LLM API     | **Static env var key**      | **GCP Secret Manager via OIDC**  |
+| VPS CLI auth         | Local CLI token             | Unchanged (one-shot tunnel auth) |
 
-**Plus aucun secret statique dans toute l'architecture.**
+**There are no static secrets left anywhere in the architecture.**
 
-## Justification
+## Rationale
 
-- **Zéro secret statique** — même les clés API LLM ne sont plus en env vars
-- **Rotation automatique** — changer une clé dans Secret Manager, tous les
-  brokers la récupèrent au prochain call
-- **Audit trail** — GCP logge chaque accès au Secret Manager
-- **Révocation instantanée** — désactiver le service account coupe l'accès à
-  tous les secrets
-- **Pas de fuite possible** — les clés ne sont jamais dans le code, dans git,
-  dans les env vars, ni dans les logs Deploy
+- **Zero static secrets** — even LLM API keys are no longer stored in env vars
+- **Automatic rotation** — change a key in Secret Manager and all brokers pick
+  it up on the next call
+- **Audit trail** — GCP logs every Secret Manager access
+- **Instant revocation** — disabling the service account cuts access to all
+  secrets
+- **No leak path** — keys are never in code, git, env vars, or Deploy logs
 
-## Conséquences
+## Consequences
 
-- Dépendance à GCP — le broker a besoin de GCP pour récupérer les clés
-  (mitigation : cache en mémoire avec TTL)
-- Latence au démarrage — premier call au Secret Manager au boot du broker
-  (~100ms)
-- Configuration initiale — il faut setup le Workload Identity Pool + Service
-  Account + Secrets (one-time)
-- Le broker peut cacher les clés en mémoire avec un TTL (ex: 1h) pour éviter un
-  call Secret Manager à chaque requête LLM
+- Dependency on GCP — the broker needs GCP to retrieve keys
+  (mitigation: in-memory TTL cache)
+- Startup latency — first Secret Manager call when the broker boots (~100ms)
+- Initial configuration — Workload Identity Pool + Service Account + Secrets
+  must be set up once
+- The broker can cache keys in memory with a TTL (for example 1h) to avoid a
+  Secret Manager call on every LLM request
 
-## Mode dégradé
+## Degraded Mode
 
-Si GCP est down ou non configuré, le broker peut fallback sur les env vars
-Deploy classiques. L'OIDC + Secret Manager est le mode production recommandé,
-pas une obligation.
+If GCP is down or not configured, the broker can fall back to standard Deploy
+env vars. OIDC + Secret Manager is the recommended production mode, not a hard
+requirement.

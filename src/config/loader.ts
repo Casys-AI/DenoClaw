@@ -60,7 +60,7 @@ export async function loadConfig(): Promise<Config> {
   try {
     const raw = await Deno.readTextFile(configPath);
     const parsed = JSON.parse(raw) as Config;
-    log.debug("Config chargée", configPath);
+    log.debug("Config loaded", configPath);
     return parsed;
   } catch (e) {
     if (e instanceof SyntaxError) {
@@ -79,7 +79,7 @@ export async function saveConfig(config: Config): Promise<void> {
   await ensureDir(homeDir);
   const configPath = getConfigPath();
   await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2));
-  log.info("Config sauvegardée", configPath);
+  log.info("Config saved", configPath);
 }
 
 async function mergeWorkspaceAgents(config: Config): Promise<Config> {
@@ -109,7 +109,7 @@ export async function getConfigOrDefault(): Promise<Config> {
     return await getConfig();
   } catch (e) {
     if (e instanceof ConfigError) {
-      log.debug("Pas de config, utilisation des valeurs par défaut");
+      log.debug("No config found, using default values");
       return mergeWorkspaceAgents(mergeEnvConfig(createDefaultConfig()));
     }
     throw e;

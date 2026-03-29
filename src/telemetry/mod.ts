@@ -24,11 +24,11 @@ async function loadOtel(): Promise<boolean> {
     const api = await import("@opentelemetry/api");
     trace = api.trace;
     SpanStatusCode = api.SpanStatusCode;
-    log.info("OTEL: instrumentation activée");
+    log.info("OTEL: instrumentation enabled");
     return true;
   } catch {
     log.debug(
-      "OTEL: @opentelemetry/api non disponible, instrumentation désactivée",
+      "OTEL: @opentelemetry/api unavailable, instrumentation disabled",
     );
     return false;
   }
@@ -46,7 +46,7 @@ export async function initTelemetry(): Promise<void> {
   ) {
     await loadOtel();
   } else {
-    log.debug("OTEL: désactivé (set OTEL_DENO=1 pour activer)");
+    log.debug("OTEL: disabled (set OTEL_DENO=1 to enable)");
   }
 }
 
@@ -131,7 +131,7 @@ export function spanBusPublish<T>(
   }, fn);
 }
 
-// Re-export metrics — tout dans telemetry/
+// Re-export metrics — everything lives under telemetry/
 export { MetricsCollector } from "./metrics.ts";
 export type { AgentMetrics } from "./metrics.ts";
 

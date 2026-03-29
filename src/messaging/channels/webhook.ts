@@ -19,7 +19,7 @@ export class WebhookChannel extends BaseChannel {
   }
 
   async initialize(): Promise<void> {
-    log.debug("Webhook channel initialisé");
+    log.debug("Webhook channel initialized");
     await Promise.resolve();
   }
 
@@ -62,18 +62,18 @@ export class WebhookChannel extends BaseChannel {
 
         return Response.json({ ok: true, messageId: msg.id });
       } catch (e) {
-        log.error("Erreur webhook", e);
+        log.error("Webhook error", e);
         return Response.json({ error: "Invalid request" }, { status: 400 });
       }
     });
 
-    log.info(`Webhook channel démarré sur port ${port}`);
+    log.info(`Webhook channel started on port ${port}`);
   }
 
   async stop(): Promise<void> {
     if (this.server) {
       await this.server.shutdown();
-      log.info("Webhook channel arrêté");
+      log.info("Webhook channel stopped");
     }
   }
 
@@ -84,7 +84,7 @@ export class WebhookChannel extends BaseChannel {
   ): Promise<void> {
     const callbackUrl = metadata?.callbackUrl as string;
     if (!callbackUrl) {
-      log.warn("Pas de callbackUrl pour webhook send");
+      log.warn("No callbackUrl provided for webhook send");
       return;
     }
 

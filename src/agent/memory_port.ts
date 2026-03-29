@@ -9,9 +9,9 @@ export interface LongTermFact {
 }
 
 /**
- * Port d'accès à la mémoire agent (DDD).
- * Deux facettes : conversations (session-scoped) + faits long-terme (agent-scoped).
- * getMessages() et getRecentMessages() sont synchrones (cache in-memory).
+ * Agent memory access port (DDD).
+ * Two facets: conversations (session-scoped) + long-term facts (agent-scoped).
+ * getMessages() and getRecentMessages() are synchronous (in-memory cache).
  */
 export interface MemoryPort {
   load(): Promise<void>;

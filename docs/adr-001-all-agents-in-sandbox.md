@@ -1,128 +1,125 @@
-# ADR-001 : Agents en Subhosting, exécution de code en Sandbox
+# ADR-001: Agents in Subhosting, Code Execution in Sandbox
 
-**Statut :** Accepté **Date :** 2026-03-26
+**Status:** Accepted **Date:** 2026-03-26
 
-## Contexte
+## Context
 
-DenoClaw doit exécuter des agents AI qui utilisent des LLM, des outils (shell,
-fichiers, CLI), et communiquent entre eux. La question est : quel modèle
-d'hébergement et d'isolation pour les agents ?
+DenoClaw must run AI agents that use LLMs, tools (shell, files, CLI), and
+communicate with each other. The question is: which hosting and isolation model
+should agents use?
 
-## Options considérées
+## Options Considered
 
-1. **Web Workers** — threads isolés dans le même process Deno (rejeté pour
-   deploy, **retenu pour le mode local**)
-2. **Tout en Sandbox** — microVMs Linux pour tout
-3. **Broker + Subhosting + Sandbox** — Broker orchestre, Subhosting pour
-   l'agent, Sandbox pour l'exécution de code
+1. **Web Workers** — isolated threads in the same Deno process (rejected for
+   deploy, **kept for local mode**)
+2. **Everything in Sandbox** — Linux microVMs for everything
+3. **Broker + Subhosting + Sandbox** — Broker orchestrates, Subhosting hosts
+   the agent, Sandbox handles code execution
 
-## Décision
+## Decision
 
-**Trois couches, chacune avec son rôle :**
+**Three layers, each with a distinct role:**
 
-- **Broker** (Deno Deploy) — orchestre tout : cron, message routing, agent
-  lifecycle. Seul composant long-running.
-- **Deno Subhosting** — héberge l'agent (warm-cached V8 isolate, KV bindé pour
-  état/mémoire). Se réveille sur HTTP du Broker, se rendort quand idle. Pas de
-  `Deno.cron()`, pas de `listenQueue()`.
-- **Deno Sandbox** — exécute le code de l'agent avec des permissions hardened
-  (skills, outils, code LLM-generated)
+- **Broker** (Deno Deploy) — orchestrates everything: cron, message routing,
+  agent lifecycle. The only long-running component.
+- **Deno Subhosting** — hosts the agent (warm-cached V8 isolate, KV bound for
+  state/memory). Wakes over Broker HTTP and goes idle afterward. No
+  `Deno.cron()`, no `listenQueue()`.
+- **Deno Sandbox** — executes agent code with hardened permissions (skills,
+  tools, LLM-generated code)
 
-Aucun code ne s'exécute directement dans le Subhosting. Le runtime agent dans le
-Subhosting est un endpoint réactif — il reçoit les messages par HTTP du Broker,
-appelle le broker pour le LLM, et délègue toute exécution de code à une Sandbox
-éphémère.
+No code runs directly inside Subhosting. The agent runtime in Subhosting is a
+reactive endpoint: it receives messages over Broker HTTP, calls the broker for
+LLM access, and delegates all code execution to an ephemeral Sandbox.
 
-> **API Subhosting** : utiliser **v2** (`api.deno.com/v2`). La v1 sunset en
-> juillet 2026.
+> **Subhosting API:** use **v2** (`api.deno.com/v2`). v1 sunsets in July 2026.
 
 ## Architecture
 
 ```
 ┌─── Broker (Deno Deploy) ────────────────────────────────┐
-│  Orchestre : cron, routing, lifecycle                    │
-│  Long-running, Deno.cron() + KV Queues disponibles      │
+│  Orchestrates: cron, routing, lifecycle                │
+│  Long-running, Deno.cron() + KV Queues available       │
 │                                                         │
-│  HTTP POST → Agent Subhosting                           │
+│  HTTP POST → Agent Subhosting                          │
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────┐
-│  Subhosting (Agent) — warm-cached V8 isolate            │
+│  Subhosting (Agent) — warm-cached V8 isolate           │
 │                                                         │
-│  Agent runtime (notre code, logique réactive)           │
-│  KV bindé (mémoire, sessions, état — persiste toujours) │
-│  Se réveille sur HTTP, se rendort quand idle            │
+│  Agent runtime (our code, reactive logic)              │
+│  Bound KV (memory, sessions, state — always persists)  │
+│  Wakes over HTTP, sleeps when idle                     │
 │                                                         │
-│  Quand il faut exécuter du code :                       │
-│  └─→ Sandbox (microVM éphémère)                         │
-│       - Permissions hardened                             │
-│       - Network allowlist (broker seul)                  │
-│       - Pas de secrets                                   │
-│       - 30 min max                                       │
-│       - Skills user, code LLM-generated, outils          │
-│       └─→ exécute le code, renvoie le résultat          │
+│  When code must run:                                   │
+│  └─→ Sandbox (ephemeral microVM)                       │
+│       - Hardened permissions                           │
+│       - Network allowlist (broker only)                │
+│       - No secrets                                     │
+│       - 30 min max                                     │
+│       - User skills, LLM-generated code, tools         │
+│       └─→ executes code, returns the result            │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Rôle de chaque couche
+## Role of Each Layer
 
-|              | Broker (Deploy)              | Subhosting (l'agent)                  | Sandbox (l'exécution)        |
-| ------------ | ---------------------------- | ------------------------------------- | ---------------------------- |
-| Durée de vie | Long-running                 | Warm-cached (dort quand idle)         | Éphémère, 30 min max         |
-| KV           | Oui (routing, état global)   | Bindé (mémoire, sessions)             | Aucun (éphémère)             |
-| Cron         | Oui (`Deno.cron()`)          | **Non**                               | Non                          |
-| Queues       | Oui (`listenQueue()`)        | **Non**                               | Non                          |
-| Rôle         | Orchestration, cron, routing | État agent, logique réactive          | Exécution de code            |
-| Code exécuté | Broker uniquement            | Notre runtime agent uniquement        | Skills, outils, code LLM     |
-| Isolation    | Deno Deploy                  | V8 isolate (par deployment)           | MicroVM Linux (hardened)     |
-| Secrets      | Clés API LLM                 | Credentials materialization (ADR-003) | Aucun, jamais                |
-| Réseau       | Public (endpoints)           | Broker seulement                      | Broker seulement (allowlist) |
+|              | Broker (Deploy)              | Subhosting (the agent)               | Sandbox (execution)         |
+| ------------ | ---------------------------- | ------------------------------------ | --------------------------- |
+| Lifetime     | Long-running                 | Warm-cached (sleeps when idle)       | Ephemeral, 30 min max       |
+| KV           | Yes (routing, global state)  | Bound (memory, sessions)             | None (ephemeral)            |
+| Cron         | Yes (`Deno.cron()`)          | **No**                               | No                          |
+| Queues       | Yes (`listenQueue()`)        | **No**                               | No                          |
+| Role         | Orchestration, cron, routing | Agent state, reactive logic          | Code execution              |
+| Code run     | Broker only                  | Our agent runtime only               | Skills, tools, LLM code     |
+| Isolation    | Deno Deploy                  | V8 isolate (per deployment)          | Linux microVM (hardened)    |
+| Secrets      | LLM API keys                 | Credentials materialization (ADR-003)| None, ever                  |
+| Network      | Public (endpoints)           | Broker only                          | Broker only (allowlist)     |
 
-## Justification
+## Rationale
 
-- **Séparation orchestration / état / exécution** — le Broker orchestre, l'agent
-  gère l'état, la Sandbox exécute le code
-- **Warm-cached + éphémère** — l'agent se réveille sur requête (Subhosting),
-  l'exécution est ponctuelle (Sandbox 30 min max). Le Broker est le seul
-  composant long-running.
-- **KV bindé** — chaque agent Subhosting a un KV bindé explicitement (créé via
-  API v2) pour mémoire et sessions. Le KV persiste indépendamment de l'isolate.
-- **Permissions hardened** — le code s'exécute dans la couche la plus sécurisée
-  (microVM), pas dans l'agent
-- **Un seul modèle** — pas de distinction "code de confiance" vs "code non
-  fiable", tout passe par la Sandbox
-- **Coût maîtrisé** — Subhosting disponible sur le free tier (1M req/mois, 60
-  deploys/h). Builder à $200/mois pour la prod (20M req, 300 deploys/h). Sandbox
-  facturé uniquement pendant l'exécution
+- **Separation of orchestration / state / execution** — the Broker
+  orchestrates, the agent manages state, Sandbox executes code
+- **Warm-cached + ephemeral** — the agent wakes on request (Subhosting), while
+  execution is short-lived (Sandbox, 30 min max). The Broker is the only
+  long-running component.
+- **Bound KV** — each Subhosting agent has an explicitly bound KV (created via
+  the v2 API) for memory and sessions. KV persists independently of the isolate.
+- **Hardened permissions** — code runs in the most secure layer (microVM), not
+  in the agent
+- **Single trust model** — no distinction between "trusted code" and "untrusted
+  code"; everything goes through Sandbox
+- **Controlled cost** — Subhosting is available on the free tier (1M req/month,
+  60 deploys/hour). Builder is $200/month for production (20M req, 300
+  deploys/hour). Sandbox is billed only during execution
 
-## Conséquences
+## Consequences
 
-- Le runtime agent dans Subhosting est léger et réactif : réception HTTP, appels
-  broker, dispatch vers Sandbox
-- L'agent n'a pas de boucle interne — c'est le Broker qui pilote chaque étape
-  par HTTP
-- Chaque exécution de code crée une instance Sandbox → latence de boot (~1s) à
-  chaque tool call
-- Le Broker gère le cycle de vie des trois couches : crons/routing (lui-même),
-  Subhosting (CRUD agents via API v2), Sandbox (CRUD exécutions)
-- Les Sandboxes ne conservent rien — tout résultat doit remonter au Subhosting
-  via le broker pour être persisté en KV
-- L'isolate Subhosting reste warm entre des appels rapprochés (burst pendant une
-  tâche), mais s'éteint après idle
+- The Subhosting agent runtime is lightweight and reactive: HTTP ingress, broker
+  calls, Sandbox dispatch
+- The agent has no internal loop — the Broker drives each step over HTTP
+- Each code execution creates a Sandbox instance → boot latency (~1s) on every
+  tool call
+- The Broker manages the lifecycle of all three layers: cron/routing (itself),
+  Subhosting (agent CRUD via v2 API), Sandbox (execution CRUD)
+- Sandboxes persist nothing — every result must flow back through the broker to
+  Subhosting for KV persistence
+- The Subhosting isolate stays warm between closely spaced calls (bursts during
+  a task), then shuts down after idle
 
-## Mode local — Process / Worker / Subprocess
+## Local Mode — Process / Worker / Subprocess
 
-En local, le même modèle 3 couches s'applique avec des primitives Deno :
+Locally, the same 3-layer model applies with Deno primitives:
 
-| Deploy                  | Local                           | Rôle                     |
+| Deploy                  | Local                           | Role                     |
 | ----------------------- | ------------------------------- | ------------------------ |
-| Broker (Deno Deploy)    | **Process** (main)              | Orchestre, cron, routing |
-| Subhosting (V8 isolate) | **Worker** (`new Worker()`)     | Agent, état en KV local  |
-| Sandbox (microVM)       | **Subprocess** (`Deno.Command`) | Exécution de code isolée |
+| Broker (Deno Deploy)    | **Process** (main)              | Orchestrates, cron, routing |
+| Subhosting (V8 isolate) | **Worker** (`new Worker()`)     | Agent, state in local KV |
+| Sandbox (microVM)       | **Subprocess** (`Deno.Command`) | Isolated code execution  |
 
-Les Workers sont le bon choix local : mêmes contraintes que Subhosting (pas de
-cron, pas de mémoire partagée, `postMessage` ≈ HTTP). La transition Worker →
-Subhosting est quasi transparente. Les subprocesses (`Deno.Command`) offrent une
-isolation par process (permissions Deno, timeout, env séparé) — équivalent local
-des microVMs Sandbox.
+Workers are the right local choice: the same constraints as Subhosting (no
+cron, no shared memory, `postMessage` ≈ HTTP). The Worker → Subhosting
+transition is nearly transparent. Subprocesses (`Deno.Command`) provide
+process-level isolation (Deno permissions, timeout, isolated env), the local
+equivalent of Sandbox microVMs.

@@ -1,13 +1,13 @@
 /**
- * AuthManager — authentification et autorisation pour le broker (ADR-003).
+ * AuthManager — authentication and authorization for the broker (ADR-003).
  *
- * Gère trois mécanismes :
- * 1. Invite tokens : usage unique (atomic), pour la connexion initiale d'un tunnel
- * 2. Session tokens : éphémères, durée de vie limitée, pour une session tunnel active
- * 3. OIDC : vérification de tokens Deno Deploy (@deno/oidc) quand disponible
+ * Manages three mechanisms:
+ * 1. Invite tokens: single-use (atomic), for a tunnel's initial connection
+ * 2. Session tokens: ephemeral, limited lifetime, for an active tunnel session
+ * 3. OIDC: verification of Deno Deploy tokens (@deno/oidc) when available
  *
- * Fallback : si DENOCLAW_API_TOKEN est défini en env, il sert de token statique
- * (mode local / dev). En production Deploy, tout passe par OIDC + invite tokens.
+ * Fallback: if DENOCLAW_API_TOKEN is defined in env, it acts as a static token
+ * (local / dev mode). In Deploy production, everything uses OIDC + invite tokens.
  */
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -32,7 +32,7 @@ export type AuthErrorCode =
 
 export interface InviteToken {
   token: string;
-  /** Identifiant du tunnel autorisé (si connu) */
+  /** Authorized tunnel identifier (if known). */
   tunnelId?: string;
   createdAt: string;
   expiresAt: string;
@@ -53,8 +53,8 @@ export type AuthResult =
 // ── Constants ────────────────────────────────────────────
 
 const INVITE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 heures
-const AGENT_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 min (durée max Sandbox)
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const AGENT_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 min (maximum Sandbox lifetime)
 
 // ── AuthManager ──────────────────────────────────────────
 
@@ -65,7 +65,7 @@ export class AuthManager {
     this.kv = kv;
   }
 
-  // ── Invite tokens (usage unique, tunnel → broker) ────
+  // ── Invite tokens (single-use, tunnel → broker) ────
 
   async generateInviteToken(tunnelId?: string): Promise<InviteToken> {
     const kv = this.kv;
@@ -83,15 +83,15 @@ export class AuthManager {
       expireIn: INVITE_TTL_MS,
     });
     log.info(
-      `Invite token généré${tunnelId ? ` pour tunnel ${tunnelId}` : ""}`,
+      `Invite token generated${tunnelId ? ` for tunnel ${tunnelId}` : ""}`,
     );
 
     return invite;
   }
 
   /**
-   * Vérifie et consomme un invite token via KV atomic (usage unique garanti).
-   * Le check atomique empêche le double-use même en cas de requêtes concurrentes.
+   * Verifies and consumes an invite token via KV atomic (single-use guaranteed).
+   * The atomic check prevents double use even under concurrent requests.
    */
   async verifyInviteToken(token: string): Promise<AuthResult> {
     const kv = this.kv;
@@ -116,7 +116,7 @@ export class AuthManager {
       };
     }
 
-    // Atomic check-and-delete : échoue si l'entrée a été modifiée/supprimée entre le read et le delete
+    // Atomic check-and-delete: fails if the entry changed/was deleted between read and delete
     const result = await kv.atomic()
       .check(entry)
       .delete(key)
@@ -131,7 +131,7 @@ export class AuthManager {
     }
 
     log.info(
-      `Invite token consommé${
+      `Invite token consumed${
         entry.value.tunnelId ? ` (tunnel: ${entry.value.tunnelId})` : ""
       }`,
     );
@@ -141,7 +141,7 @@ export class AuthManager {
     };
   }
 
-  // ── Session tokens (éphémères, durée de vie tunnel) ──
+  // ── Session tokens (ephemeral, tunnel-lifetime) ──
 
   async generateSessionToken(
     tunnelId: string,
@@ -162,7 +162,7 @@ export class AuthManager {
     await kv.set(["auth", "session", token], session, {
       expireIn: SESSION_TTL_MS,
     });
-    log.debug(`Session token généré pour tunnel ${tunnelId}`);
+    log.debug(`Session token generated for tunnel ${tunnelId}`);
 
     return session;
   }
@@ -196,7 +196,7 @@ export class AuthManager {
   async revokeSessionToken(token: string): Promise<void> {
     const kv = this.kv;
     await kv.delete(["auth", "session", token]);
-    log.debug("Session token révoqué");
+    log.debug("Session token revoked");
   }
 
   // ── OIDC (Deno Deploy → Deno Deploy) ─────────────────
@@ -212,7 +212,7 @@ export class AuthManager {
   }
 
   /**
-   * Vérifie un token OIDC émis par Deno Deploy via JWKS (ADR-003).
+   * Verifies an OIDC token issued by Deno Deploy via JWKS (ADR-003).
    * jose verifies signature, issuer, audience, and expiry.
    * JWKS is cached and auto-refreshed on key rotation.
    */
@@ -257,7 +257,7 @@ export class AuthManager {
     await kv.set(["auth", "agent", token], { agentId, expiresAt }, {
       expireIn: AGENT_TOKEN_TTL_MS,
     });
-    log.debug(`Agent token matérialisé pour ${agentId}`);
+    log.debug(`Agent token materialized for ${agentId}`);
 
     return { token, expiresAt };
   }
@@ -294,10 +294,10 @@ export class AuthManager {
   // ── HTTP middleware ──────────────────────────────────
 
   /**
-   * Vérifie l'authentification d'une requête HTTP (ADR-003).
+   * Verifies HTTP request authentication (ADR-003).
    *
-   * Ordre : static token → session → agent → OIDC.
-   * Si aucun token configuré et aucun fourni → mode local sans auth.
+   * Order: static token → session → agent → OIDC.
+   * If no token is configured and none is provided → local mode without auth.
    */
   async checkRequest(req: Request): Promise<AuthResult> {
     const staticToken = Deno.env.get("DENOCLAW_API_TOKEN");
@@ -305,7 +305,7 @@ export class AuthManager {
     const queryToken = new URL(req.url).searchParams.get("token");
     const token = bearer || queryToken;
 
-    // Pas de token configuré et pas de token fourni → mode local sans auth
+    // No configured token and no provided token → local mode without auth
     if (!staticToken && !token) {
       return { ok: true, identity: "local" };
     }
@@ -324,7 +324,7 @@ export class AuthManager {
       const agentResult = await this.verifyAgentToken(token);
       if (agentResult.ok) return agentResult;
 
-      // 4. OIDC (dernier recours, plus lent)
+      // 4. OIDC (last resort, slower)
       const oidcResult = await this.verifyOIDC(token);
       if (oidcResult.ok) return oidcResult;
     }

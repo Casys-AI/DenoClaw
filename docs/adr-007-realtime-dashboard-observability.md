@@ -1,56 +1,56 @@
-# ADR-007 : Dashboard temps réel + observabilité profonde des agents
+# ADR-007: Real-Time Dashboard + Deep Agent Observability
 
-**Statut :** Proposé **Date :** 2026-03-27
+**Status:** Proposed **Date:** 2026-03-27
 
-## Contexte
+## Context
 
-Le broker voit passer tous les messages (LLM, tools, A2A) mais aujourd'hui les
-métriques sont des compteurs agrégés (/stats). On veut voir **en temps réel et
-en détail** ce qui se passe :
+The broker already sees every message (LLM, tools, A2A), but today the metrics
+are aggregated counters (`/stats`). We want to observe **what is happening in
+real time and in detail**:
 
-- L'état de chaque agent et tunnel
-- Chaque action à l'intérieur de la boucle agent (pas juste le résultat final)
-- Le graphe de communication A2A en live
+- The state of each agent and tunnel
+- Every action inside the agent loop, not just the final result
+- The live A2A communication graph
 
-## Décision
+## Decision
 
-### 1. Dashboard Fresh avec KV Watch
+### 1. Fresh dashboard with KV watch
 
-Un dashboard web (Deno Fresh) qui observe le KV en temps réel via `kv.watch()`.
-Pas de polling, pas de WebSocket custom — lecture directe du KV.
+A web dashboard (Deno Fresh) observes KV in real time through `kv.watch()`.
+No polling, no custom WebSocket layer, direct KV-driven reads.
 
-### 2. Observabilité profonde : tracer la boucle agent
+### 2. Deep observability: trace the agent loop
 
-Aujourd'hui on trace les appels LLM et tools au niveau du broker. Mais on ne
-voit pas ce qui se passe **à l'intérieur** de l'agent :
+Today we trace LLM and tool calls at the broker level. We still do not see what
+happens **inside** the agent:
 
 ```
-Ce qu'on voit aujourd'hui :
+What we see today:
   agent "coder" → llm_request → llm_response → tool_request → tool_response
 
-Ce qu'on veut voir :
-  agent "coder" boucle ReAct
-    ├── itération 1
+What we want to see:
+  agent "coder" ReAct loop
+    ├── iteration 1
     │   ├── context build (12 messages, 3 skills, 4 tools)
     │   ├── LLM call (claude-sonnet-4-6, 2847 tokens in, 342 out, 1.2s)
     │   ├── tool_call: shell { command: "deno test" }
-    │   │   ├── sandbox créée (perms: [run], 256MB)
-    │   │   ├── exécution (1.8s, exit 0)
-    │   │   └── sandbox détruite
-    │   └── résultat tool → continue
-    ├── itération 2
+    │   │   ├── sandbox created (perms: [run], 256MB)
+    │   │   ├── execution (1.8s, exit 0)
+    │   │   └── sandbox destroyed
+    │   └── tool result → continue
+    ├── iteration 2
     │   ├── LLM call (342 tokens in, 89 out, 0.6s)
-    │   └── réponse finale : "Tests passed."
-    └── terminé (2 itérations, 3.6s total, $0.012)
+    │   └── final response: "Tests passed."
+    └── finished (2 iterations, 3.6s total, $0.012)
 ```
 
-### Comment tracer la boucle agent
+### How to trace the agent loop
 
-L'AgentRuntime dans le Subhosting écrit ses traces dans le KV au fil de
-l'exécution :
+The `AgentRuntime` in Subhosting writes trace entries into KV as execution
+progresses:
 
 ```typescript
-// Chaque étape de la boucle agent est persistée en KV
+// Each agent-loop step is persisted in KV
 await kv.set(["traces", agentId, taskId, "iteration", 1, "llm_call"], {
   model: "claude-sonnet-4-6",
   tokensIn: 2847,
@@ -69,22 +69,23 @@ await kv.set(["traces", agentId, taskId, "iteration", 1, "tool_call", 0], {
 });
 ```
 
-Le dashboard `kv.watch()` ces clés et affiche l'arbre en temps réel. On voit
-littéralement l'agent "penser" — chaque itération, chaque appel, chaque outil.
+The dashboard watches those keys with `kv.watch()` and renders the tree in real
+time. You can literally see the agent "think": each iteration, each call, each
+tool.
 
-### Structure des traces dans KV
+### Trace structure in KV
 
 ```
-["traces", agentId, taskId]                        → métadonnées task
-["traces", agentId, taskId, "iteration", N]        → résumé itération
-["traces", agentId, taskId, "iteration", N, "llm_call"]    → détail LLM
-["traces", agentId, taskId, "iteration", N, "tool_call", M] → détail outil
-["traces", agentId, taskId, "result"]              → résultat final
+["traces", agentId, taskId]                        → task metadata
+["traces", agentId, taskId, "iteration", N]        → iteration summary
+["traces", agentId, taskId, "iteration", N, "llm_call"]    → LLM detail
+["traces", agentId, taskId, "iteration", N, "tool_call", M] → tool detail
+["traces", agentId, taskId, "result"]              → final result
 ```
 
-### Vues du dashboard
+### Dashboard views
 
-**1. Vue réseau** — graphe des agents et tunnels
+**1. Network view** — agent and tunnel graph
 
 ```
 ┌─researcher─┐     ┌──coder──┐
@@ -99,54 +100,53 @@ littéralement l'agent "penser" — chaque itération, chaque appel, chaque outi
                    └──────────┘
 ```
 
-**2. Vue agent** — boucle ReAct en live
+**2. Agent view** — live ReAct loop
 
-- Arbre des itérations, LLM calls, tool calls
-- Tokens, coûts, latences
-- Contenu des messages (expandable)
+- Tree of iterations, LLM calls, and tool calls
+- Tokens, costs, and latency
+- Expandable message content
 
-**3. Vue métriques** — graphes temporels
+**3. Metrics view** — time-series charts
 
-- Tokens/heure par agent
-- Coût cumulé
-- Latence p50/p95
+- Tokens per hour by agent
+- Cumulative cost
+- p50/p95 latency
 - Tool success rate
 
-**4. Vue A2A** — flux de tasks entre agents
+**4. A2A view** — task flow between agents
 
-- Tasks en cours, complétées, échouées
-- Graphe de dépendances
+- In-progress, completed, and failed tasks
+- Dependency graph
 
-### Lien avec OTEL
+### Relationship to OTEL
 
-Les spans OTEL qu'on a déjà (spanAgentLoop, spanLLMCall, spanToolCall) peuvent
-être exportés vers un backend OTEL (Grafana, Jaeger). Le dashboard Fresh est
-complémentaire — il montre l'état live via KV Watch, les spans OTEL montrent les
-traces historiques.
+The OTEL spans that already exist (`spanAgentLoop`, `spanLLMCall`,
+`spanToolCall`) can be exported to an OTEL backend such as Grafana or Jaeger.
+The Fresh dashboard is complementary: it shows live state through KV watch,
+while OTEL provides historical traces.
 
 ```
-Temps réel : KV Watch → Dashboard Fresh
-Historique  : OTEL spans → Grafana / Jaeger
+Real time : KV Watch → Fresh Dashboard
+History   : OTEL spans → Grafana / Jaeger
 ```
 
-## Modules à créer
+## Modules to create
 
-| Module                         | Rôle                                         |
+| Module                         | Role                                         |
 | ------------------------------ | -------------------------------------------- |
-| `src/telemetry/traces.ts`      | Écriture des traces détaillées dans KV       |
-| `web/routes/index.tsx`         | Dashboard principal (Fresh)                  |
-| `web/routes/agents/[id].tsx`   | Vue détaillée d'un agent                     |
-| `web/routes/network.tsx`       | Vue réseau (graphe)                          |
-| `web/routes/api/watch.ts`      | SSE endpoint qui expose KV Watch au frontend |
-| `web/islands/AgentTrace.tsx`   | Composant interactif arbre de trace          |
-| `web/islands/NetworkGraph.tsx` | Graphe réseau interactif                     |
+| `src/telemetry/traces.ts`      | Write detailed traces into KV                |
+| `web/routes/index.tsx`         | Main dashboard (Fresh)                       |
+| `web/routes/agents/[id].tsx`   | Detailed agent view                          |
+| `web/routes/network.tsx`       | Network view (graph)                         |
+| `web/routes/api/watch.ts`      | SSE endpoint that exposes KV watch to the UI |
+| `web/islands/AgentTrace.tsx`   | Interactive trace-tree component             |
+| `web/islands/NetworkGraph.tsx` | Interactive network graph                    |
 
-## Conséquences
+## Consequences
 
-- Les traces détaillées consomment du KV — il faut un TTL et du cleanup (traces
-  > 24h supprimées)
-- Le dashboard Fresh est optionnel — le broker fonctionne sans
-- Chaque AgentRuntime doit écrire ses traces dans le KV (ajout dans la boucle
-  agent)
-- C'est comme OpenClaw qui trace les appels d'outils, mais en plus profond (on
-  voit chaque itération de la boucle ReAct)
+- Detailed traces consume KV space, so they need a TTL and cleanup
+  (delete traces older than 24h)
+- The Fresh dashboard is optional; the broker still works without it
+- Every `AgentRuntime` must write traces into KV (added in the agent loop)
+- This is similar to OpenClaw tool-call tracing, but deeper: every ReAct-loop
+  iteration becomes visible

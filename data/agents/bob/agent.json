@@ -1,5 +1,5 @@
 {
-  "description": "Agent exécuteur",
+  "description": "Execution agent",
   "sandbox": {
     "allowedPermissions": [
       "read",

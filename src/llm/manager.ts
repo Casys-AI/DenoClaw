@@ -79,7 +79,7 @@ const PROVIDERS: ProviderEntry[] = [
     requiresKey: true,
     factory: (k, b) => new OllamaProvider(k, b),
   },
-  // CLI providers — shell out vers les CLI locaux
+  // CLI providers — shell out to local CLIs
   {
     name: "claude-cli",
     prefixes: ["claude-cli"],
@@ -115,7 +115,7 @@ export class ProviderManager {
         if (!providerCfg?.apiKey) continue;
         const provider = entry.factory(providerCfg.apiKey, providerCfg.apiBase);
         this.cache.set(model, provider);
-        log.debug(`Provider résolu : ${entry.name} pour ${model}`);
+        log.debug(`Resolved provider: ${entry.name} for ${model}`);
         return provider;
       }
 
@@ -123,7 +123,7 @@ export class ProviderManager {
       const providerCfg = this.providers[entry.name];
       const provider = entry.factory("", providerCfg?.apiBase);
       this.cache.set(model, provider);
-      log.debug(`Provider résolu (no-key) : ${entry.name} pour ${model}`);
+      log.debug(`Resolved provider (no-key): ${entry.name} for ${model}`);
       return provider;
     }
 
@@ -134,7 +134,7 @@ export class ProviderManager {
       if (providerCfg?.apiKey && providerCfg.enabled !== false) {
         const provider = entry.factory(providerCfg.apiKey, providerCfg.apiBase);
         this.cache.set(model, provider);
-        log.info(`Fallback provider : ${entry.name} pour ${model}`);
+        log.info(`Fallback provider: ${entry.name} for ${model}`);
         return provider;
       }
     }

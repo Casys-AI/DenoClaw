@@ -3,9 +3,9 @@ import type { LongTermFact, MemoryPort } from "./memory_port.ts";
 import { log } from "../shared/log.ts";
 
 /**
- * KV-backed conversation memory (raw Deno KV, sans kvdex).
- * Implémente MemoryPort — utilisable comme fallback léger.
- * Long-term memory = no-op (pas d'indexation dans cette implem).
+ * KV-backed conversation memory (raw Deno KV, without kvdex).
+ * Implements MemoryPort — usable as a lightweight fallback.
+ * Long-term memory = no-op (no indexing in this implementation).
  */
 export class Memory implements MemoryPort {
   private sessionId: string;
@@ -38,11 +38,11 @@ export class Memory implements MemoryPort {
       if (entry.value) {
         this.messages = entry.value;
         log.debug(
-          `Mémoire chargée : ${this.messages.length} messages (${this.sessionId})`,
+          `Memory loaded: ${this.messages.length} messages (${this.sessionId})`,
         );
       }
     } catch (e) {
-      log.error(`Échec chargement mémoire (${this.sessionId})`, e);
+      log.error(`Failed to load memory (${this.sessionId})`, e);
       this.messages = [];
     }
   }
@@ -52,7 +52,7 @@ export class Memory implements MemoryPort {
       const kv = await this.getKv();
       await kv.set(this.kvKey(), this.messages);
     } catch (e) {
-      log.error(`Échec sauvegarde mémoire (${this.sessionId})`, e);
+      log.error(`Failed to save memory (${this.sessionId})`, e);
     }
   }
 
@@ -94,7 +94,7 @@ export class Memory implements MemoryPort {
     }
   }
 
-  // Long-term memory — no-op dans cette implem (pas d'indexation raw KV)
+  // Long-term memory — no-op in this implementation (no raw-KV indexing)
   remember(_fact: Omit<LongTermFact, "timestamp">): Promise<void> {
     return Promise.resolve();
   }

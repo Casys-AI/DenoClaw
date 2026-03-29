@@ -1,99 +1,101 @@
-# Plan d'implémentation — Post ADR-008
+# Implementation Plan — Post ADR-008
 
-**Date :** 2026-03-27
+**Date:** 2026-03-27
 
-## Phase 1 — Workers multi-agent local ✅ DONE
+## Phase 1 — Local multi-agent workers ✅ DONE
 
-- [x] WorkerPool spawn/routing/shutdown avec protocol typé
-- [x] Worker entrypoint (init, process, shutdown via BroadcastChannel)
-- [x] Chaque agent a un nom (`--agent` requis, pas de "default")
-- [x] KV privé par agent (`./data/<agentId>.db`) via Memory kvPath
-- [x] Gateway accepte `agentId` dans /chat et WebSocket
-- [x] AgentError structured error type
+- [x] WorkerPool spawn/routing/shutdown with typed protocol
+- [x] Worker entrypoint (`init`, process, shutdown via `BroadcastChannel`)
+- [x] Every agent has a name (`--agent` required, no `"default"`)
+- [x] Private KV per agent (`./data/<agentId>.db`) via Memory `kvPath`
+- [x] Gateway accepts `agentId` in `/chat` and WebSocket
+- [x] `AgentError` structured error type
 - [x] Review + fixes (addEventListener, init timeout, ready check, Map drain)
-- [x] Monitoring endpoints (/stats, /agents, /cron) + MetricsCollector DI
-- [x] WorkerPoolCallbacks (onWorkerReady, onWorkerStopped)
-- [x] Fresh handler slot dans GatewayDeps (dashboard futur)
-- [x] Test end-to-end OK (Worker + Ollama Cloud)
+- [x] Monitoring endpoints (`/stats`, `/agents`, `/cron`) + `MetricsCollector` DI
+- [x] `WorkerPoolCallbacks` (`onWorkerReady`, `onWorkerStopped`)
+- [x] Fresh handler slot in `GatewayDeps` (future dashboard)
+- [x] End-to-end test OK (Worker + Ollama Cloud)
 
-## Phase 1.5 — A2A routing + KV partagé + observabilité ✅ DONE
+## Phase 1.5 — A2A routing + shared KV + observability ✅ DONE
 
-- [x] SendToAgentTool — tool A2A avec callback injecté (transport-agnostic)
-- [x] Protocol Worker étendu (`run`, `peer_deliver`, `peer_result`,
+- [x] `SendToAgentTool` — A2A tool with injected callback
+      (transport-agnostic)
+- [x] Worker protocol extended (`run`, `peer_deliver`, `peer_result`,
       `peer_response`, `task_started`, `task_completed`, `task_observe`)
-- [x] WorkerPool routing A2A avec peer check (peers/acceptFrom fermé par défaut)
-- [x] Worker n'écrit plus dans le shared KV — émet des messages, main process
-      écrit (deploy-compatible)
-- [x] Types observabilité déplacés dans shared/ (`TaskObservationEntry`,
-      AgentStatusEntry, etc.)
-- [x] Gateway routes : /tasks/observations, /agents/:name/task,
-      /.well-known/agent-card.json
-- [x] KV watch SSE étendu avec `task_observation` events
-- [x] Naming harmonisé : `task_observations` KV, `task_observation_update`
-      sentinel
-- [x] AgentCard URL alignée avec les vrais endpoints
-- [x] SendToAgentTool préserve les erreurs structurées (DenoClawError
-      passthrough)
-- [x] SSE controller.close() + deno.json --unstable-cron
-- [x] 83 tests, check, lint OK
+- [x] `WorkerPool` A2A routing with peer checks
+      (`peers` / `acceptFrom` closed by default)
+- [x] Workers no longer write to shared KV directly; they emit messages and the
+      main process writes instead (deploy-compatible)
+- [x] Observability types moved into `shared/`
+      (`TaskObservationEntry`, `AgentStatusEntry`, etc.)
+- [x] Gateway routes: `/tasks/observations`, `/agents/:name/task`,
+      `/.well-known/agent-card.json`
+- [x] KV watch SSE extended with `task_observation` events
+- [x] Naming normalized: `task_observations` KV,
+      `task_observation_update` sentinel
+- [x] `AgentCard` URL aligned with the real endpoints
+- [x] `SendToAgentTool` preserves structured errors
+      (`DenoClawError` passthrough)
+- [x] `SSE controller.close()` + `deno.json --unstable-cron`
+- [x] 83 tests, `check`, and `lint` OK
 
-## Phase 2 — Deploy Subhosting
+## Phase 2 — Deploy / Subhosting
 
-### Chantier 2.1 — BrokerClient mode HTTP ✅ DONE
+### Workstream 2.1 — BrokerClient HTTP mode ✅ DONE
 
-- [x] Interface `BrokerTransport` extraite (`src/orchestration/transport.ts`)
-- [x] `KvQueueTransport` — implémentation locale (KV Queue)
-- [x] `BrokerClient` avec transport pluggable (`AgentBrokerPort`)
-- [ ] Transport HTTP/SSE pour mode deploy (à faire)
+- [x] Extracted `BrokerTransport` interface (`src/orchestration/transport.ts`)
+- [x] `KvQueueTransport` — local implementation (KV Queue)
+- [x] `BrokerClient` with pluggable transport (`AgentBrokerPort`)
+- [ ] HTTP/SSE transport for deploy mode (still pending)
 
-### Chantier 2.2 — AgentRuntime HTTP ✅ DONE
+### Workstream 2.2 — HTTP AgentRuntime ✅ DONE
 
-- [x] `AgentRuntime` avec `Deno.serve()` réactif (`src/agent/runtime.ts`)
-- [x] Tâches rapides : sync HTTP response
-- [x] Tâches longues : task_submit / task_continue (pattern A2A)
+- [x] `AgentRuntime` with reactive `Deno.serve()` (`src/agent/runtime.ts`)
+- [x] Short tasks: synchronous HTTP response
+- [x] Long tasks: `task_submit` / `task_continue` (A2A pattern)
 
-### Chantier 2.3 — Auth OIDC agent → Broker
+### Workstream 2.3 — Agent → Broker OIDC auth
 
-- `@deno/oidc` préféré
-- Fallback : Layers (v2) / invite token
+- Prefer `@deno/oidc`
+- Fallback: Layers (v2) / invite token
 
-### Chantier 2.4 — Cron dispatcher
+### Workstream 2.4 — Cron dispatcher
 
-- Un seul `Deno.cron()` statique, KV schedule store
+- One static `Deno.cron()` with KV-backed schedule store
 
-### Chantier 2.5 — API v2
+### Workstream 2.5 — API v2
 
-- Deadline : 20 juillet 2026
+- Deadline: July 20, 2026
 
-### Chantier 2.6 — Entrypoint Subhosting
+### Workstream 2.6 — Subhosting entrypoint
 
 - `Deno.serve()` HTTP handler
 
-### Chantier 2.7 — Tests
+### Workstream 2.7 — Tests
 
 - AgentRuntime, BrokerClient, CronManager
 
-## Design debt identifié (reviews)
+## Identified design debt (reviews)
 
-| Issue                                                                      | Priorité | Ref          |
+| Issue                                                                      | Priority | Ref          |
 | -------------------------------------------------------------------------- | -------- | ------------ |
-| WorkerPool fait trop — extraire PeerPolicy et PendingMap                   | Medium   | Arch review  |
-| Gateway.handleHttp = 230 lignes non structurées — extraire routeur         | Medium   | Arch review  |
-| Agent message naming — consider outbound/inbound pattern                   | Low      | Arch + Codex |
-| Endpoints pas très RESTful                                                 | Low      | Codex naming |
-| Telemetry KV keys still use `a2a` prefix (protocol dimension — acceptable) | Low      | Codex        |
-| Dashboard islands ne passent pas le auth token                             | Medium   | Codex arch   |
+| WorkerPool does too much — extract `PeerPolicy` and `PendingMap`           | Medium   | Arch review  |
+| `Gateway.handleHttp` = 230 unstructured lines — extract a router           | Medium   | Arch review  |
+| Agent message naming — consider an outbound/inbound pattern                | Low      | Arch + Codex |
+| Endpoints are not very RESTful                                             | Low      | Codex naming |
+| Telemetry KV keys still use `a2a` prefix (protocol dimension; acceptable)  | Low      | Codex        |
+| Dashboard islands do not yet pass the auth token                           | Medium   | Codex arch   |
 
-## Décisions prises
+## Decisions taken
 
-| Sujet                                 | Décision                                                      |
+| Topic                                 | Decision                                                      |
 | ------------------------------------- | ------------------------------------------------------------- |
-| **KV Queues en local**                | On les garde. HTTP seulement pour Subhosting.                 |
-| **Communication 3 couches**           | HTTP (wake) + WS (perf) + BC (infra only).                    |
-| **Routing = Broker**                  | Toute comm agent↔agent via Broker (1:1 et multicast fan-out). |
-| **Agent ne fait jamais kv.watch()**   | Seul le Broker watch. Agent fait read/write.                  |
-| **Worker n'écrit pas dans shared KV** | Émet des messages, main process écrit. Deploy-compatible.     |
-| **OAuth LLM**                         | Basse priorité. API cloud Ollama par défaut.                  |
-| **Auth OIDC préféré**                 | OIDC partout sauf Sandbox et local.                           |
-| **Multi-agent = défaut**              | Toujours multi-agent. `--agent` requis.                       |
-| **API Subhosting v2**                 | Obligatoire. Deadline 20 juillet 2026.                        |
+| **KV Queues locally**                 | Keep them. HTTP only for Subhosting.                          |
+| **3-layer communication**             | HTTP (wake) + WS (perf) + BC (infra only).                    |
+| **Routing = Broker**                  | All agent↔agent communication goes through the Broker.        |
+| **Agent never does `kv.watch()`**     | Only the Broker watches. Agents only read/write.              |
+| **Workers do not write shared KV**    | They emit messages; the main process writes. Deploy-compatible. |
+| **OAuth LLM**                         | Lower priority. Ollama Cloud API by default.                  |
+| **Prefer OIDC auth**                  | OIDC everywhere except Sandbox and local mode.                |
+| **Multi-agent = default**             | Always multi-agent. `--agent` is required.                    |
+| **Subhosting API v2**                 | Mandatory. Deadline July 20, 2026.                            |

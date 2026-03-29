@@ -1,60 +1,60 @@
-# ADR-003 : Auth — OIDC + Credentials Materialization partout où possible
+# ADR-003: Auth — OIDC + Credentials Materialization Wherever Possible
 
-**Statut :** Accepté **Date :** 2026-03-26
+**Status:** Accepted **Date:** 2026-03-26
 
-## Contexte
+## Context
 
-L'architecture DenoClaw a plusieurs frontières d'authentification :
+The DenoClaw architecture has several authentication boundaries:
 
-- Broker → API Deno Subhosting + Sandbox (gestion du cycle de vie)
-- Broker → API LLM (Anthropic, OpenAI, etc.)
-- Tunnel → Broker (machines/VPS qui se connectent comme noeuds)
-- **Agent (Subhosting) → Broker** (l'agent appelle le broker par HTTP pour LLM,
-  tools, A2A)
-- Sandbox → Broker (le code exécuté en Sandbox communique avec le broker)
+- Broker → Deno Subhosting + Sandbox API (lifecycle management)
+- Broker → LLM API (Anthropic, OpenAI, etc.)
+- Tunnel → Broker (machines/VPS connecting as nodes)
+- **Agent (Subhosting) → Broker** (the agent calls the broker over HTTP for
+  LLM, tools, A2A)
+- Sandbox → Broker (code executed in Sandbox communicates with the broker)
 
-L'objectif : minimiser les secrets statiques. Chaque secret statique est un
-risque (fuite, rotation oubliée, accès non révocable).
+The goal is to minimize static secrets. Every static secret is a risk
+(leakage, missed rotation, non-revocable access).
 
-## Décision
+## Decision
 
-Utiliser **@deno/oidc** et **credentials materialization** partout où c'est
-techniquement possible. Les secrets statiques sont un dernier recours.
+Use **@deno/oidc** and **credentials materialization** wherever it is
+technically possible. Static secrets are a last resort.
 
-## Application par frontière
+## Per-Boundary Application
 
-### Broker → API Deno Sandbox : `@deno/oidc`
+### Broker → Deno Sandbox API: `@deno/oidc`
 
-Le broker tourne sur Deno Deploy. Il utilise `@deno/oidc` pour s'authentifier
-auprès de l'API Sandbox sans token statique. Le token OIDC prouve l'identité de
-l'app Deploy, est éphémère et automatiquement renouvelé.
+The broker runs on Deno Deploy. It uses `@deno/oidc` to authenticate to the
+Sandbox API without a static token. The OIDC token proves the Deploy app's
+identity, is ephemeral, and renews automatically.
 
-- Élimine : `DENO_SANDBOX_API_TOKEN`
-- Le broker n'a pas besoin de stocker ce secret
+- Eliminates: `DENO_SANDBOX_API_TOKEN`
+- The broker does not need to store this secret
 
-### Tunnel ↔ Broker : OIDC token éphémère
+### Tunnel ↔ Broker: ephemeral OIDC token
 
-Quand un tunnel se connecte au broker :
+When a tunnel connects to the broker:
 
-1. Le tunnel s'identifie auprès du broker
-2. Le broker vérifie l'identité via OIDC (si le tunnel est aussi sur Deploy) ou
-   via un challenge/response
-3. Le broker émet un token éphémère pour la session WebSocket
-4. Pas de secret partagé statique entre le tunnel et le broker
+1. The tunnel identifies itself to the broker
+2. The broker verifies identity via OIDC (if the tunnel also runs on Deploy) or
+   via challenge/response
+3. The broker issues an ephemeral token for the WebSocket session
+4. No static shared secret exists between the tunnel and the broker
 
-Pour les tunnels locaux (pas sur Deploy) : le broker émet un token d'invitation
-à usage unique. Le tunnel l'utilise pour la connexion initiale, puis reçoit un
-token de session éphémère.
+For local tunnels (not on Deploy), the broker issues a single-use invite token.
+The tunnel uses it for the initial connection, then receives an ephemeral
+session token.
 
-### Agent (Subhosting) → Broker : `@deno/oidc` (préféré)
+### Agent (Subhosting) → Broker: `@deno/oidc` (preferred)
 
-L'agent en Subhosting appelle le Broker par HTTP (`fetch()`) pour les requêtes
-LLM, tools et A2A. Il s'authentifie via OIDC — même mécanisme que le Broker vers
-l'API Sandbox.
+The Subhosting agent calls the Broker over HTTP (`fetch()`) for LLM, tools, and
+A2A requests. It authenticates via OIDC — the same mechanism used by the Broker
+for the Sandbox API.
 
 ```typescript
-// Côté Agent (Subhosting)
-const token = await getIdToken(brokerUrl);  // @deno/oidc, éphémère 5 min
+// Agent side (Subhosting)
+const token = await getIdToken(brokerUrl); // @deno/oidc, ephemeral 5 min
 await fetch(brokerUrl + "/llm", {
   headers: { "Authorization": `Bearer ${token}` },
   body: JSON.stringify({ model: "...", messages: [...] }),
@@ -62,71 +62,67 @@ await fetch(brokerUrl + "/llm", {
 ```
 
 ```typescript
-// Côté Broker — vérification
-// Vérifie signature JWKS (https://oidc.deno.com/.well-known/jwks.json)
-// Vérifie org_id = notre organisation
-// Vérifie app_id = un agent enregistré
-// Vérifie aud = URL du broker
-// Vérifie exp > maintenant
+// Broker side — verification
+// Verifies JWKS signature (https://oidc.deno.com/.well-known/jwks.json)
+// Verifies org_id = our organization
+// Verifies app_id = a registered agent
+// Verifies aud = broker URL
+// Verifies exp > now
 ```
 
-Le Broker identifie l'agent via `app_id` (stable, ne change pas au redeploy) et
-`org_id` (notre organisation).
+The Broker identifies the agent via `app_id` (stable, does not change on
+redeploy) and `org_id` (our organization).
 
-**Fallbacks si OIDC indisponible en Subhosting :**
+**Fallbacks if OIDC is unavailable in Subhosting:**
 
-1. **Layers (API v2)** — le Broker injecte un token rotatif via la feature
-   Layers, sans redéployer
-2. **Invite token → session token** — déjà implémenté dans `auth.ts`
+1. **Layers (API v2)** — the Broker injects a rotating token via the Layers
+   feature, without redeploying
+2. **Invite token → session token** — already implemented in `auth.ts`
 
-**En local** : pas d'auth, `postMessage` est interne au process.
+**Locally**: no auth, `postMessage` is internal to the process.
 
-### Sandbox → Broker : Credentials materialization
+### Sandbox → Broker: Credentials materialization
 
-Le code exécuté en Sandbox est potentiellement non fiable (skills, code
-LLM-generated). Il doit s'authentifier auprès du broker, mais ne doit JAMAIS
-voir son propre token.
+Code executed in Sandbox is potentially untrusted (skills, LLM-generated code).
+It must authenticate to the broker, but it must NEVER see its own token.
 
-Avec credentials materialization :
+With credentials materialization:
 
-- Le code utilise un placeholder : `Bearer {{AGENT_TOKEN}}`
-- La plateforme Sandbox injecte la vraie valeur **uniquement** sur les requêtes
-  sortantes vers l'URL du broker
-- Le code ne peut pas lire, logger ou exfiltrer le token
-- Même un code malveillant dans la Sandbox ne peut pas extraire le secret
+- The code uses a placeholder: `Bearer {{AGENT_TOKEN}}`
+- The Sandbox platform injects the real value **only** on outbound requests to
+  the broker URL
+- The code cannot read, log, or exfiltrate the token
+- Even malicious code inside Sandbox cannot extract the secret
 
-Couplé au network allowlist (la Sandbox ne peut parler qu'au broker), c'est une
-double protection.
+Combined with the network allowlist (Sandbox can only talk to the broker), this
+provides double protection.
 
-### Broker → API LLM : Via GCP Secret Manager (voir ADR-004)
+### Broker → LLM API: via GCP Secret Manager (see ADR-004)
 
-Les clés API LLM sont stockées dans **GCP Secret Manager**. Le broker les
-récupère via OIDC (Deno Deploy est un OIDC provider natif → Workload Identity
-Federation → Service Account → Secret Manager).
+LLM API keys are stored in **GCP Secret Manager**. The broker retrieves them via
+OIDC (Deno Deploy is a native OIDC provider → Workload Identity Federation →
+Service Account → Secret Manager).
 
-**Plus aucun secret statique dans l'architecture.** Voir ADR-004 pour les
-détails.
+**There are no static secrets left in the architecture.** See ADR-004 for
+details.
 
-## Résumé
+## Summary
 
-| Frontière                         | Mécanisme                                          | Secret statique ?       |
-| --------------------------------- | -------------------------------------------------- | ----------------------- |
-| Broker → Subhosting + Sandbox API | `@deno/oidc`                                       | Non                     |
-| **Agent (Subhosting) → Broker**   | **`@deno/oidc`** (préféré), fallback Layers/invite | **Non**                 |
-| Tunnel → Broker                   | OIDC éphémère / token d'invitation                 | Non                     |
-| Sandbox → Broker                  | Credentials materialization                        | Non (invisible au code) |
-| Broker → LLM API                  | GCP Secret Manager via OIDC (ADR-004)              | **Non**                 |
-| Local (Worker → Main)             | Aucune (postMessage interne)                       | N/A                     |
+| Boundary                          | Mechanism                                            | Static secret?         |
+| --------------------------------- | ---------------------------------------------------- | ---------------------- |
+| Broker → Subhosting + Sandbox API | `@deno/oidc`                                         | No                     |
+| **Agent (Subhosting) → Broker**   | **`@deno/oidc`** (preferred), Layers/invite fallback | **No**                 |
+| Tunnel → Broker                   | Ephemeral OIDC / invite token                        | No                     |
+| Sandbox → Broker                  | Credentials materialization                          | No (invisible to code) |
+| Broker → LLM API                  | GCP Secret Manager via OIDC (ADR-004)                | **No**                 |
+| Local (Worker → Main)             | None (internal postMessage)                          | N/A                    |
 
-## Conséquences
+## Consequences
 
-- La surface de secrets statiques est réduite à un seul point : les clés API LLM
-  sur le broker
-- Les tokens d'agent sont éphémères et invisibles au code → pas de risque
-  d'exfiltration
-- La rotation des tokens est automatique (OIDC) ou gérée par le broker (tokens
-  de session)
-- Complexité ajoutée : il faut implémenter le flow OIDC et le flow credentials
-  materialization
-- Dépendance : `@deno/oidc` est spécifique à Deno Deploy — si on migre le broker
-  hors Deploy, il faudra un autre mécanisme OIDC
+- The static-secret surface is reduced to one point: LLM API keys on the broker
+- Agent tokens are ephemeral and invisible to code → no exfiltration risk
+- Token rotation is automatic (OIDC) or managed by the broker (session tokens)
+- Added complexity: the OIDC flow and credentials materialization flow must be
+  implemented
+- Dependency: `@deno/oidc` is specific to Deno Deploy — if the broker moves off
+  Deploy, another OIDC mechanism will be required

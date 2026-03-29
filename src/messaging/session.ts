@@ -47,7 +47,7 @@ export class SessionManager {
     };
 
     await kv.set(this.key(sessionId), session);
-    log.info(`Session créée : ${sessionId}`);
+    log.info(`Session created: ${sessionId}`);
     return session;
   }
 
@@ -60,7 +60,7 @@ export class SessionManager {
   async delete(sessionId: string): Promise<void> {
     const kv = await this.getKv();
     await kv.delete(this.key(sessionId));
-    log.info(`Session supprimée : ${sessionId}`);
+    log.info(`Session deleted: ${sessionId}`);
   }
 
   async listAll(): Promise<Session[]> {
@@ -89,7 +89,7 @@ export class SessionManager {
         count++;
       }
     }
-    log.info(`${count} session(s) nettoyée(s)`);
+    log.info(`${count} session(s) cleaned up`);
     return count;
   }
 

@@ -9,7 +9,7 @@ import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { createSandboxBackend } from "./tools/backends/factory.ts";
 
-/** Projection minimale de Config nécessaire à AgentLoop — pas de dépendance sur config/ */
+/** Minimal Config projection required by AgentLoop — no dependency on config/. */
 interface AgentLoopConfig {
   agents: { defaults: AgentDefaults };
   providers: ProvidersConfig;
@@ -223,7 +223,7 @@ export class AgentLoop implements AgentLoopLike {
           iteration,
           async () => {
             log.debug(
-              `Boucle agent itération ${iteration}/${this.maxIterations}`,
+              `Agent loop iteration ${iteration}/${this.maxIterations}`,
             );
 
             const skillsList = this.skills.getSkills();
@@ -291,7 +291,7 @@ export class AgentLoop implements AgentLoopLike {
                 try {
                   args = JSON.parse(tc.function.arguments);
                 } catch {
-                  log.warn(`JSON invalide pour outil ${tc.function.name}`);
+                  log.warn(`Invalid JSON for tool ${tc.function.name}`);
                   await this.memory.addMessage({
                     role: "tool",
                     content:
@@ -302,7 +302,7 @@ export class AgentLoop implements AgentLoopLike {
                   continue;
                 }
 
-                log.info(`Outil: ${tc.function.name}`);
+                log.info(`Tool: ${tc.function.name}`);
                 const toolStart = performance.now();
                 const result = await spanToolCall(
                   tc.function.name,
@@ -359,7 +359,7 @@ export class AgentLoop implements AgentLoopLike {
         if (iterResult !== null) return iterResult;
       }
 
-      log.warn(`Max itérations atteint (${this.maxIterations})`);
+      log.warn(`Max iterations reached (${this.maxIterations})`);
       finalStatus = "completed";
       const last = this.memory.getMessages().findLast((m) =>
         m.role === "assistant"

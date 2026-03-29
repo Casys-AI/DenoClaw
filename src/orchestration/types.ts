@@ -209,7 +209,7 @@ export interface TunnelCapabilities {
   type: TunnelType;
   // Local tunnel: expose tools
   tools: string[];
-  /** Permissions requises par chaque outil (ADR-005). Clé = nom outil, valeur = permissions. */
+  /** Required permissions for each tool (ADR-005). Key = tool name, value = permissions. */
   toolPermissions?: Record<string, SandboxPermission[]>;
   // Instance tunnel: expose remote agents via broker-to-broker
   agents?: string[];

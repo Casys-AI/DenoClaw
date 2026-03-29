@@ -1,187 +1,192 @@
-# ADR-008 : Corrections architecture Subhosting — Broker orchestre, agents réactifs
+# ADR-008: Subhosting Architecture Corrections — Broker Orchestrates, Agents React
 
-**Statut :** Accepté **Date :** 2026-03-27
+**Status:** Accepted **Date:** 2026-03-27
 
-## Contexte
+## Context
 
-L'audit de la doc officielle Deno Subhosting a révélé des erreurs fondamentales
-dans notre modèle d'exécution. L'architecture actuelle assume que les agents
-Subhosting sont des daemons long-running avec `Deno.cron()` et
-`kv.listenQueue()`. En réalité, ces deux APIs ne fonctionnent pas en Subhosting.
+An audit of the official Deno Subhosting docs revealed fundamental errors in
+our execution model. The existing architecture assumed that Subhosting agents
+could run as long-lived daemons using `Deno.cron()` and `kv.listenQueue()`. In
+practice, neither API works in Subhosting.
 
-### Claims vérifiées (sources officielles)
+### Verified claims (official sources)
 
-| Claim                              | Verdict  | Source                                                                                        |
-| ---------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `Deno.cron()` bloqué en Subhosting | CONFIRMÉ | docs.deno.com/subhosting/api/ — _"Deno Cron and Queues do not currently work for Subhosting"_ |
-| `kv.listenQueue()` bloqué          | CONFIRMÉ | Même phrase, même doc                                                                         |
-| Isolates pas long-running          | CONFIRMÉ | Idle timeout 5 sec à 10 min, SIGKILL après                                                    |
-| KV pas auto-isolé par deployment   | CONFIRMÉ | KV databases créées et bindées explicitement via API                                          |
-| API v1 sunset 20 juillet 2026      | CONFIRMÉ | Multiple sources officielles                                                                  |
-| Workers dans Subhosting            | INCONNU  | Pas documenté, ne résout pas la persistence                                                   |
+| Claim                                 | Verdict   | Source                                                                                        |
+| ------------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
+| `Deno.cron()` blocked in Subhosting   | CONFIRMED | docs.deno.com/subhosting/api/ — _"Deno Cron and Queues do not currently work for Subhosting"_ |
+| `kv.listenQueue()` blocked            | CONFIRMED | Same statement, same doc                                                                      |
+| Isolates are not long-running         | CONFIRMED | Idle timeout 5 sec to 10 min, then SIGKILL                                                    |
+| KV is not auto-isolated per deployment | CONFIRMED | KV databases are explicitly created and bound through the API                                 |
+| API v1 sunset July 20, 2026           | CONFIRMED | Multiple official sources                                                                     |
+| Workers inside Subhosting             | UNKNOWN   | Not documented and does not solve persistence                                                 |
 
-### Changements API v2
+### API v2 changes
 
-|              | v1                         | v2                                           |
-| ------------ | -------------------------- | -------------------------------------------- |
-| Terminologie | Projects / Deployments     | **Apps / Revisions**                         |
-| Champs       | camelCase                  | **snake_case**                               |
-| Entry point  | `entryPointUrl`            | `config.runtime.entrypoint`                  |
-| Env vars     | object                     | array                                        |
-| Status       | `pending`/`success`        | `queued`/`succeeded`                         |
-| RAM max      | 512 MB                     | **4 GB**                                     |
-| CPU limits   | Per-request (50-200ms avg) | **Pas de limite par requête**                |
-| Nouveautés   | —                          | Labels, Layers, SSE logs, custom build steps |
+|              | v1                         | v2                                         |
+| ------------ | -------------------------- | ------------------------------------------ |
+| Terminology  | Projects / Deployments     | **Apps / Revisions**                       |
+| Fields       | camelCase                  | **snake_case**                             |
+| Entry point  | `entryPointUrl`            | `config.runtime.entrypoint`                |
+| Env vars     | object                     | array                                      |
+| Status       | `pending`/`success`        | `queued`/`succeeded`                       |
+| Max RAM      | 512 MB                     | **4 GB**                                   |
+| CPU limits   | Per-request (50-200ms avg) | **No per-request limit**                   |
+| New features | —                          | Labels, Layers, SSE logs, custom build steps |
 
-## Code impacté
+## Affected code
 
-### Critique (cassé en Subhosting)
+### Critical (broken in Subhosting)
 
-| Fichier                       | Problème                                                                                                         |
+| File                          | Problem                                                                                                          |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `src/agent/runtime.ts`        | `Deno.cron()` via CronManager + `kv.listenQueue()`. Modèle daemon `start()`/`stop()`.                            |
-| `src/orchestration/client.ts` | Communication par `kv.enqueue()`/`kv.listenQueue()` + `pendingRequests` qui assume process persistant.           |
-| `src/cli/setup.ts`            | Entrypoint généré contient `Deno.cron()`, `listenQueue()`, `Deno.serve()` keep-alive bidon. Cycle LLM incomplet. |
+| `src/agent/runtime.ts`        | `Deno.cron()` via CronManager + `kv.listenQueue()`. Daemon-style `start()`/`stop()` model.                      |
+| `src/orchestration/client.ts` | Communication through `kv.enqueue()`/`kv.listenQueue()` plus `pendingRequests`, assuming a persistent process. |
+| `src/cli/setup.ts`            | Generated entrypoint contains `Deno.cron()`, `listenQueue()`, fake `Deno.serve()` keep-alive, incomplete LLM cycle. |
 
-### Haut (pas aligné avec l'archi)
+### High priority (not aligned with the architecture)
 
-| Fichier                        | Problème                                                 |
-| ------------------------------ | -------------------------------------------------------- |
-| `main.ts`                      | `AgentLoop` tourne in-process, pas de `new Worker()`.    |
-| `src/orchestration/gateway.ts` | `AgentLoop` dans les handlers HTTP, bloque l'event loop. |
-| `src/cli/setup.ts`             | API Subhosting v1 (`api.deno.com/v1`).                   |
-| `src/orchestration/sandbox.ts` | API Sandbox v1.                                          |
+| File                         | Problem                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `main.ts`                    | `AgentLoop` runs in-process, not behind `new Worker()`.  |
+| `src/orchestration/gateway.ts` | `AgentLoop` inside HTTP handlers blocks the event loop. |
+| `src/cli/setup.ts`           | Subhosting API v1 (`api.deno.com/v1`).                   |
+| `src/orchestration/sandbox.ts` | Sandbox API v1.                                        |
 
-### Couverture tests
+### Test coverage
 
-Zéro tests sur AgentRuntime, BrokerClient, CronManager, entrypoint généré.
+There are zero tests for AgentRuntime, BrokerClient, CronManager, or the
+generated entrypoint.
 
-## Décision
+## Decision
 
-### Principe
+### Principle
 
-> **Le Broker orchestre. L'agent réagit. Le code s'exécute en Sandbox.**
+> **The Broker orchestrates. The agent reacts. Code runs in Sandbox.**
 
-En Subhosting, l'agent est un serveur HTTP pur. Il reçoit du travail par POST,
-fait ses calculs (y compris LLM multi-step), et soit retourne un résultat
-synchrone (tâche rapide), soit retourne un taskId + stream SSE (tâche longue).
-Le Broker est le message store durable et le cron dispatcher.
+In Subhosting, the agent is a pure HTTP server. It receives work by POST,
+performs its computation, including multi-step LLM work, and either returns a
+synchronous result (short task) or a `taskId` plus SSE stream (long task). The
+Broker is the durable message store and cron dispatcher.
 
 > **A2A over transport X, persisted in KV, correlated by task/context ids.**
 
-### Trois couches — Deploy et Local
+### Three layers — Deploy and Local
 
-| Rôle           | Deploy                              | Local                           |
+| Role           | Deploy                              | Local                           |
 | -------------- | ----------------------------------- | ------------------------------- |
-| Orchestrateur  | Broker (Deno Deploy)                | **Process** (main)              |
+| Orchestrator   | Broker (Deno Deploy)                | **Process** (main)              |
 | Agent          | Subhosting (warm-cached V8 isolate) | **Worker** (`new Worker()`)     |
-| Exécution code | Sandbox (microVM)                   | **Subprocess** (`Deno.Command`) |
+| Code execution | Sandbox (microVM)                   | **Subprocess** (`Deno.Command`) |
 
-Multi-agent est le mode par défaut, même en dev. Chaque agent a un nom — pas de
-"default".
+Multi-agent is the default mode, even in development. Every agent has a name,
+never `"default"`.
 
-### Communication — 3 couches
+### Communication — 3 layers
 
-| Couche               | Rôle                                      | Local                              | Deploy                                     |
-| -------------------- | ----------------------------------------- | ---------------------------------- | ------------------------------------------ |
-| **HTTP POST**        | Transport de travail A2A au réveil        | Pas nécessaire (Workers always-on) | Seul moyen de wake Subhosting              |
-| **WebSocket**        | Communication continue / optimisation     | `postMessage` (≈ WS local)         | WS persistant tant que l'agent est éveillé |
-| **BroadcastChannel** | Infra seulement (shutdown, config reload) | ✅ entre Workers                   | N/A (ne marche pas cross-deployment)       |
+| Layer                | Role                                 | Local                              | Deploy                                     |
+| -------------------- | ------------------------------------ | ---------------------------------- | ------------------------------------------ |
+| **HTTP POST**        | Wake-up transport for A2A work       | Not required (workers stay alive)  | Only way to wake Subhosting                |
+| **WebSocket**        | Continuous communication / optimization | `postMessage` (local WS equivalent) | Persistent WS while the agent is awake     |
+| **BroadcastChannel** | Infra only (shutdown, config reload) | ✅ between workers                  | N/A (does not work cross-deployment)       |
 
-En d'autres termes : **A2A over transport X, persisted in KV, correlated by task/context ids.**
+In other words: **A2A over transport X, persisted in KV, correlated by
+task/context ids.**
 
-Flux deploy : HTTP POST réveille l'agent → agent ouvre WS vers Broker →
-communication bidirectionnelle → agent idle → WS meurt → retour à HTTP POST.
+Deploy flow: HTTP POST wakes the agent → agent opens WS to Broker →
+bidirectional communication → agent goes idle → WS dies → system falls back to
+HTTP POST.
 
-L'agent voit une seule interface (`AgentBrokerPort`). Le dual mode est dans
-l'infra, pas dans le code agent.
+The agent sees a single interface (`AgentBrokerPort`). The dual mode exists in
+infrastructure, not in agent code.
 
-### Routing — le Broker est le routeur universel
+### Routing — the Broker is the universal router
 
-Toute communication agent ↔ agent passe par le Broker. L'agent ne sait pas où
-est la cible.
+All agent-to-agent communication goes through the Broker. The agent does not
+know where the target is located.
 
-| L'agent veut parler à...     | Le Broker fait...                         |
-| ---------------------------- | ----------------------------------------- |
-| Un agent même instance       | postMessage (local) ou WS (deploy)        |
-| Un agent autre instance      | Tunnel → Broker distant → WS vers l'agent |
-| Plusieurs agents (multicast) | Fan-out, même logique par agent cible     |
+| The agent wants to talk to... | The Broker does...                        |
+| ----------------------------- | ----------------------------------------- |
+| An agent in the same instance | `postMessage` (local) or WS (deploy)      |
+| An agent in another instance  | Tunnel → remote Broker → WS to the agent  |
+| Multiple agents (multicast)   | Fan-out using the same logic per target   |
 
-BroadcastChannel n'est PAS utilisé pour la communication inter-agents —
-seulement pour l'infra (shutdown, config reload).
+`BroadcastChannel` is **not** used for inter-agent communication, only for
+infra concerns such as shutdown and config reload.
 
 ### KV — store vs transport
 
-**KV comme store = oui partout. KV comme transport (enqueue/listenQueue) =
-local + Broker Deploy uniquement.**
+**KV as storage: yes everywhere. KV as transport (`enqueue` / `listenQueue`):
+local + Broker Deploy only.**
 
-Deux KV par agent :
+Two KV stores per agent:
 
-- **KV privé** (`./data/<agentId>.db` local, DB bindée en deploy) — mémoire,
-  sessions, historique A2A propre
-- **KV partagé** (`./data/shared.db` local, DB bindée à tous en deploy) —
-  messages inter-agents, traces, routing, cron schedules
+- **Private KV** (`./data/<agentId>.db` locally, bound DB in deploy) for
+  memory, sessions, and agent-specific A2A history
+- **Shared KV** (`./data/shared.db` locally, bound DB shared across agents in
+  deploy) for inter-agent messages, traces, routing, and cron schedules
 
-En local, KV Queues fonctionnent entre Workers (même SQLite). En deploy, le
-Broker utilise KV Queues en interne et pousse vers les agents par HTTP.
+Locally, KV queues work between workers because they share the same SQLite
+store. In deploy, the Broker uses KV queues internally and pushes toward agents
+over HTTP.
 
-### Communication Deploy
+### Deploy communication
 
 ```
-Deploy ↔ Subhosting = HTTP direct (même plateforme Deno, pas de tunnel)
-Agent → Broker     : fetch() HTTP avec OIDC auth
-Broker → Agent     : HTTP POST (messages, cron triggers, tâches A2A)
-Durabilité         : KV Queues interne Broker (Deploy)
+Deploy ↔ Subhosting = direct HTTP (same Deno platform, no tunnel)
+Agent → Broker     : fetch() HTTP with OIDC auth
+Broker → Agent     : HTTP POST (messages, cron triggers, A2A tasks)
+Durability         : internal Broker KV Queues (Deploy)
 ```
 
-### Tâches longues — pattern A2A task + SSE
+### Long tasks — A2A task + SSE pattern
 
 ```
 1. Broker POST /tasks → Agent
-2. Agent retourne 202 Accepted { taskId }
-3. Agent exécute le ReAct loop (LLM calls via fetch au Broker)
-4. Agent écrit le progrès en KV + stream SSE sur GET /tasks/{id}/events
-5. Broker subscribe au SSE, re-émet au caller, stocke le résultat final
+2. Agent returns 202 Accepted { taskId }
+3. Agent runs the ReAct loop (LLM calls via fetch to the Broker)
+4. Agent writes progress into KV + streams SSE on GET /tasks/{id}/events
+5. Broker subscribes to SSE, re-emits to the caller, stores the final result
 ```
 
-Les types A2A existants dans `src/messaging/a2a/types.ts` sont le wire format
-(TaskState, TaskStatusUpdateEvent).
+The existing A2A types in `src/messaging/a2a/types.ts` are the wire format
+(`TaskState`, `TaskStatusUpdateEvent`).
 
-### Cron — dispatcher unique
+### Cron — single dispatcher
 
-`Deno.cron()` est extrait statiquement de l'AST sur Deploy. Un seul cron
-dispatcher lit les schedules agents depuis KV et dispatche par HTTP POST.
+`Deno.cron()` is statically extracted from the AST on Deploy. One cron
+dispatcher reads agent schedules from KV and dispatches them over HTTP POST.
 
-### Auth Agent → Broker — OIDC préféré
+### Auth Agent → Broker — prefer OIDC
 
-`@deno/oidc` (probablement disponible en Subhosting, même infra que Deploy). Le
-Broker vérifie `org_id` + `app_id` dans le JWT. Fallback : Layers (v2) / invite
-token. Pas d'auth en local (postMessage interne).
+Use `@deno/oidc` when possible in Subhosting, since it runs on the same
+platform as Deploy. The Broker verifies `org_id` + `app_id` in the JWT.
+Fallbacks are Layers (v2) or invite tokens. Local mode uses no auth because
+`postMessage` is internal.
 
-### LLM — Clé API + OAuth, pas de CLI
+### LLM — API key + OAuth, not CLI
 
-Le Broker fait `fetch()` avec une clé API ou un token OAuth (même flow que
-Claude CLI / Codex CLI, juste l'auth). Pas de `Deno.Command`. Le tunnel sert
-uniquement pour l'auth initiale OAuth (ouvrir le navigateur).
+The Broker uses `fetch()` with either an API key or an OAuth token, following
+the same auth model as Claude CLI or Codex CLI but without `Deno.Command`.
+Tunnels are only needed for the initial OAuth browser flow.
 
-### Traces — via le Broker
+### Traces — through the Broker
 
-Les traces agent remontent au Broker via HTTP. Le Broker les écrit dans le KV
-partagé. Le dashboard `kv.watch()` le KV Broker.
+Agent traces are sent back to the Broker over HTTP. The Broker writes them into
+shared KV. The dashboard watches Broker KV through `kv.watch()`.
 
-### Tunnels — mesh hors plateforme
+### Tunnels — mesh outside the platform
 
-Les tunnels connectent ce qui est **hors** de la plateforme Deno : machines
-locales (outils, auth), VPS/GPU (ressources), autres Brokers (fédération).
-Deploy ↔ Subhosting n'a pas besoin de tunnel.
+Tunnels connect systems that are **outside** the Deno platform: local machines
+(tools, auth), VPS/GPU hosts (resources), and other Brokers (federation).
+Deploy ↔ Subhosting does not need a tunnel.
 
-## Conséquences
+## Consequences
 
-- L'architecture passe de "agent orchestre, Broker route" à **"Broker orchestre,
-  agent réagit"**
-- Le code agent est identique en local (Worker) et en deploy (Subhosting)
-- La durabilité est centralisée dans le Broker (seul composant avec KV Queues en
-  deploy)
-- Les types A2A existants deviennent le wire format natif agent ↔ Broker
-- Le modèle 3 couches (Process/Worker/Subprocess ↔ Broker/Subhosting/Sandbox)
-  est cohérent
+- The architecture moves from "agent orchestrates, Broker routes" to
+  **"Broker orchestrates, agent reacts"**
+- Agent code is identical in local mode (Worker) and deploy mode (Subhosting)
+- Durable state is centralized in the Broker, the only component allowed to use
+  KV queues in deploy
+- Existing A2A types become the native wire format between agent and Broker
+- The three-layer model
+  (Process/Worker/Subprocess ↔ Broker/Subhosting/Sandbox) becomes coherent

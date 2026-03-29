@@ -77,7 +77,7 @@ export class KvQueueTransport implements BrokerTransport {
         const msg = raw as BrokerMessage;
         if (msg.to !== this.agentId) return;
         if (!isBrokerResponseMessage(msg)) {
-          log.debug(`Message non-réponse ignoré : ${msg.type} (${msg.id})`);
+          log.debug(`Non-response message ignored: ${msg.type} (${msg.id})`);
           return;
         }
         const response: BrokerResponseMessage = msg;
@@ -87,16 +87,16 @@ export class KvQueueTransport implements BrokerTransport {
           this.pendingRequests.delete(response.id);
           pending.resolve(response);
         } else {
-          log.debug(`Message non attendu : ${response.type} (${response.id})`);
+          log.debug(`Unexpected message: ${response.type} (${response.id})`);
         }
       } catch (err) {
-        log.error(`KvQueueTransport: erreur dans listenQueue callback`, {
+        log.error(`KvQueueTransport: listenQueue callback error`, {
           err,
         });
       }
     });
 
-    log.info(`KvQueueTransport: écoute démarrée (agent: ${this.agentId})`);
+    log.info(`KvQueueTransport: listening started (agent: ${this.agentId})`);
   }
 
   async send(
@@ -158,7 +158,7 @@ export class KvQueueTransport implements BrokerTransport {
       );
       throw error;
     }
-    log.debug(`Requête envoyée au broker : ${msg.type} (${id})`);
+    log.debug(`Request sent to broker: ${msg.type} (${id})`);
 
     return promise;
   }

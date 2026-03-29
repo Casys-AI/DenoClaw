@@ -40,7 +40,7 @@ export async function choose(
     console.log(`  ${i + 1}. ${options[i]}`);
   }
 
-  const answer = await ask("Choix (numéro)");
+  const answer = await ask("Choice (number)");
   const idx = parseInt(answer) - 1;
 
   if (idx >= 0 && idx < options.length) return options[idx];

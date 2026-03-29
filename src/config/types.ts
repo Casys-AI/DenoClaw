@@ -1,5 +1,5 @@
 /**
- * Config aggregate — assemble les sub-configs de chaque bounded context.
+ * Config aggregate — assembles the sub-configs for each bounded context.
  */
 
 import type { AgentsConfig, ToolsConfig } from "../agent/types.ts";

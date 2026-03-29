@@ -39,7 +39,7 @@ export abstract class BaseChannel {
     if (!allowFrom?.length) return true;
     const ok = allowFrom.includes(userId);
     if (!ok) {
-      log.warn(`Utilisateur non autorisé : ${userId} sur ${this.channelType}`);
+      log.warn(`Unauthorized user: ${userId} on ${this.channelType}`);
     }
     return ok;
   }

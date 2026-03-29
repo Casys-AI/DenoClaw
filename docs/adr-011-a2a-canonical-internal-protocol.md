@@ -1,180 +1,175 @@
-# ADR-011 : A2A comme contrat canonique interne et externe
+# ADR-011: A2A as the Canonical Internal and External Contract
 
-**Statut :** Accepté **Date :** 2026-03-28
+**Status:** Accepted **Date:** 2026-03-28
 
-## Contexte
+## Context
 
-Le dépôt a déjà la bonne intuition architecturale :
+The repository already has the right architectural intuition:
 
-- **A2A** décrit le travail entre agents
-- le **worker protocol** coordonne le runtime local
-- **KV** persiste l'état et les traces
+- **A2A** describes agent work
+- the **worker protocol** coordinates local runtime behavior
+- **KV** persists state and traces
 
-Le problème restant est plus subtil : plusieurs chemins broker↔agent et
-worker↔broker transportent encore des enveloppes custom qui ressemblent à un
-second modèle de tâche. Cela crée deux récits concurrents pour le même système :
+The remaining problem is subtler: several broker↔agent and worker↔broker paths
+still carry custom envelopes that behave like a second task model. That creates
+two competing narratives for the same system:
 
-1. un récit A2A pour le réseau et la documentation
-2. un récit custom broker/worker pour l'exécution locale
+1. an A2A narrative for network transport and documentation
+2. a custom broker/worker narrative for local execution
 
-Cette ambiguïté complique les invariants de lifecycle, la gestion des pauses
-humaines, la traçabilité et les migrations de transport.
+That ambiguity makes lifecycle invariants, human pauses, traceability, and
+transport migration harder than they need to be.
 
-## Décision
+## Decision
 
-**A2A devient le contrat canonique unique pour toute représentation du travail
-agentique, en interne comme en externe.**
+**A2A becomes the single canonical contract for representing agent work, both
+internally and externally.**
 
-Concrètement :
+Concretely:
 
-- le **task intent** appartient à A2A
-- le **task lifecycle** appartient à A2A
-- les **artifacts** appartiennent à A2A
-- la **continuation** et la **cancellation** appartiennent à A2A
-- les **pauses sur entrée humaine** appartiennent au lifecycle A2A
+- **task intent** belongs to A2A
+- **task lifecycle** belongs to A2A
+- **artifacts** belong to A2A
+- **continuation** and **cancellation** belong to A2A
+- **human-input pauses** belong to the A2A lifecycle
 
-Le **worker protocol** est conservé, mais réduit strictement aux préoccupations
-d'infrastructure et de runtime :
+The **worker protocol** stays, but is reduced strictly to infrastructure and
+runtime concerns:
 
 - `init`
 - `ready`
 - `shutdown`
-- transport des demandes d'approbation / reprise
-- coordination d'exécution bas niveau
-- hooks d'observabilité éventuellement nécessaires
+- transport of approval / resume requests
+- low-level execution coordination
+- any observability hooks that are still required
 
-Il ne constitue plus un second contrat de tâche.
+It is no longer allowed to act as a second task contract.
 
-## Règles normatives
+## Normative rules
 
-### 1. Un seul modèle de tâche
+### 1. One task model only
 
-Toute unité de travail agentique doit pouvoir être décrite par une tâche A2A,
-qu'elle soit exécutée :
+Every unit of agent work must be representable as an A2A task, whether it runs:
 
-- localement via `postMessage`
-- à distance via HTTP
-- en streaming via SSE
+- locally through `postMessage`
+- remotely over HTTP
+- in streaming form over SSE
 
-Le transport peut varier. La sémantique de tâche, non.
+The transport may vary. Task semantics may not.
 
-### 2. Même lifecycle en local et sur le réseau
+### 2. Same lifecycle locally and over the network
 
-Les transitions canoniques vivent dans le modèle A2A, pas dans une enveloppe
-locale spécifique.
+Canonical transitions live in the A2A model, not in a local-only wrapper.
 
-La phrase à conserver partout est :
+The sentence that should remain true everywhere is:
 
 > **A2A over transport X, persisted in KV, correlated by task/context ids.**
 
-Exemples :
+Examples:
 
-- **Local** : A2A over `postMessage`, persisted in KV, correlated by
+- **Local:** A2A over `postMessage`, persisted in KV, correlated by
   task/context ids.
-- **Deploy** : A2A over HTTP + SSE, persisted in KV, correlated by task/context
+- **Deploy:** A2A over HTTP + SSE, persisted in KV, correlated by task/context
   ids.
 
-### 3. Les pauses humaines sont visibles dans l'état canonique
+### 3. Human pauses are visible in canonical state
 
-Les approbations, confirmations et clarifications peuvent être transportées par
-le worker protocol, mais leur effet doit toujours être visible dans l'état A2A :
+Approvals, confirmations, and clarifications may travel through the worker
+protocol, but their effect must always be reflected in A2A state:
 
-- `INPUT_REQUIRED` quand une entrée humaine est attendue
-- `WORKING` lors de la reprise
-- `REJECTED` quand le refus relève d'un refus humain ou d'une décision de
-  policy, et non d'une panne d'exécution
+- `INPUT_REQUIRED` when the task is waiting for human input
+- `WORKING` when it resumes
+- `REJECTED` when the outcome is a human or policy denial rather than an
+  execution failure
 
-Le type d'entrée attendue doit être représenté dans des métadonnées structurées
-et lisibles machine.
+The specific awaited-input type must be represented in structured,
+machine-readable metadata.
 
-### 4. KV est du stockage durable, pas un transport magique
+### 4. KV is durable storage, not magical transport
 
-Deno KV reste la couche durable pour :
+Deno KV remains the durable layer for:
 
-- état de tâche
-- historique
+- task state
+- history
 - artifacts
 - traces
-- corrélation
+- correlation
 - idempotence
-- checkpoints et leases si nécessaire
+- checkpoints and leases when needed
 
-**KV Queue n'est pas le modèle canonique broker↔agent.** S'il existe, ce n'est
-qu'un détail d'implémentation local ou interne au broker.
+**KV Queue is not the canonical broker↔agent model.** If it exists at all, it
+is only a local or broker-internal implementation detail.
 
-### 5. Le modèle mental n'est plus RPC-centrique
+### 5. The mental model is no longer RPC-centric
 
-Le système doit se penser en opérations de tâche :
+The system should be thought of in task operations:
 
 - submit task
 - stream or poll task
 - continue task
 - cancel task
-- finish in terminal state
+- finish in a terminal state
 
-Un fast path synchrone reste une optimisation, pas le contrat central.
+A synchronous fast path is still an optimization, not the core contract.
 
-## Comparatif des responsabilités
+## Responsibility comparison
 
-| Sujet                         | Canonique                                   | Notes                                                                      |
-| ----------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
-| canonical task contract       | **A2A Task / Message / Artifact lifecycle** | Source unique de vérité pour le travail agentique                          |
-| runtime/infra protocol        | **worker protocol interne**                 | `init`, `ready`, `shutdown`, approval transport, wiring bas niveau         |
-| storage layer                 | **Deno KV**                                 | Persistance, traces, idempotence, historique                               |
-| local transport               | **`postMessage` / worker bridge**           | A2A over transport local, persisted in KV, correlated by task/context ids  |
-| network transport             | **HTTP + SSE**                              | A2A over transport réseau, persisted in KV, correlated by task/context ids |
-| observability correlation ids | **`taskId` + `contextId`**                  | Corrèlent broker, worker, agent, artifacts et traces                       |
+| Topic                        | Canonical                                  | Notes                                                                      |
+| ---------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| canonical task contract      | **A2A Task / Message / Artifact lifecycle** | Single source of truth for agent work                                      |
+| runtime/infra protocol       | **internal worker protocol**               | `init`, `ready`, `shutdown`, approval transport, low-level wiring          |
+| storage layer                | **Deno KV**                                | Persistence, traces, idempotence, history                                  |
+| local transport              | **`postMessage` / worker bridge**          | A2A over local transport, persisted in KV, correlated by task/context ids  |
+| network transport            | **HTTP + SSE**                             | A2A over network transport, persisted in KV, correlated by task/context ids |
+| observability correlation ids | **`taskId` + `contextId`**                | Correlate broker, worker, agent, artifacts, and traces                     |
 
-## Notes d'implémentation
+## Implementation notes
 
-### Approbation atomique TOCTOU-safe
+### Atomic TOCTOU-safe approval grants
 
-Les grants d'approbation humaine sont scopés à la commande exacte + binaire
-exact, stockés dans le record `pendingResumes` de la métadonnée broker de la
-tâche. Chaque grant est consommé atomiquement via `kv.atomic().check().set()` —
-une seule exécution peut consommer un grant donné. Cela empêche les races entre
-deux demandes d'approbation simultanées sur la même tâche (le wildcard `"*"`
-couvre le cas d'un grant global, le grant exact par commande est vérifié en
-premier).
+Human approval grants are scoped to the exact command + exact binary and stored
+inside the task's broker metadata record under `pendingResumes`. Each grant is
+consumed atomically through `kv.atomic().check().set()`, so only one execution
+can use a given grant. That prevents races between two simultaneous approval
+requests for the same task. The wildcard `"*"` covers a global grant, while the
+exact command-level grant is checked first.
 
-## Conséquences
+## Consequences
 
-### Positives
+### Positive
 
-- une seule histoire cohérente pour le runtime
-- invariants de lifecycle centralisés
-- pauses humaines visibles dans l'état réel des tâches
-- meilleure portabilité entre local et deploy
-- migration des transports sans duplication du modèle de tâche
+- one coherent story for the runtime
+- lifecycle invariants become centralized
+- human pauses are visible in real task state
+- better portability between local and deploy modes
+- transport migration no longer duplicates the task model
 
-### Négatives / coûts
+### Negative / cost
 
-- il faut garder temporairement des bridges de compatibilité
-- certains types/messages internes devront être reclassifiés comme infra-only
-- la documentation existante doit être durcie pour ne plus suggérer un contrat
-  parallèle
+- compatibility bridges have to remain temporarily
+- some internal types/messages must be reclassified as infra-only
+- existing docs need to be tightened so they stop implying a parallel contract
 
-## Ce que cette ADR n'implique pas
+## What this ADR does not imply
 
-Cette ADR :
+This ADR:
 
-- **ne supprime pas** les Workers ou subprocess locaux
-- **ne supprime pas** le worker protocol
-- **n'impose pas** d'exposer du JSON-RPC brut à tous les callsites internes
-- **ne retire pas** KV de la persistance
+- **does not remove** local Workers or subprocesses
+- **does not remove** the worker protocol
+- **does not require** raw JSON-RPC objects at every internal callsite
+- **does not remove** KV from persistence
 
-Elle impose seulement une frontière stricte :
+It only enforces a strict boundary:
 
-- **A2A = contrat de tâche**
-- **worker protocol = plomberie runtime**
-- **KV = stockage durable**
+- **A2A = task contract**
+- **worker protocol = runtime plumbing**
+- **KV = durable storage**
 
-## Statut de migration
+## Migration status
 
-Jusqu'à suppression complète des bridges temporaires, tout message interne qui
-ressemble à une tâche doit être évalué selon une question simple :
+Until the compatibility bridges are completely removed, any internal message
+that looks like a task should be evaluated with one question:
 
-> Est-ce de la sémantique de travail agentique ? Si oui, cela appartient à A2A.
+> Is this agent-work semantics? If yes, it belongs to A2A.
 
-Si la réponse est non, cela peut rester dans le worker protocol comme détail de
-runtime.
+If the answer is no, it may stay in the worker protocol as a runtime detail.

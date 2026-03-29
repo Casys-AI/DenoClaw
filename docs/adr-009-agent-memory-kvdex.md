@@ -1,49 +1,47 @@
-# ADR-009 : Mémoire agents — KV conversations + Markdown long-terme
+# ADR-009: Agent Memory — KV Conversations + Long-Term Markdown
 
-**Statut :** En cours **Date :** 2026-03-27 **Dernière mise à jour :**
-2026-03-27
+**Status:** In progress **Date:** 2026-03-27 **Last updated:** 2026-03-27
 
-## Contexte
+## Context
 
-La mémoire des agents DenoClaw était un blob unique `Message[]` dans Deno KV.
-Pas d'indexation, pas de recherche, pas de long-terme, pas d'interface DDD. Le
-refactoring workspace agents est l'occasion de restructurer la mémoire.
+DenoClaw agent memory used to be one `Message[]` blob in Deno KV. There was no
+indexing, no search, no long-term memory, and no DDD interface. The agent
+workspace refactor is the right moment to restructure memory.
 
-Après exploration approfondie de l'écosystème (kvdex, denodata, kv-toolbox,
-Serena, OpenClaw, NanoClaw, PicoClaw, Mem0, Zep, Letta, CrewAI), la décision est
-un **modèle dual** :
+After a broad survey of the ecosystem (kvdex, denodata, kv-toolbox, Serena,
+OpenClaw, NanoClaw, PicoClaw, Mem0, Zep, Letta, CrewAI), the decision is a
+**dual model**:
 
-- **Court-terme (conversations)** → KV structuré via kvdex
-- **Long-terme (connaissances)** → Fichiers Markdown (pattern
-  OpenClaw/Serena/NanoClaw)
+- **Short-term (conversations)** → structured KV through kvdex
+- **Long-term (knowledge)** → Markdown files
+  (OpenClaw/Serena/NanoClaw pattern)
 
-## Décision
+## Decision
 
-### Court-terme : kvdex pour les conversations ✅ IMPLÉMENTÉ
+### Short-term: kvdex for conversations ✅ IMPLEMENTED
 
-kvdex (`@olli/kvdex@^3`) structure les conversations dans le KV privé de chaque
-agent :
+kvdex (`@olli/kvdex@^3`) structures conversations in each agent's private KV:
 
-- Collections typées avec index secondaire `sessionId`
-- Tri par `seq`, trim à `maxMessages` (garde les system messages)
-- Cache in-memory synchrone pour `getMessages()` (hot path du loop)
-- Compression/segmentation automatique (dépasse la limite 64KB)
-- `MemoryPort` interface DDD — le loop dépend de l'interface, pas du concret
+- Typed collections with secondary `sessionId` index
+- Sorted by `seq`, trimmed to `maxMessages` while preserving system messages
+- Synchronous in-memory cache for `getMessages()` on the loop hot path
+- Automatic compression/segmentation when exceeding the 64 KB limit
+- `MemoryPort` DDD interface, so the loop depends on the interface, not the implementation
 
-**Pourquoi kvdex et pas raw KV :** les conversations sont des données
-structurées (session × seq × role) qui bénéficient de l'indexation secondaire et
-de la compression. kvdex ajoute peu de surface et beaucoup de valeur ici.
+**Why kvdex instead of raw KV:** conversations are structured data
+(session × seq × role) and benefit directly from secondary indexes and
+compression. kvdex adds little surface area and high value for this workload.
 
-### Long-terme : dual backend (fichiers local, KV sur Deploy) ⏳ À IMPLÉMENTER
+### Long-term: dual backend (files locally, KV in Deploy) ⏳ TO IMPLEMENT
 
-Chaque agent a un dossier `memories/` dans son workspace :
+Each agent has a `memories/` directory inside its workspace:
 
 ```
 ./data/agents/alice/          ← project-level (ADR-012)
   agent.json                  ← config
   soul.md                     ← system prompt
   skills/                     ← skills .md
-  memories/                   ← connaissances long-terme (.md)
+  memories/                   ← long-term knowledge (.md)
     project.md
     user_preferences.md
     learned_patterns.md
@@ -52,205 +50,199 @@ Chaque agent a un dossier `memories/` dans son workspace :
   memory.db                   ← KV conversations (kvdex)
 ```
 
-**Dual backend selon l'environnement :**
+**Dual backend by environment:**
 
-| Environnement | Backend | Source of truth |
-|---------------|---------|-----------------|
-| Local (dev/VPS) | Fichiers .md (`data/agents/<id>/memories/`) | Filesystem |
-| Deploy (agents déployés) | KV (`["memories", agentId, filename]`) | KV |
+| Environment      | Backend                                  | Source of truth |
+| ---------------- | ---------------------------------------- | --------------- |
+| Local (dev/VPS)  | `.md` files (`data/agents/<id>/memories/`) | Filesystem      |
+| Deploy (deployed agents) | KV (`["memories", agentId, filename]`) | KV              |
 
-En local, les .md sont git-friendly, éditables, reviewables en PR. Sur Deploy,
-pas de filesystem — tout est en KV. Le contenu est identique (du markdown),
-seul le storage change.
+Locally, the `.md` files are git-friendly, editable, and reviewable in PRs. On
+Deploy there is no filesystem, so everything lives in KV. The content remains
+the same Markdown; only the storage layer changes.
 
-**Sync au déploiement :** `deploy:agent` lit les .md locaux et les copie dans
-le KV de l'agent déployé. Soul.md et skills suivent le même pattern.
+**Sync on deployment:** `deploy:agent` reads local `.md` files and copies them
+into the deployed agent's KV. `soul.md` and `skills/` follow the same pattern.
 
-**Pas de tool spécial.** L'agent utilise les tools fichier existants (`read_file`,
-`write_file`) pour lire/écrire ses memories — exactement comme Claude Code.
+**No special tool.** The agent uses the existing file tools (`read_file`,
+`write_file`) to read and write its memories, just like Claude Code.
 
-En local, les tools accèdent au filesystem réel. Sur Deploy, les tools détectent
-les chemins `memories/` et switchent sur un backend KV transparent. L'agent ne
-sait pas quel backend est utilisé.
+Locally, the tools access the real filesystem. On Deploy, the tools detect
+`memories/` paths and transparently switch to a KV-backed implementation. The
+agent does not know which backend is active.
 
 ```
-Agent: write_file("memories/user_prefs.md", "Préfère le français")
+Agent: write_file("memories/user_prefs.md", "Prefers French")
 → Local:  Deno.writeTextFile("data/agents/alice/memories/user_prefs.md", ...)
 → Deploy: kv.set(["workspace", "alice", "memories/user_prefs.md"], ...)
 ```
 
-**Au démarrage** : la liste des fichiers mémoire est injectée dans le system
-prompt pour que l'agent sache ce qu'il a mémorisé.
+**At startup:** the system prompt receives the list of memory files so the
+agent knows what it has already stored.
 
-## Pourquoi ce modèle dual
+## Why this dual model
 
-### Pourquoi KV pour le court-terme
+### Why KV for short-term memory
 
-- Les conversations sont des séquences ordonnées de messages — un cas d'usage
-  classique KV
-- Le trim (window management) nécessite des opérations atomiques
-- Le cache synchrone est nécessaire pour le hot path du loop
-- Pas besoin qu'un humain lise les conversations brutes
-- Fonctionne sur Deno Deploy (pas de filesystem)
+- Conversations are ordered message sequences, a natural KV workload
+- Trimming the window requires atomic operations
+- A synchronous cache is necessary for the loop hot path
+- Humans do not need to read raw conversation storage
+- It works on Deno Deploy where no filesystem exists
 
-### Pourquoi Markdown pour le long-terme
+### Why Markdown for long-term memory
 
-- **Lisible par l'humain** — tu peux ouvrir `user_preferences.md` et corriger un
-  fact faux
-- **Git-friendly** — les memories se diffent, se commitent, se review
-- **Consolidation naturelle** — l'agent "résume" en réécrivant un paragraphe,
-  pas besoin de système bi-temporal
-- **Pattern éprouvé** — OpenClaw (MEMORY.md + LanceDB), NanoClaw (CLAUDE.md par
-  groupe), Serena (.serena/memories/), Claude Code (memory/)
-- **Pas d'éviction automatique** — le long-terme ne s'efface jamais seul, c'est
-  l'agent ou l'humain qui décide
-- **Extensible** — on peut ajouter du vector search par-dessus les .md plus tard
+- **Human-readable** — you can open `user_preferences.md` and fix a wrong fact
+- **Git-friendly** — memories diff cleanly, can be committed, and can be reviewed
+- **Natural consolidation** — the agent can summarize by rewriting a paragraph
+  instead of requiring a bi-temporal fact system
+- **Established pattern** — OpenClaw (`MEMORY.md` + `memory/YYYY-MM-DD.md`),
+  NanoClaw (`CLAUDE.md` per group), Serena (`.serena/memories/`), Claude Code (`memory/`)
+- **No automatic eviction** — long-term memory should not disappear by itself
+- **Extensible** — vector search can be layered on top later
   (embeddings, memsearch, LanceDB)
 
-### Pourquoi pas tout en KV
+### Why not put everything in KV
 
-L'exploration a montré que stocker des connaissances long-terme dans KV pose des
-problèmes fondamentaux :
+The exploration showed that long-term knowledge in KV creates fundamental
+problems:
 
-- **Opaque** — un `.db` SQLite n'est pas lisible/éditable par l'humain
-- **Pas de consolidation naturelle** — il faut inventer un système bi-temporal
-  (FactRecord, status superseded/consolidated, versionstamp CAS) pour ce que le
-  Markdown fait naturellement
-- **Croissance non bornée** — sans mécanisme de compaction, les facts
-  s'accumulent. kvdex n'a pas de pruning built-in
-- **Pas git-friendly** — impossible de review les connaissances d'un agent dans
-  un PR
+- **Opaque** — a SQLite `.db` is not human-readable or editable
+- **No natural consolidation** — you end up designing a bi-temporal system
+  (FactRecord, superseded/consolidated states, versionstamp CAS) for something
+  Markdown already handles naturally
+- **Unbounded growth** — without compaction, facts accumulate; kvdex does not
+  provide built-in pruning
+- **Not git-friendly** — you cannot review an agent's knowledge in a PR
 
-### Pourquoi pas tout en Markdown
+### Why not put everything in Markdown
 
-Les conversations ne sont pas adaptées au format fichier :
+Conversations do not fit file storage well:
 
-- Volume élevé (centaines de messages par session)
-- Besoin de trim atomique et de pagination
-- Pas besoin de lisibilité humaine pour les messages bruts
-- Sur Deno Deploy, pas de filesystem → KV obligatoire
+- High volume (hundreds of messages per session)
+- Need for atomic trimming and pagination
+- No need for humans to read raw conversation logs
+- Deno Deploy has no filesystem, so KV is mandatory
 
-## Options évaluées et rejetées
+## Evaluated and rejected options
 
 ### denodata
 
-50+ opérateurs de recherche intéressants, mais **projet abandonné** (dernier
-commit sept 2023, v0.0.28-beta, 15 stars). TTL lazy (cleanup au read seulement).
-API incompatible Deno 2.x. **Rejeté.**
+Interesting 50+ search operators, but the project is **abandoned** (last commit
+September 2023, v0.0.28-beta, 15 stars). TTL cleanup is lazy, only on read. The
+API is incompatible with Deno 2.x. **Rejected.**
 
 ### kv-toolbox
 
-Blobs > 64KB, chiffrement, batched atomics. **Complémentaire** — peut être
-ajouté plus tard pour le chiffrement at-rest ou les gros artefacts. Pas
-nécessaire pour la mémoire conversationnelle ou long-terme.
+Supports blobs larger than 64 KB, encryption, and batched atomics.
+**Complementary**. It can be added later for at-rest encryption or large
+artifacts, but it is unnecessary for conversation or long-term memory today.
 
-### Tout en kvdex (long-terme dans KV)
+### Everything in kvdex (long-term memory in KV)
 
-Implémenté puis remis en question. kvdex supporte `expireIn` (TTL natif Deno KV)
-et `count()`, mais :
+This was implemented and then reconsidered. kvdex supports `expireIn` (native
+Deno KV TTL) and `count()`, but:
 
-- Pas de compaction/consolidation built-in
-- Pas de déduplication
-- Les facts dans KV sont opaques (pas éditables par l'humain)
-- Le pattern n'est utilisé par aucun framework agent sérieux
+- No built-in compaction or consolidation
+- No deduplication
+- Facts in KV stay opaque to humans
+- No serious agent framework uses this pattern
 
-### Raw KV bi-temporal (FactRecord, versionstamp CAS)
+### Raw bi-temporal KV (FactRecord, versionstamp CAS)
 
-Exploré en profondeur : clés ordonnées `["facts", agentId, topic, timestampMs]`,
-index actif/par-id/par-tx, consolidation atomique via `kv.atomic().check()`.
-Techniquement correct mais **sur-engineeré** pour le besoin réel. Un fichier
-`project.md` que l'agent édite fait le même travail en 10x moins de code.
+Explored in depth using ordered keys
+`["facts", agentId, topic, timestampMs]`, active/by-id/by-tx indexes, and
+atomic consolidation through `kv.atomic().check()`. Technically correct, but
+**over-engineered** for the actual need. A single `project.md` file edited by
+the agent does the same job with 10x less code.
 
-### Recherche symbolique (SWC / LSP)
+### Symbolic search (SWC / LSP)
 
-Deno a `deno_ast` (parser SWC en Rust), exposé en WASM via `@jsz/swc` et
-`@deco/deno-ast-wasm` sur JSR. Parse TypeScript/JavaScript uniquement (pas
-multi-langage comme Serena qui utilise multilspy + 40 LSP). **Pertinent pour un
-futur tool `code_analyze`**, pas pour la mémoire long-terme. Noté pour plus
-tard.
+Deno has `deno_ast` (Rust SWC parser), exposed in WASM through `@jsz/swc` and
+`@deco/deno-ast-wasm` on JSR. It parses TypeScript and JavaScript only, unlike
+Serena's multi-language LSP approach. **Relevant for a future `code_analyze`
+tool, not for long-term memory.**
 
-## Recherche : patterns mémoire dans l'écosystème
+## Research: memory patterns in the ecosystem
 
-### Frameworks agents — comment ils gèrent la mémoire
+### Agent frameworks — how they handle memory
 
-| Framework        | Court-terme             | Long-terme                           | Recherche                                         | Consolidation                               |
+| Framework        | Short-term              | Long-term                            | Search                                            | Consolidation                               |
 | ---------------- | ----------------------- | ------------------------------------ | ------------------------------------------------- | ------------------------------------------- |
-| **OpenClaw**     | Messages en contexte    | `MEMORY.md` + `memory/YYYY-MM-DD.md` | LanceDB semantic (memsearch)                      | Agent auto-écrit avant compaction contexte  |
-| **NanoClaw**     | SQLite messages         | `CLAUDE.md` par groupe               | —                                                 | Agent édite le .md                          |
-| **Serena**       | —                       | `.serena/memories/*.md`              | Liste + read                                      | Agent écrit/édite via tools                 |
-| **Letta/MemGPT** | Context window (RAM)    | Core blocks + Archival (vector DB)   | Embedding search                                  | Recursive summarization + sleep-time agents |
+| **OpenClaw**     | Messages in context     | `MEMORY.md` + `memory/YYYY-MM-DD.md` | LanceDB semantic search (`memsearch`)             | Agent auto-writes before context compaction |
+| **NanoClaw**     | SQLite messages         | `CLAUDE.md` per group                | —                                                 | Agent edits the `.md`                       |
+| **Serena**       | —                       | `.serena/memories/*.md`              | List + read                                       | Agent writes/edits through tools            |
+| **Letta/MemGPT** | Context window (RAM)    | Core blocks + archival (vector DB)   | Embedding search                                  | Recursive summarization + sleep-time agents |
 | **CrewAI**       | RAG short-term          | LanceDB + SQLite                     | Composite score (semantic × recency × importance) | LLM-assisted dedup (cosine > 0.85)          |
 | **Mem0**         | —                       | Vector store + knowledge graph       | Hybrid vector + graph                             | LLM-as-router (ADD/UPDATE/DELETE/NOOP)      |
 | **Zep/Graphiti** | Episodes (raw messages) | Bi-temporal knowledge graph          | Vector + BM25 + graph traversal                   | Edge dedup + community summaries            |
 
-### Convergences observées (2025-2026)
+### Observed convergence (2025-2026)
 
-1. **Mémoire tiered** — tout le monde sépare court-terme (structuré/DB) et
-   long-terme (documents/fichiers)
-2. **Markdown comme source of truth** — OpenClaw, NanoClaw, Serena, Claude Code
-   utilisent tous des .md
-3. **Vector search comme couche additionnelle** — ajouté par-dessus les
-   documents, pas comme storage primaire
-4. **Pas de hard-delete sur le long-terme** — soft decay (Zep bi-temporal,
-   CrewAI half-life) ou edit explicite
-5. **Sleep-time consolidation** — Letta, Google, Claude Code font de la
-   maintenance mémoire en idle
-6. **LLM-as-memory-router** — Mem0 pattern (l'agent décide ADD/UPDATE/DELETE) se
-   répand
+1. **Tiered memory** — everyone separates short-term (structured/DB) from
+   long-term (documents/files)
+2. **Markdown as source of truth** — OpenClaw, NanoClaw, Serena, and Claude
+   Code all use `.md`
+3. **Vector search as an additional layer** — added on top of documents, not as
+   the primary storage layer
+4. **No hard delete for long-term memory** — either soft decay or explicit edit
+5. **Sleep-time consolidation** — Letta, Google, and Claude Code all perform
+   memory maintenance while idle
+6. **LLM-as-memory-router** — the Mem0 pattern (the agent chooses
+   ADD/UPDATE/DELETE) is spreading
 
-### Primitives Deno pertinentes pour le futur
+### Relevant Deno primitives for later
 
-| Primitive                          | Usage potentiel                                          |
-| ---------------------------------- | -------------------------------------------------------- |
-| `Deno.cron()`                      | Sleep-time consolidation (background memory maintenance). Note: `kv.enqueue()` is deprecated on new Deploy — use cron directly. |
-| `kv.watch()`                       | Cross-agent memory events (max 10 clés, sentinels)       |
-| `.sum()` / `.max()` (atomics CRDT) | Compteurs de facts sans lock                             |
-| `@jsz/swc` / `@deco/deno-ast-wasm` | Futur tool code_analyze (parse TS AST en WASM)           |
-| `kv-toolbox` blob + crypto         | Futur chiffrement at-rest, artefacts > 64KB              |
+| Primitive                          | Potential use                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `Deno.cron()`                      | Sleep-time consolidation (background memory maintenance). Note: `kv.enqueue()` is deprecated on new Deploy, so use cron directly. |
+| `kv.watch()`                       | Cross-agent memory events (max 10 keys, sentinels)                            |
+| `.sum()` / `.max()` (atomics CRDT) | Fact counters without locks                                                   |
+| `@jsz/swc` / `@deco/deno-ast-wasm` | Future `code_analyze` tool (parse TS AST in WASM)                             |
+| `kv-toolbox` blob + crypto         | Future at-rest encryption, artifacts > 64 KB                                  |
 
-## État actuel de l'implémentation
+## Current implementation state
 
-### ✅ Fait
+### ✅ Done
 
-- `MemoryPort` interface DDD (`src/agent/memory_port.ts`)
-- `KvdexMemory` adapter pour conversations (`src/agent/memory_kvdex.ts`)
+- `MemoryPort` DDD interface (`src/agent/memory_port.ts`)
+- `KvdexMemory` adapter for conversations (`src/agent/memory_kvdex.ts`)
 - `Memory implements MemoryPort` fallback (`src/agent/memory.ts`)
-- `WorkspaceLoader` CRUD workspaces (`src/agent/workspace.ts`)
-- `MemoryTool` KV-backed avec 4 actions (`src/agent/tools/memory.ts`)
-- Topics injectés dans le system prompt (`src/agent/context.ts`, `loop.ts`)
-- CLI workspace-backed (`src/cli/agents.ts`)
-- Config merge workspace + registry (`src/config/loader.ts`)
-- Helpers `getAgent*()` + `validateAgentId()` (`src/shared/helpers.ts`)
-- Runtime unifié avec MemoryPort (`src/agent/runtime.ts`)
-- Worker wiring KvdexMemory + ensureDir (`worker_entrypoint.ts`,
+- `WorkspaceLoader` workspace CRUD (`src/agent/workspace.ts`)
+- `MemoryTool` KV-backed with 4 actions (`src/agent/tools/memory.ts`)
+- Topics injected into the system prompt (`src/agent/context.ts`, `loop.ts`)
+- Workspace-backed CLI (`src/cli/agents.ts`)
+- Workspace + registry config merge (`src/config/loader.ts`)
+- `getAgent*()` + `validateAgentId()` helpers (`src/shared/helpers.ts`)
+- Unified runtime with `MemoryPort` (`src/agent/runtime.ts`)
+- Worker wiring for `KvdexMemory` + `ensureDir` (`worker_entrypoint.ts`,
   `worker_pool.ts`)
-- 95 tests passent, type-check OK, lint clean
+- 95 tests pass, type-check passes, lint clean
 
-### ⏳ À faire — Mémoire long-terme via tools fichier
+### ⏳ To do — long-term memory through file tools
 
-1. `WorkspaceLoader.create()` crée `memories/` dans `data/agents/<id>/`
-2. `read_file` / `write_file` tools : détecter les chemins `memories/` et router
-   vers le filesystem (local) ou KV (Deploy) transparently
-3. Adapter `context.ts` : injecter la liste des fichiers mémoire dans le prompt
-4. `deploy:agent` sync les .md locaux vers KV au moment du déploiement
-5. Tests du routing filesystem/KV dans les tools fichier
+1. `WorkspaceLoader.create()` creates `memories/` under `data/agents/<id>/`
+2. `read_file` / `write_file` tools detect `memories/` paths and transparently
+   route to the filesystem (local) or KV (Deploy)
+3. Update `context.ts` to inject the list of memory files into the prompt
+4. `deploy:agent` syncs local `.md` files into KV at deployment time
+5. Add tests for filesystem/KV routing in the file tools
 
-### 🔮 Futur (hors scope)
+### 🔮 Future (out of scope)
 
-- Semantic search sur les .md (embeddings, memsearch, LanceDB)
+- Semantic search on `.md` files (embeddings, memsearch, LanceDB)
 - Sleep-time consolidation via `Deno.cron()` + `kv.enqueue()`
-- Cross-agent memory events via `kv.watch()` sentinels sur shared KV
-- Tool `code_analyze` basé sur SWC WASM (`@jsz/swc`)
-- Chiffrement mémoire via `kv-toolbox` crypto
-- Onboarding auto (Serena pattern — l'agent analyse le projet au premier
-  lancement)
+- Cross-agent memory events through `kv.watch()` sentinels on shared KV
+- `code_analyze` tool built on SWC WASM (`@jsz/swc`)
+- Memory encryption through `kv-toolbox` crypto
+- Automatic onboarding (Serena pattern: the agent analyzes the project on first launch)
 
-## Conséquences
+## Consequences
 
-- La mémoire long-terme est lisible, éditable, et git-friendly
-- Le modèle dual (KV + .md) couvre les deux usages sans sur-engineering
-- L'architecture est extensible vers le vector search sans refonte
-- Compatible local (filesystem) et Deploy (KV backend derrière les mêmes tools)
-- `deploy:agent` sync workspace local → KV distant (soul.md, skills, memories)
-- Pas de tool spécial pour les memories — `read_file`/`write_file` suffisent
-- Pattern Claude Code : l'agent gère ses memories comme des fichiers
+- Long-term memory becomes readable, editable, and git-friendly
+- The dual model (KV + `.md`) covers both use cases without over-engineering
+- The architecture can grow into vector search without a storage rewrite
+- Compatible with local mode (filesystem) and Deploy (KV behind the same tools)
+- `deploy:agent` syncs local workspace → remote KV (`soul.md`, `skills/`, `memories/`)
+- No special memory tool is required; `read_file` / `write_file` are enough
+- Follows the Claude Code pattern: the agent manages its memories as files

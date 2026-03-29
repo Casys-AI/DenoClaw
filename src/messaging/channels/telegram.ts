@@ -4,8 +4,8 @@ import { generateId } from "../../shared/helpers.ts";
 import { log } from "../../shared/log.ts";
 
 /**
- * Telegram channel — pure fetch(), zéro dépendance npm.
- * Utilise le long polling de l'API Bot Telegram.
+ * Telegram channel — pure fetch(), zero npm dependencies.
+ * Uses Telegram Bot API long polling.
  */
 export class TelegramChannel extends BaseChannel {
   private config: TelegramConfig;
@@ -24,27 +24,27 @@ export class TelegramChannel extends BaseChannel {
 
   async initialize(): Promise<void> {
     if (!this.config.token) {
-      log.warn("Telegram: pas de token configuré");
+      log.warn("Telegram: no token configured");
       return;
     }
 
-    // Vérifier que le token est valide
+    // Verify that the token is valid
     const res = await fetch(`${this.baseUrl}/getMe`);
     if (!res.ok) {
       const text = await res.text();
-      log.error(`Telegram: token invalide — ${text}`);
+      log.error(`Telegram: invalid token — ${text}`);
       this.enabled = false;
       return;
     }
 
     const data = await res.json() as { result: { username: string } };
-    log.info(`Telegram: connecté en tant que @${data.result.username}`);
+    log.info(`Telegram: connected as @${data.result.username}`);
   }
 
   async start(onMessage: OnMessage): Promise<void> {
     this.onMessage = onMessage;
     this.running = true;
-    log.info("Telegram: polling démarré");
+    log.info("Telegram: polling started");
 
     // Long polling loop
     while (this.running) {
@@ -55,7 +55,7 @@ export class TelegramChannel extends BaseChannel {
         }
       } catch (e) {
         if (this.running) {
-          log.error("Telegram: erreur polling", e);
+          log.error("Telegram: polling error", e);
           await new Promise((r) => setTimeout(r, 5000));
         }
       }
@@ -64,7 +64,7 @@ export class TelegramChannel extends BaseChannel {
 
   async stop(): Promise<void> {
     this.running = false;
-    log.info("Telegram: polling arrêté");
+    log.info("Telegram: polling stopped");
     await Promise.resolve();
   }
 
@@ -80,7 +80,7 @@ export class TelegramChannel extends BaseChannel {
     });
 
     if (!res.ok) {
-      // Retry sans Markdown si erreur de parsing
+      // Retry without Markdown if parsing fails
       const errBody = await res.text();
       if (errBody.includes("can't parse")) {
         await fetch(`${this.baseUrl}/sendMessage`, {
@@ -89,7 +89,7 @@ export class TelegramChannel extends BaseChannel {
           body: JSON.stringify({ chat_id: parseInt(userId), text: content }),
         });
       } else {
-        log.error(`Telegram: erreur envoi — ${errBody}`);
+        log.error(`Telegram: send error — ${errBody}`);
       }
     }
   }

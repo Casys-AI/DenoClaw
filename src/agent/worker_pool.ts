@@ -53,8 +53,8 @@ const INIT_TIMEOUT_MS = 30_000;
 const DATA_DIR = "./data";
 
 /**
- * WorkerPool — spawne et gère un Worker par agent.
- * Communication via postMessage (protocol typé WorkerRequest/WorkerResponse).
+ * WorkerPool — spawns and manages one Worker per agent.
+ * Communication uses postMessage (typed WorkerRequest/WorkerResponse protocol).
  */
 interface AgentMessagePending {
   fromAgent: string;
@@ -103,7 +103,7 @@ export class WorkerPool {
     }
 
     await Promise.all(readyPromises);
-    log.info(`WorkerPool démarré — ${this.agents.size} agent(s)`);
+    log.info(`WorkerPool started — ${this.agents.size} agent(s)`);
   }
 
   private spawnWorker(agentId: string): Promise<void> {
@@ -141,7 +141,7 @@ export class WorkerPool {
               this.handleWorkerMessage(agentId, ev.data);
             },
           );
-          log.info(`Worker ${agentId} prêt`);
+          log.info(`Worker ${agentId} ready`);
           this.callbacks.onWorkerReady?.(agentId);
           resolve();
         }
@@ -151,7 +151,7 @@ export class WorkerPool {
 
       worker.onerror = (e: ErrorEvent) => {
         clearTimeout(initTimer);
-        log.error(`Worker ${agentId} erreur: ${e.message}`);
+        log.error(`Worker ${agentId} error: ${e.message}`);
         e.preventDefault();
         if (!entry.ready) {
           worker.terminate();
@@ -204,7 +204,7 @@ export class WorkerPool {
             ),
           );
         } else {
-          log.error(`Worker erreur non corrélée: [${msg.code}] ${msg.message}`);
+          log.error(`Uncorrelated worker error: [${msg.code}] ${msg.message}`);
         }
         break;
       }
@@ -375,7 +375,7 @@ export class WorkerPool {
       try {
         entry.worker.terminate();
       } catch {
-        log.debug(`Worker ${agentId} déjà terminé`);
+        log.debug(`Worker ${agentId} already terminated`);
       }
       this.callbacks.onWorkerStopped?.(agentId);
     }
@@ -400,7 +400,7 @@ export class WorkerPool {
     this.agentPending.clear();
 
     this.agents.clear();
-    log.info("WorkerPool arrêté");
+    log.info("WorkerPool stopped");
   }
 
   /** Add an agent dynamically (hot-add, no restart needed). */
@@ -419,7 +419,7 @@ export class WorkerPool {
     await Deno.mkdir(DATA_DIR, { recursive: true });
     await ensureDir(getAgentRuntimeDir(agentId));
     await this.spawnWorker(agentId);
-    log.info(`Agent ajouté à chaud : ${agentId}`);
+    log.info(`Agent hot-added: ${agentId}`);
   }
 
   /** Remove an agent dynamically. */
@@ -434,7 +434,7 @@ export class WorkerPool {
       delete this.config.agents.registry[agentId];
     }
     this.callbacks.onWorkerStopped?.(agentId);
-    log.info(`Agent supprimé : ${agentId}`);
+    log.info(`Agent removed: ${agentId}`);
   }
 
   // ── Shared KV writes (observability, on behalf of Workers) ──

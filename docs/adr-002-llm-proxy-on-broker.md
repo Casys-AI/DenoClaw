@@ -1,142 +1,140 @@
-# ADR-002 : LLM Proxy centralisé sur le Broker — Clé API + OAuth
+# ADR-002: Centralized LLM Proxy on the Broker — API Key + OAuth
 
-**Statut :** Accepté **Date :** 2026-03-26
+**Status:** Accepted **Date:** 2026-03-26
 
-## Contexte
+## Context
 
-Les agents tournent en Subhosting (ADR-001). Ils appellent le Broker par HTTP
-pour tout : LLM, tools, A2A. Les Sandboxes (code execution) n'ont accès à aucun
-secret. Les LLM nécessitent une authentification — que ce soit des clés API
-(Anthropic, OpenAI) ou des tokens OAuth (flow navigateur, comme Claude CLI /
-Codex CLI).
+Agents run in Subhosting (ADR-001). They call the Broker over HTTP for
+everything: LLM, tools, A2A. Sandboxes (code execution) have access to no
+secret. LLMs require authentication, whether via API keys (Anthropic, OpenAI)
+or OAuth tokens (browser flow, like Claude CLI / Codex CLI).
 
-Les agents ne se parlent jamais directement (pas d'URL publique). Tout passe par
-le Broker. Le tunnel est le mesh réseau de DenoClaw — il connecte brokers,
-noeuds et machines, à la manière de Tailscale.
+Agents never talk to each other directly (no public URL). Everything flows
+through the Broker. The tunnel is DenoClaw's network mesh: it connects brokers,
+nodes, and machines, similar to Tailscale.
 
-## Décision
+## Decision
 
-**Le Broker (Deno Deploy) est le routeur central pour TOUT ce qui sort d'un
-agent** : calls LLM, exécution d'outils, et communication inter-agents. Le
-tunnel WebSocket est un primitif de premier ordre.
+**The Broker (Deno Deploy) is the central router for EVERYTHING leaving an
+agent**: LLM calls, tool execution, and inter-agent communication. The
+WebSocket tunnel is a first-class primitive.
 
-### Deux modes d'authentification LLM
+### Two LLM Authentication Modes
 
-Les deux modes font `fetch()` vers l'API LLM au final. Seule la méthode d'auth
-change.
+Both modes ultimately use `fetch()` to call the LLM API. Only the authentication
+method changes.
 
-**Mode Clé API** — pour les providers avec clé statique (Anthropic, OpenAI,
-DeepSeek, etc.)
+**API Key Mode** — for providers with static keys (Anthropic, OpenAI, DeepSeek,
+etc.)
 
-- Le broker détient les clés API (env vars Deploy ou GCP Secret Manager,
+- The broker holds the API keys (Deploy env vars or GCP Secret Manager,
   ADR-004)
-- L'agent demande une completion, le broker fait le `fetch()` avec la clé
+- The agent requests a completion, and the broker performs the `fetch()` with
+  the key
 
-**Mode OAuth** — authentification navigateur (même flow que Claude CLI / Codex
-CLI)
+**OAuth Mode** — browser authentication (same flow as Claude CLI / Codex CLI)
 
-- Le broker initie un flow OAuth/device code
-- Le tunnel route l'URL d'auth vers la machine locale → l'utilisateur se
-  connecte dans son navigateur (one-shot)
-- Le broker stocke le token OAuth (KV ou Secret Manager)
-- Les appels LLM suivants utilisent `fetch()` avec le token OAuth — comme le
-  mode clé API
+- The broker initiates an OAuth/device code flow
+- The tunnel routes the auth URL to the local machine → the user signs in in
+  their browser (one-shot)
+- The broker stores the OAuth token (KV or Secret Manager)
+- Subsequent LLM calls use `fetch()` with the OAuth token, just like API key
+  mode
 
-Les deux modes sont transparents pour l'agent — interface uniforme
-`broker.complete()`.
+Both modes are transparent to the agent through the uniform
+`broker.complete()` interface.
 
-## Flux — Appel LLM (identique pour les deux modes d'auth)
+## Flow — LLM Call (identical for both auth modes)
 
 ```
-Agent (Subhosting)               Broker (Deploy)              API LLM
+Agent (Subhosting)               Broker (Deploy)              LLM API
      │                                │                          │
      │  POST /llm { messages, model } │                          │
      ├──── HTTP (OIDC auth) ─────────►│                          │
-     │                                │  + injecte clé API       │
-     │                                │    ou token OAuth         │
+     │                                │  + injects API key       │
+     │                                │    or OAuth token        │
      │                                ├─── fetch() ─────────────►│
      │                                │◄── response ─────────────┤
      │◄── HTTP response ──────────────┤                          │
      │  { content, toolCalls }        │                          │
 ```
 
-L'agent ne sait pas quel mode d'auth est utilisé — interface uniforme
-`broker.complete()`.
+The agent does not know which auth mode is used — the `broker.complete()`
+interface stays uniform.
 
-## Auth initiale OAuth (one-shot)
+## Initial OAuth Auth (one-shot)
 
-Quand le Broker n'a pas de clé API et utilise le mode OAuth (même flow que
-Claude CLI / Codex CLI) :
+When the Broker has no API key and uses OAuth mode (the same flow as Claude CLI
+/ Codex CLI):
 
 ```
-Broker (Deploy)                           Machine locale (tunnel)
+Broker (Deploy)                           Local machine (tunnel)
      │                                          │
-     │  Besoin d'auth pour Anthropic            │
-     │  → génère un device code / URL OAuth     │
+     │  Anthropic auth needed                   │
+     │  → generates device code / OAuth URL     │
      │                                          │
-     ├──── tunnel : auth_request {url, code} ──►│
-     │                                    ouvre navigateur
-     │                                    user se connecte
-     │◄──── tunnel : token OAuth ───────────────┤
+     ├──── tunnel: auth_request {url, code} ───►│
+     │                                    opens browser
+     │                                    user signs in
+     │◄──── tunnel: OAuth token ────────────────┤
      │                                          │
-     │  Stocke le token (KV / Secret Manager)   │
-     │  fetch() avec token OAuth désormais      │
+     │  Stores token (KV / Secret Manager)      │
+     │  fetch() now uses OAuth token            │
 ```
 
-C'est un **one-shot** — le Broker stocke le token et l'utilise directement pour
-les `fetch()` suivants. Pas de `Deno.Command`, pas de CLI exécuté — juste le
-même flow d'auth que les CLIs utilisent.
+This is **one-shot** — the Broker stores the token and reuses it directly for
+later `fetch()` calls. No `Deno.Command`, no executed CLI, just the same auth
+flow used by CLIs.
 
-## Flux — Communication inter-agents (A2A)
+## Flow — Inter-Agent Communication (A2A)
 
 ```
 Agent A (Subhosting)             Broker (Deploy)              Agent B (Subhosting)
      │                                │                          │
      │  POST /agent { to:"b", ... }   │                          │
      ├──── HTTP (OIDC) ─────────────►│                          │
-     │                                │  vérifie permissions     │
+     │                                │  verifies permissions    │
      │                                ├──── HTTP POST ──────────►│
-     │                                │                          │ traite
+     │                                │                          │ handles request
      │                                │◄──── HTTP response ──────┤
      │◄── HTTP response ──────────────┤  { from:"agent-b", ... } │
 ```
 
-## Le tunnel est un primitif, pas un add-on
+## The Tunnel Is a Primitive, Not an Add-On
 
-Le tunnel WebSocket est le **mesh réseau** de DenoClaw — il connecte tout ce qui
-n'est pas sur la même instance Deploy. Comme Tailscale crée un réseau privé
-entre machines.
+The WebSocket tunnel is DenoClaw's **network mesh** — it connects everything
+that is not on the same Deploy instance. Like Tailscale, it creates a private
+network between machines.
 
-**Trois types de connexion tunnel :**
+**Three tunnel connection types:**
 
-| Type                | Relie                    | Usage                                                   |
+| Type                | Connects                 | Usage                                                   |
 | ------------------- | ------------------------ | ------------------------------------------------------- |
-| **Noeud → Broker**  | Machine/VPS/GPU → Broker | Outils distants (shell, FS, GPU), auth navigateur OAuth |
-| **Broker → Broker** | Instance A ↔ Instance B  | Fédération A2A cross-instance, routage inter-agents     |
-| **Local → Broker**  | Dev machine → Broker     | Outils locaux, auth flow, tests                         |
+| **Node → Broker**   | Machine/VPS/GPU → Broker | Remote tools (shell, FS, GPU), browser OAuth auth       |
+| **Broker → Broker** | Instance A ↔ Instance B  | Cross-instance A2A federation, inter-agent routing      |
+| **Local → Broker**  | Dev machine → Broker     | Local tools, auth flow, tests                           |
 
-Les **agents** ne sont jamais directement sur le tunnel — ils passent par leur
-Broker via HTTP. Le tunnel connecte les **composants d'infrastructure** entre
-eux.
+**Agents** are never directly on the tunnel — they go through their Broker over
+HTTP. The tunnel connects **infrastructure components** to each other.
 
 ```
-Instance A                    Instance B                    Machine locale
+Instance A                    Instance B                    Local machine
 ┌──────────┐                 ┌──────────┐                 ┌──────────┐
 │ Broker A │◄═══ tunnel ════►│ Broker B │                 │ denoclaw │
 │  agents  │                 │  agents  │                 │ tunnel   │
 └──────────┘                 └──────────┘                 └────┬─────┘
                                                                │
-                              VPS (noeud)                      │
+                              VPS (node)                       │
                              ┌──────────┐                      │
                              │GPU       │◄══ tunnel ═══════════╝
                              │Shell/FS  │
                              └──────────┘
 ```
 
-Chaque tunnel déclare ses capabilities :
+Each tunnel declares its capabilities:
 
 ```typescript
-// Noeud VPS avec outils
+// VPS node with tools
 {
   type: "local",
   tools: ["shell", "fs_read", "fs_write"],
@@ -146,10 +144,10 @@ Chaque tunnel déclare ses capabilities :
 // Broker B (inter-instance)
 {
   type: "instance",
-  agents: ["support", "billing"],  // agents routables via ce tunnel
+  agents: ["support", "billing"], // agents routable through this tunnel
 }
 
-// Dev machine locale
+// Local dev machine
 {
   type: "local",
   tools: ["shell", "fs_read", "fs_write"],
@@ -157,26 +155,25 @@ Chaque tunnel déclare ses capabilities :
 }
 ```
 
-## Justification
+## Rationale
 
-- **Zero secret dans les agents et Sandboxes** — les clés API et tokens OAuth
-  restent sur le Broker
-- **Interface uniforme pour l'agent** — `broker.complete({ messages, model })`
-  quel que soit le mode d'auth (clé API ou OAuth)
-- **Tracking de coûts** centralisé par agent / par utilisateur
-- **Rate limiting** centralisé
-- **Fallback chains** — provider A down → fallback sur provider B
-- **Cache** et **logs centralisés**
-- **Inter-agents** — le même broker qui route les LLM requests route aussi les
-  messages entre agents
+- **Zero secrets inside agents and Sandboxes** — API keys and OAuth tokens stay
+  on the Broker
+- **Uniform interface for the agent** — `broker.complete({ messages, model })`
+  regardless of auth mode (API key or OAuth)
+- **Centralized cost tracking** per agent / per user
+- **Centralized rate limiting**
+- **Fallback chains** — provider A down → fallback to provider B
+- **Centralized cache and logs**
+- **Inter-agent routing** — the same broker that routes LLM requests also routes
+  messages between agents
 
-## Conséquences
+## Consequences
 
-- Le broker est un single point of failure → mitigation : Deploy multi-région
-- Le broker doit maintenir un registre des tunnels actifs et de leurs
-  capabilities
-- Le broker stocke les tokens OAuth en KV (ou Secret Manager) — rotation
-  automatique possible
-- Les agents ont une interface unique : `broker.complete()` pour le LLM,
-  `broker.toolExec()` pour les outils, `broker.submitTask()` /
-  `broker.sendTextTask()` pour l'inter-agents
+- The broker is a single point of failure → mitigation: multi-region Deploy
+- The broker must maintain a registry of active tunnels and their capabilities
+- The broker stores OAuth tokens in KV (or Secret Manager), enabling automatic
+  rotation
+- Agents have a single interface: `broker.complete()` for LLM,
+  `broker.toolExec()` for tools, `broker.submitTask()` /
+  `broker.sendTextTask()` for inter-agent communication

@@ -73,7 +73,7 @@ Deno.test({
     const kv = await Deno.openKv();
     const auth = new AuthManager(kv);
 
-    const invite = await auth.generateInviteToken(); // pas de tunnelId
+    const invite = await auth.generateInviteToken(); // no tunnelId
     const result = await auth.verifyInviteToken(invite.token);
     assertEquals(result.ok, true);
     if (result.ok) {
@@ -192,7 +192,7 @@ Deno.test({
 Deno.test({
   name: "AuthManager checkRequest — local mode (no token configured)",
   async fn() {
-    // S'assurer qu'il n'y a pas de token en env pour ce test
+    // Make sure there is no token in the environment for this test
     const prev = Deno.env.get("DENOCLAW_API_TOKEN");
     Deno.env.delete("DENOCLAW_API_TOKEN");
 
@@ -206,7 +206,7 @@ Deno.test({
       assertEquals(result.identity, "local");
     }
 
-    // Restaurer
+    // Restore
     if (prev) Deno.env.set("DENOCLAW_API_TOKEN", prev);
     kv.close();
   },

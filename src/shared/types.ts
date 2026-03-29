@@ -1,8 +1,8 @@
 /**
- * Shared Kernel — types cross-domain utilisés par 3+ bounded contexts.
+ * Shared Kernel — cross-domain types used by 3+ bounded contexts.
  *
- * Seuls les types réellement partagés vivent ici.
- * Les types domain-specific vivent dans leur domaine (agent/types.ts, messaging/types.ts, etc.).
+ * Only truly shared types belong here.
+ * Domain-specific types live in their own domain (agent/types.ts, messaging/types.ts, etc.).
  */
 
 // ── Messages ──────────────────────────────────────────────
@@ -66,7 +66,7 @@ export interface LLMResponse {
   };
 }
 
-// ── Ports (interfaces pour DI cross-domain sans violation de boundary) ────
+// ── Ports (interfaces for cross-domain DI without boundary violations) ────
 
 /** Message envelope for broker-routed communication. */
 export interface BrokerEnvelope<
@@ -82,9 +82,9 @@ export interface BrokerEnvelope<
 }
 
 /**
- * Port d'accès au broker pour les agents (DI).
- * L'agent dépend de cette interface, pas du BrokerClient concret.
- * Résout la violation de boundary agent/ → orchestration/.
+ * Broker access port for agents (DI).
+ * The agent depends on this interface, not the concrete BrokerClient.
+ * Resolves the agent/ → orchestration/ boundary violation.
  */
 export interface AgentBrokerPort {
   startListening(): Promise<void>;
@@ -103,7 +103,7 @@ export interface AgentBrokerPort {
   close(): void;
 }
 
-// ── Sandbox permissions (cross-domain: utilisé par agent/tools, orchestration, config) ─
+// ── Sandbox permissions (cross-domain: used by agent/tools, orchestration, config) ─
 
 export type SandboxPermission =
   | "read"
@@ -192,7 +192,7 @@ export interface SandboxConfig {
   approvalTimeoutSec?: number;
 }
 
-// ── Agent registry (cross-domain: utilisé par orchestration, messaging/a2a, cli, config) ─
+// ── Agent registry (cross-domain: used by orchestration, messaging/a2a, cli, config) ─
 
 export type ChannelRouting =
   | "direct"
@@ -208,11 +208,11 @@ export interface AgentEntry {
   description?: string;
   // Sandbox (ADR-005)
   sandbox?: SandboxConfig;
-  // A2A peers (ADR-006) — fermé par défaut
-  peers?: string[]; // agents à qui je peux envoyer des Tasks
-  acceptFrom?: string[]; // agents dont j'accepte des Tasks ("*" = tous)
-  // Channels — d'où je reçois des messages utilisateur
-  channels?: string[]; // noms des channels assignés
+  // A2A peers (ADR-006) — closed by default
+  peers?: string[]; // agents I can send Tasks to
+  acceptFrom?: string[]; // agents I accept Tasks from ("*" = all)
+  // Channels — where I receive user messages from
+  channels?: string[]; // assigned channel names
   channelRouting?: ChannelRouting;
 }
 

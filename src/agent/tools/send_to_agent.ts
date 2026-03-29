@@ -6,15 +6,15 @@ import type {
 import { BaseTool } from "./registry.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 
-/** Callback pour envoyer un message à un autre agent — transport-agnostic */
+/** Callback for sending a message to another agent — transport-agnostic. */
 export type SendToAgentFn = (
   toAgent: string,
   message: string,
 ) => Promise<string>;
 
 /**
- * SendToAgentTool — permet au LLM d'envoyer un message à un autre agent.
- * Le transport (postMessage local, HTTP deploy) est abstrait par le callback injecté.
+ * SendToAgentTool — allows the LLM to send a message to another agent.
+ * The transport (local postMessage, deploy HTTP) is abstracted by the injected callback.
  */
 export class SendToAgentTool extends BaseTool {
   name = "send_to_agent";

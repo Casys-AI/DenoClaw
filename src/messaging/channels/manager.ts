@@ -13,11 +13,11 @@ export class ChannelManager {
 
   register(channel: BaseChannel): void {
     if (this.channels.has(channel.channelType)) {
-      log.warn(`Channel déjà enregistré : ${channel.channelType}`);
+      log.warn(`Channel already registered: ${channel.channelType}`);
       return;
     }
     this.channels.set(channel.channelType, channel);
-    log.info(`Channel enregistré : ${channel.channelType}`);
+    log.info(`Channel registered: ${channel.channelType}`);
   }
 
   async startAll(): Promise<void> {
@@ -31,20 +31,20 @@ export class ChannelManager {
             );
           });
         } catch (e) {
-          log.error(`Échec démarrage ${type}`, e);
+          log.error(`Failed to start ${type}`, e);
         }
       });
 
     await Promise.all(promises);
-    log.info("Tous les channels actifs sont démarrés");
+    log.info("All active channels started");
   }
 
   async stopAll(): Promise<void> {
     const promises = [...this.channels.values()].map((ch) =>
-      ch.stop().catch((e) => log.error(`Échec arrêt ${ch.channelType}`, e))
+      ch.stop().catch((e) => log.error(`Failed to stop ${ch.channelType}`, e))
     );
     await Promise.all(promises);
-    log.info("Tous les channels arrêtés");
+    log.info("All channels stopped");
   }
 
   async send(

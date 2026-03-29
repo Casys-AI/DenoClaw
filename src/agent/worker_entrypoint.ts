@@ -1,12 +1,12 @@
 /**
- * Worker entrypoint — chargé par new Worker().
- * Reçoit la config via `init` et exécute le travail local via un protocole
- * runtime interne strict, pendant que la sémantique canonique de tâche reste
- * portée par A2A.
- * Supporte la communication inter-agents via le main process (Broker local).
+ * Worker entrypoint — loaded by `new Worker()`.
+ * Receives config via `init` and executes local work through a strict internal
+ * runtime protocol, while canonical task semantics remain carried by A2A.
+ * Supports inter-agent communication through the main process (local Broker).
  *
- * Le Worker n'écrit JAMAIS dans le shared KV — il émet des messages au main process
- * qui se charge des écritures. Cela rend le Worker transport-agnostic (deploy-compatible).
+ * The Worker NEVER writes directly to shared KV — it emits messages to the main
+ * process, which performs the writes. This keeps the Worker transport-agnostic
+ * (deploy-compatible).
  *
  * All local worker execution routes through canonical A2A task semantics via
  * executeCanonicalWorkerTask(). The worker protocol remains runtime plumbing only.
@@ -213,7 +213,7 @@ function emitTaskObservation(
   });
 }
 
-// ── Ask approval pending requests (ADR-010) ──
+// ── Pending ask-approval requests (ADR-010) ──
 
 const APPROVAL_TIMEOUT_MS = 60_000;
 
@@ -273,7 +273,7 @@ function drainAskPending(): void {
   askPending.clear();
 }
 
-// ── Agent message pending requests (attente réponse d'un autre agent) ──
+// ── Agent message pending requests (waiting for another agent's response) ──
 
 const agentPending = new Map<string, {
   resolve: (content: string) => void;

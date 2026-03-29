@@ -1,6 +1,6 @@
 /**
  * Agent domain types.
- * Les types cross-domain (AgentEntry, SandboxConfig…) restent dans src/shared/types.ts.
+ * Cross-domain types (AgentEntry, SandboxConfig, etc.) remain in src/shared/types.ts.
  */
 
 import type { AgentEntry, SandboxConfig, ToolCall } from "../shared/types.ts";

@@ -3,10 +3,10 @@ import { log } from "../shared/log.ts";
 import { generateId } from "../shared/helpers.ts";
 
 /**
- * Cron & Heartbeat manager.
+ * Cron & heartbeat manager.
  *
- * Utilise Deno.cron() natif — fonctionne en local (--unstable-cron) et sur Deploy.
- * Pas de fallback setInterval, on assume que le flag est toujours présent.
+ * Uses native Deno.cron() — works locally (--unstable-cron) and on Deploy.
+ * No setInterval fallback; we assume the flag is always present.
  */
 export class CronManager {
   private jobs = new Map<string, CronJob>();
@@ -41,26 +41,26 @@ export class CronManager {
         await this.persistJob(job);
         try {
           await callback();
-          log.info(`Cron terminé : ${job.name}`);
+          log.info(`Cron completed: ${job.name}`);
         } catch (e) {
-          log.error(`Cron échoué : ${job.name}`, e);
+          log.error(`Cron failed: ${job.name}`, e);
         }
       });
 
       this.jobs.set(job.id, job);
       await this.persistJob(job);
-      log.info(`Cron planifié : ${job.name} (${job.schedule})`);
+      log.info(`Cron scheduled: ${job.name} (${job.schedule})`);
       return true;
     } catch (e) {
-      log.error(`Échec planification cron ${job.name}`, e);
+      log.error(`Failed to schedule cron ${job.name}`, e);
       return false;
     }
   }
 
   /**
-   * Heartbeat — raccourci pour un cron récurrent.
-   * L'agent se réveille périodiquement pour vérifier s'il a des tâches,
-   * envoyer des messages proactifs, check les tunnels, etc.
+   * Heartbeat — shorthand for a recurring cron.
+   * The agent wakes periodically to check for tasks, send proactive messages,
+   * check tunnels, etc.
    */
   async heartbeat(
     callback: () => void | Promise<void>,

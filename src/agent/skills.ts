@@ -15,7 +15,7 @@ export class SkillsLoader {
     try {
       await Deno.stat(this.skillsDir);
     } catch {
-      log.debug(`Répertoire skills inexistant : ${this.skillsDir}`);
+      log.debug(`Skills directory does not exist: ${this.skillsDir}`);
       return;
     }
 
@@ -27,9 +27,9 @@ export class SkillsLoader {
           if (skill) this.skills.set(skill.name, skill);
         }
       }
-      log.info(`${this.skills.size} skill(s) chargé(s)`);
+      log.info(`${this.skills.size} skill(s) loaded`);
     } catch (e) {
-      log.error("Échec chargement skills", e);
+      log.error("Failed to load skills", e);
     }
   }
 
@@ -61,7 +61,7 @@ export class SkillsLoader {
         path,
       };
     } catch (e) {
-      log.error(`Échec lecture skill ${path}`, e);
+      log.error(`Failed to read skill ${path}`, e);
       return null;
     }
   }

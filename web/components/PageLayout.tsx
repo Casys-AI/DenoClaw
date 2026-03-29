@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 
-/** Wrapper standard pour le contenu des pages. */
+/** Standard wrapper for page content. */
 export function PageLayout(
   { title, children }: { title: string; children: ComponentChildren },
 ) {

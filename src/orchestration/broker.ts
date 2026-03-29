@@ -152,7 +152,7 @@ export class BrokerServer {
   }
 
   async start(port = 3000): Promise<void> {
-    // Warning si pas de token configuré (ADR-003)
+    // Warn if no token is configured (ADR-003)
     if (!Deno.env.get("DENOCLAW_API_TOKEN")) {
       log.warn(
         "DENOCLAW_API_TOKEN not set — broker running in unauthenticated mode. Do not use in production.",
@@ -164,7 +164,7 @@ export class BrokerServer {
     // HTTP + WebSocket server — all messages arrive via HTTP or WebSocket
     this.httpServer = Deno.serve({ port }, (req) => this.handleHttp(req));
 
-    log.info(`Broker démarré sur port ${port}`);
+    log.info(`Broker started on port ${port}`);
   }
 
   /**
@@ -177,7 +177,7 @@ export class BrokerServer {
   }
 
   private async handleMessage(msg: BrokerMessage): Promise<void> {
-    log.info(`Broker: ${msg.type} de ${msg.from}`);
+    log.info(`Broker: ${msg.type} from ${msg.from}`);
 
     try {
       switch (msg.type) {
@@ -203,7 +203,7 @@ export class BrokerServer {
           await this.handleTaskResult(msg);
           break;
         default:
-          log.warn(`Type de message inconnu : ${msg.type}`);
+          log.warn(`Unknown message type: ${msg.type}`);
       }
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -516,26 +516,26 @@ export class BrokerServer {
   }
 
   /**
-   * Résout les permissions d'un outil (ADR-005).
-   * Built-in map = source de vérité pour les outils connus.
-   * Tunnel-advertised = pour les outils custom pas dans la map.
+   * Resolve tool permissions (ADR-005).
+   * Built-in map = source of truth for known tools.
+   * Tunnel-advertised = custom tools that are not in the built-in map.
    */
   private isBuiltinTool(tool: string): tool is BuiltinToolName {
     return tool in BUILTIN_TOOL_PERMISSIONS;
   }
 
   private resolveToolPermissions(tool: string): SandboxPermission[] {
-    // 1. Built-in map (source de vérité, non-overridable par un tunnel)
+    // 1. Built-in map (source of truth, cannot be overridden by a tunnel)
     if (this.isBuiltinTool(tool)) return [...BUILTIN_TOOL_PERMISSIONS[tool]];
 
-    // 2. Tunnel-advertised (outils custom uniquement)
+    // 2. Tunnel-advertised (custom tools only)
     for (const [_, t] of this.tunnels) {
       if (t.capabilities.toolPermissions?.[tool]) {
         return [...t.capabilities.toolPermissions[tool]];
       }
     }
 
-    // 3. Deny by default — outil inconnu = aucune permission
+    // 3. Deny by default — unknown tool = no permissions
     return [];
   }
 
@@ -853,7 +853,7 @@ export class BrokerServer {
     if (tunnel) {
       this.routeToTunnel(tunnel, message);
       log.info(
-        `A2A routé via tunnel : ${message.from} → ${targetAgentId} (${message.type})`,
+        `A2A routed via tunnel: ${message.from} → ${targetAgentId} (${message.type})`,
       );
       return;
     }
@@ -863,7 +863,7 @@ export class BrokerServer {
     const kv = await this.getKv();
     await kv.enqueue(message);
     log.info(
-      `A2A routé via KV Queue : ${message.from} → ${targetAgentId} (${message.type})`,
+      `A2A routed via KV Queue: ${message.from} → ${targetAgentId} (${message.type})`,
     );
   }
 
@@ -934,7 +934,7 @@ export class BrokerServer {
     }
   }
 
-  // ── HTTP + WebSocket (ADR-003: auth intégré) ───────
+  // ── HTTP + WebSocket (ADR-003: auth built in) ───────
 
   private async handleHttp(req: Request): Promise<Response> {
     try {
@@ -951,7 +951,7 @@ export class BrokerServer {
   private async handleHttpInner(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
-    // Root — public, pas d'auth
+    // Root — public, no auth
     if (url.pathname === "/") {
       return new Response("DenoClaw Broker");
     }
@@ -965,7 +965,7 @@ export class BrokerServer {
       });
     }
 
-    // Tunnel WebSocket — auth par invite token (ADR-003)
+    // Tunnel WebSocket — auth via invite token (ADR-003)
     if (url.pathname === "/tunnel") {
       return await this.handleTunnelUpgrade(req);
     }
@@ -987,7 +987,7 @@ export class BrokerServer {
       });
     }
 
-    // Tous les autres endpoints nécessitent auth (ADR-003)
+    // All other endpoints require auth (ADR-003)
     const auth = await this.getAuth();
     const authResult = await auth.checkRequest(req);
     if (!authResult.ok) {
@@ -1090,7 +1090,7 @@ export class BrokerServer {
     });
 
     socket.onopen = async () => {
-      log.info(`Tunnel connecté : ${tunnelId} (${negotiatedProtocol})`);
+      log.info(`Tunnel connected: ${tunnelId} (${negotiatedProtocol})`);
 
       try {
         const session = await auth.generateSessionToken(tunnelId);
@@ -1144,7 +1144,7 @@ export class BrokerServer {
             registered: true,
           });
           log.info(
-            `Tunnel enregistré : ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${
+            `Tunnel registered: ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${
               caps.agents || []
             }, protocol: ${socket.protocol})`,
           );
@@ -1163,14 +1163,14 @@ export class BrokerServer {
         // Otherwise = response to a routed request
         await this.handleTunnelMessage(tunnelId, e.data as string);
       } catch (err) {
-        log.error(`Erreur tunnel ${tunnelId}`, err);
+        log.error(`Tunnel error ${tunnelId}`, err);
         socket.close(1002, "Invalid tunnel control message");
       }
     };
 
     socket.onclose = () => {
       this.tunnels.delete(tunnelId);
-      log.info(`Tunnel déconnecté : ${tunnelId}`);
+      log.info(`Tunnel disconnected: ${tunnelId}`);
     };
 
     return response;
@@ -1261,6 +1261,6 @@ export class BrokerServer {
       this.kv.close();
       this.kv = null;
     }
-    log.info("Broker arrêté");
+    log.info("Broker stopped");
   }
 }

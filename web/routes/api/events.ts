@@ -5,8 +5,8 @@ import {
 } from "../../lib/dashboard-auth.ts";
 
 /**
- * SSE proxy — le browser se connecte ici (meme origine),
- * et on relaie le SSE de la gateway cote serveur. Zero CORS.
+ * SSE proxy — the browser connects here (same origin),
+ * and the gateway SSE stream is relayed server-side. Zero CORS.
  */
 export const handler = {
   GET(ctx: FreshContext) {

@@ -1,6 +1,6 @@
 {
   "$schema": "../../../schemas/agent.schema.json",
-  "description": "Agent de recherche — lecture et réseau",
+  "description": "Research agent — reading and network",
   "sandbox": {
     "allowedPermissions": [
       "read",

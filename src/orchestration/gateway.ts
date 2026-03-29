@@ -149,9 +149,9 @@ export interface GatewayDeps {
 }
 
 /**
- * Gateway — central orchestrator (mode local).
+ * Gateway — central orchestrator (local mode).
  * Wires channels, bus, sessions and agent loop together.
- * Toutes les dépendances injectées via constructeur (DI).
+ * All dependencies are injected through the constructor (DI).
  */
 export class Gateway {
   private config: Config;
@@ -195,7 +195,7 @@ export class Gateway {
   async start(): Promise<void> {
     if (this.running) return;
 
-    log.info("Démarrage du gateway...");
+    log.info("Starting gateway...");
 
     await this.bus.init();
     this.wsClients = new Map();
@@ -226,12 +226,12 @@ export class Gateway {
     });
 
     this.running = true;
-    log.info(`Gateway démarré — API sur port ${port}`);
+    log.info(`Gateway started — API on port ${port}`);
   }
 
   async stop(): Promise<void> {
     if (!this.running) return;
-    log.info("Arrêt du gateway...");
+    log.info("Stopping gateway...");
 
     if (this.httpServer) await this.httpServer.shutdown();
     for (const ws of this.wsClients.values()) {
@@ -244,11 +244,11 @@ export class Gateway {
     this.bus.close();
 
     this.running = false;
-    log.info("Gateway arrêté");
+    log.info("Gateway stopped");
   }
 
   private async handleMessage(msg: ChannelMessage): Promise<void> {
-    log.info(`Message de ${msg.channelType} (user: ${msg.userId})`);
+    log.info(`Message from ${msg.channelType} (user: ${msg.userId})`);
 
     try {
       await this.session.getOrCreate(
@@ -259,7 +259,7 @@ export class Gateway {
 
       const agentId = msg.metadata?.agentId as string | undefined;
       if (!agentId) {
-        log.error("Message sans agentId — ignoré");
+        log.error("Message without agentId — ignored");
         return;
       }
       const result = await this.workerPool.send(
@@ -274,12 +274,12 @@ export class Gateway {
         msg.metadata,
       );
     } catch (e) {
-      log.error("Erreur traitement message", e);
+      log.error("Message handling error", e);
       try {
         await this.channels.send(
           msg.channelType,
           msg.userId,
-          "Désolé, une erreur s'est produite. Réessayez.",
+          "Sorry, an error occurred. Please try again.",
           msg.metadata,
         );
       } catch {
@@ -290,7 +290,7 @@ export class Gateway {
 
   private async checkAuth(req: Request): Promise<Response | null> {
     if (!this.auth) {
-      // Pas d'AuthManager injecté — fallback static token (mode local)
+      // No AuthManager injected — fall back to a static token (local mode)
       const token = Deno.env.get("DENOCLAW_API_TOKEN");
       if (!token) return null;
       const auth = req.headers.get("authorization");
@@ -333,7 +333,7 @@ export class Gateway {
       }
     }
 
-    // Dashboard Fresh handler — avant auth (gère sa propre auth si besoin)
+    // Fresh dashboard handler — before auth (it handles its own auth if needed)
     if (
       this.freshHandler &&
       (url.pathname.startsWith(this.dashboardBasePath) ||
@@ -501,7 +501,7 @@ export class Gateway {
         );
         return Response.json({ sessionId, response: result.content });
       } catch (e) {
-        log.error("Erreur API /chat", e);
+        log.error("API /chat error", e);
         // AX-3: structured error output
         const msg = e instanceof Error ? e.message : String(e);
         return Response.json(
@@ -530,7 +530,7 @@ export class Gateway {
 
       socket.onopen = () => {
         this.wsClients.set(token, socket);
-        log.info(`WebSocket connecté : ${token}`);
+        log.info(`WebSocket connected: ${token}`);
       };
 
       socket.onmessage = async (e) => {
@@ -558,7 +558,7 @@ export class Gateway {
             content: result.content,
           });
         } catch (err) {
-          log.error("Erreur WebSocket message", err);
+          log.error("WebSocket message error", err);
           if (err instanceof DenoClawError) {
             sendGatewayWsJson(socket, {
               type: "error",
@@ -580,7 +580,7 @@ export class Gateway {
 
       socket.onclose = () => {
         this.wsClients.delete(token);
-        log.info(`WebSocket déconnecté : ${token}`);
+        log.info(`WebSocket disconnected: ${token}`);
       };
 
       return response;

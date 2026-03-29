@@ -7,9 +7,9 @@ import type { MemoryPort } from "../memory_port.ts";
 import { BaseTool } from "./registry.ts";
 
 /**
- * MemoryTool — permet au LLM de stocker et retrouver des faits long-terme.
- * Trois actions : remember, recall, forget.
- * S'exécute in-process (pas de sandbox) — c'est de l'infra mémoire, comme SendToAgentTool.
+ * MemoryTool — allows the LLM to store and retrieve long-term facts.
+ * Three actions: remember, recall, forget.
+ * Runs in-process (no sandbox) — this is memory infrastructure, like SendToAgentTool.
  */
 export class MemoryTool extends BaseTool {
   name = "memory";

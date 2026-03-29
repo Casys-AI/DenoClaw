@@ -17,7 +17,7 @@ import type { AgentDefaults, ToolsConfig } from "./types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import type { AgentEntry, ApprovalReason } from "../shared/types.ts";
 
-/** Projection minimale de Config envoyée au Worker (JSON-serializable) */
+/** Minimal Config projection sent to the Worker (JSON-serializable). */
 export interface WorkerConfig {
   agents: {
     defaults: AgentDefaults;
@@ -27,7 +27,7 @@ export interface WorkerConfig {
   tools: ToolsConfig;
 }
 
-/** KV paths pour le Worker */
+/** KV paths for the Worker. */
 export interface WorkerKvPaths {
   private: string;
   shared: string;

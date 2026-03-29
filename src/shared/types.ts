@@ -86,7 +86,7 @@ export interface BrokerEnvelope<
  * The agent depends on this interface, not the concrete BrokerClient.
  * Resolves the agent/ → orchestration/ boundary violation.
  */
-export interface AgentBrokerPort {
+export interface AgentLlmToolPort {
   startListening(): Promise<void>;
   complete(
     messages: Message[],
@@ -102,6 +102,18 @@ export interface AgentBrokerPort {
   ): Promise<ToolResult>;
   close(): void;
 }
+
+export interface AgentCanonicalTaskPort<TTask = unknown> {
+  getTask(taskId: string): Promise<TTask | null>;
+  reportTaskResult(task: TTask): Promise<TTask>;
+}
+
+/**
+ * Backward-compatible aggregate port used by adapters that implement
+ * both LLM/tooling and canonical task operations.
+ */
+export interface AgentBrokerPort<TTask = unknown>
+  extends AgentLlmToolPort, AgentCanonicalTaskPort<TTask> {}
 
 // ── Sandbox permissions (cross-domain: used by agent/tools, orchestration, config) ─
 

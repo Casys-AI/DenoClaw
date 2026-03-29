@@ -9,7 +9,8 @@ import type {
 } from "./types.ts";
 import { isBrokerErrorMessage } from "./types.ts";
 import type {
-  AgentBrokerPort,
+  AgentCanonicalTaskPort,
+  AgentLlmToolPort,
   LLMResponse,
   Message,
   ToolDefinition,
@@ -32,7 +33,7 @@ export interface BrokerClientDeps {
  * Transport is pluggable via BrokerTransport (KV Queue locally, HTTP/SSE on network).
  * The client operates in canonical task terms above the transport layer.
  */
-export class BrokerClient implements AgentBrokerPort {
+export class BrokerClient implements AgentLlmToolPort, AgentCanonicalTaskPort<Task> {
   private transport: BrokerTransport;
 
   constructor(agentId: string, deps: BrokerClientDeps = {}) {

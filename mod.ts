@@ -90,6 +90,8 @@ export { LocalRelay } from "./src/orchestration/relay.ts";
 export { Gateway } from "./src/orchestration/gateway.ts";
 export type { GatewayDeps } from "./src/orchestration/gateway.ts";
 
+export * from "./src/orchestration/federation/mod.ts";
+
 
 // ── LLM domain ───────────────────────────────────────────
 export {

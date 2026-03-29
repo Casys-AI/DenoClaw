@@ -20,3 +20,9 @@ export {
   createRelayToolExecutionPort,
 } from "./bootstrap.ts";
 export * from "./monitoring.ts";
+export type {
+  ActiveTaskEntry,
+  AgentStatusEntry,
+  AgentStatusValue,
+  TaskObservationEntry,
+} from "./monitoring_types.ts";

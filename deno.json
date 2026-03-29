@@ -11,6 +11,7 @@
     "dashboard:build": "deno run -A npm:vite build --config vite.config.ts",
     "test": "deno test --unstable-kv --unstable-cron --allow-all --env",
     "test:unit": "deno test --unstable-kv --allow-all src/",
+    "test:boundaries": "deno test --allow-read src/shared/import_boundaries_test.ts",
     "test:e2e": "deno test --unstable-kv --unstable-cron --allow-all --env tests/",
     "check": "deno check main.ts mod.ts",
     "lint": "deno lint",

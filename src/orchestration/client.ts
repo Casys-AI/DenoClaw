@@ -30,7 +30,8 @@ export interface BrokerClientDeps {
  * BrokerClient — used by agents to communicate with the Broker.
  *
  * Transport is pluggable via BrokerTransport (KV Queue locally, HTTP/SSE on network).
- * The client operates in canonical task terms above the transport layer.
+ * Implements AgentBrokerPort end-to-end, including canonical task lifecycle
+ * operations required by AgentRuntime.
  */
 export class BrokerClient implements AgentBrokerPort {
   private transport: BrokerTransport;

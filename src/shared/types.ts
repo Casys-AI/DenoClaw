@@ -82,9 +82,12 @@ export interface BrokerEnvelope<
 }
 
 /**
- * Broker access port for agents (DI).
- * The agent depends on this interface, not the concrete BrokerClient.
- * Resolves the agent/ → orchestration/ boundary violation.
+ * Broker access port for agents (DI, DDD application port).
+ * The agent runtime depends on this abstraction, not on BrokerClient.
+ * This port exposes:
+ * - LLM completion
+ * - Tool execution
+ * - Canonical task lifecycle operations used by AgentRuntime
  */
 export interface AgentBrokerPort {
   startListening(): Promise<void>;
@@ -100,6 +103,24 @@ export interface AgentBrokerPort {
     args: Record<string, unknown>,
     correlation?: { taskId?: string; contextId?: string },
   ): Promise<ToolResult>;
+  /** Fetch a canonical task from broker persistence. */
+  getTask(taskId: string): Promise<import("../messaging/a2a/types.ts").Task | null>;
+  /** Persist a canonical task state transition/result. */
+  reportTaskResult(
+    task: import("../messaging/a2a/types.ts").Task,
+  ): Promise<import("../messaging/a2a/types.ts").Task>;
+  /** Submit a new canonical task to a target agent. */
+  submitTask(
+    payload: import("../orchestration/types.ts").BrokerTaskSubmitPayload,
+  ): Promise<import("../messaging/a2a/types.ts").Task>;
+  /** Continue an existing canonical task with an additional message. */
+  continueTask(
+    payload: import("../orchestration/types.ts").BrokerTaskContinuePayload,
+  ): Promise<import("../messaging/a2a/types.ts").Task | null>;
+  /** Cancel an existing canonical task. */
+  cancelTask(
+    taskId: string,
+  ): Promise<import("../messaging/a2a/types.ts").Task | null>;
   close(): void;
 }
 

@@ -417,12 +417,15 @@ Deno.test("BrokerServer returns EXEC_APPROVAL_REQUIRED for broker-backed shell t
     let sandboxCalls = 0;
     const broker = new BrokerServer(createConfig(), {
       kv,
-      sandbox: {
-        run: () => {
+      toolExecution: {
+        executeTool: async () => {
           sandboxCalls++;
-          return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+          return { success: true, output: "" };
         },
-      } as never,
+        resolveToolPermissions: () => ["run"],
+        checkExecPolicy: () => ({ allowed: false, reason: "always-ask", binary: "git" }),
+        getToolPermissions: () => ({}),
+      },
       // deno-lint-ignore no-explicit-any
       metrics: { recordToolCall: async () => {} } as any,
     });

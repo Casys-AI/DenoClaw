@@ -18,6 +18,10 @@ import {
 } from "./src/cli/setup.ts";
 import { BrokerServer } from "./src/orchestration/broker.ts";
 import { LocalRelay } from "./src/orchestration/relay.ts";
+import {
+  createBrokerServerDeps,
+  createRelayToolExecutionPort,
+} from "./src/orchestration/bootstrap.ts";
 import { MetricsCollector } from "./src/telemetry/metrics.ts";
 import {
   updateAgentsList,
@@ -271,7 +275,7 @@ To start:
 
 async function broker(config: Config): Promise<void> {
   const port = parseInt(args._[1] as string) || 3000;
-  const srv = new BrokerServer(config);
+  const srv = new BrokerServer(config, createBrokerServerDeps(config));
   await srv.start(port);
 
   console.log(`Broker started on port ${port}`);
@@ -306,6 +310,8 @@ async function tunnel(): Promise<void> {
     inviteToken: token,
     capabilities: { tools },
     autoApprove: true,
+  }, {
+    toolExecution: createRelayToolExecutionPort(tools),
   });
 
   await relay.connect();

@@ -9,4 +9,14 @@ export { KvQueueTransport } from "./transport.ts";
 export { LocalRelay } from "./relay.ts";
 export { Gateway } from "./gateway.ts";
 export type { GatewayDeps } from "./gateway.ts";
+export type {
+  ExecuteToolRequest,
+  ExecPolicyCheckResult,
+  ToolExecutionPort,
+} from "./tool_execution_port.ts";
+export {
+  createBrokerServerDeps,
+  createBrokerToolExecutionPort,
+  createRelayToolExecutionPort,
+} from "./bootstrap.ts";
 export * from "./monitoring.ts";

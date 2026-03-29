@@ -14,12 +14,8 @@ import type {
   ToolResult,
 } from "../shared/types.ts";
 import type { Config } from "../config/types.ts";
-import type { BuiltinToolName } from "../agent/tools/types.ts";
-import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
-import { checkExecPolicy } from "../agent/tools/shell.ts";
 import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";
-import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
@@ -43,6 +39,9 @@ import {
   TUNNEL_IDLE_TIMEOUT_SECONDS,
   WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
 } from "./tunnel_protocol.ts";
+import type { ToolExecutionPort } from "./tool_execution_port.ts";
+import { LocalToolExecutionAdapter } from "./adapters/tool_execution_local.ts";
+import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -58,7 +57,7 @@ import {
  */
 export interface BrokerServerDeps {
   providers?: ProviderManager;
-  sandbox?: DenoSandboxBackend;
+  toolExecution?: ToolExecutionPort;
   metrics?: MetricsCollector;
   kv?: Deno.Kv;
   taskStore?: TaskStore;
@@ -104,7 +103,7 @@ export class BrokerServer {
   private config: Config;
   private auth!: AuthManager;
   private providers: ProviderManager;
-  private sandbox: DenoSandboxBackend | null;
+  private toolExecution: ToolExecutionPort;
   private metrics: MetricsCollector;
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
@@ -118,15 +117,23 @@ export class BrokerServer {
   constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
-    const sandboxToken = Deno.env.get("DENO_SANDBOX_API_TOKEN") ?? "";
-    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? { allowedPermissions: [] };
-    this.sandbox = sandboxToken
-      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken)
-      : deps?.sandbox ?? null;
+    this.toolExecution = deps?.toolExecution ?? this.createDefaultToolExecutionAdapter();
     this.metrics = deps?.metrics ?? new MetricsCollector();
     this.kv = deps?.kv ?? null;
     this.ownsKv = !deps?.kv;
     this.taskStore = deps?.taskStore ?? new TaskStore(deps?.kv);
+  }
+
+  private createDefaultToolExecutionAdapter(): ToolExecutionPort {
+    const sandboxToken = Deno.env.get("DENO_SANDBOX_API_TOKEN") ?? "";
+    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? { allowedPermissions: [] };
+    const sandbox = sandboxToken
+      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken)
+      : null;
+    return new LocalToolExecutionAdapter({
+      sandbox,
+      requireSandboxForPermissionedTools: true,
+    });
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -357,16 +364,6 @@ export class BrokerServer {
       return;
     }
 
-    // 4. Execute via @deno/sandbox cloud backend (same tool_executor as local)
-    if (!this.sandbox) {
-      this.sendStructuredError(msg.from, msg.id, {
-        code: "NO_SANDBOX_BACKEND",
-        context: { tool: req.tool },
-        recovery: "Set DENO_SANDBOX_API_TOKEN or connect a relay for local tool execution",
-      });
-      return;
-    }
-
     try {
       const agentNetwork = agentConfig.value?.sandbox?.networkAllow;
       const defaultNetwork = this.config.agents?.defaults?.sandbox?.networkAllow;
@@ -376,8 +373,7 @@ export class BrokerServer {
         this.config.agents?.defaults?.sandbox?.execPolicy ?? DEFAULT_EXEC_POLICY;
 
       log.info(`Sandbox: ${req.tool} permissions=${JSON.stringify(granted)}`);
-
-      const result = await this.sandbox.execute({
+      const result = await this.toolExecution.executeTool({
         tool: req.tool,
         args: req.args,
         permissions: granted,
@@ -414,7 +410,7 @@ export class BrokerServer {
     if (!command) return null;
 
     const policy = agentPolicy ?? defaultPolicy ?? DEFAULT_EXEC_POLICY;
-    const check = checkExecPolicy(command, policy);
+    const check = this.toolExecution.checkExecPolicy(command, policy);
     if (check.allowed) return null;
 
     if (
@@ -520,23 +516,16 @@ export class BrokerServer {
    * Built-in map = source of truth for known tools.
    * Tunnel-advertised = custom tools that are not in the built-in map.
    */
-  private isBuiltinTool(tool: string): tool is BuiltinToolName {
-    return tool in BUILTIN_TOOL_PERMISSIONS;
-  }
-
   private resolveToolPermissions(tool: string): SandboxPermission[] {
-    // 1. Built-in map (source of truth, cannot be overridden by a tunnel)
-    if (this.isBuiltinTool(tool)) return [...BUILTIN_TOOL_PERMISSIONS[tool]];
-
-    // 2. Tunnel-advertised (custom tools only)
-    for (const [_, t] of this.tunnels) {
-      if (t.capabilities.toolPermissions?.[tool]) {
-        return [...t.capabilities.toolPermissions[tool]];
+    const tunnelPermissions: Record<string, SandboxPermission[]> = {};
+    for (const [_, tunnel] of this.tunnels) {
+      for (const [toolName, perms] of Object.entries(tunnel.capabilities.toolPermissions ?? {})) {
+        if (!tunnelPermissions[toolName]) {
+          tunnelPermissions[toolName] = [...perms];
+        }
       }
     }
-
-    // 3. Deny by default — unknown tool = no permissions
-    return [];
+    return this.toolExecution.resolveToolPermissions(tool, tunnelPermissions);
   }
 
 

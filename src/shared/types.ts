@@ -5,6 +5,21 @@
  * Domain-specific types live in their own domain (agent/types.ts, messaging/types.ts, etc.).
  */
 
+export type {
+  ApprovalReason,
+  ApprovalRequest,
+  ApprovalResponse,
+  ExecPolicy,
+  SandboxBackend,
+  SandboxExecRequest,
+} from "../agent/sandbox_types.ts";
+export type {
+  ActiveTaskEntry,
+  AgentStatusEntry,
+  AgentStatusValue,
+  TaskObservationEntry,
+} from "../orchestration/monitoring_types.ts";
+
 // ── Messages ──────────────────────────────────────────────
 
 export type MessageRole = "system" | "user" | "assistant" | "tool";
@@ -125,74 +140,6 @@ export type SandboxPermission =
   | "env"
   | "ffi";
 
-// ── Exec Policy (ADR-010) — discriminated union on `security` ─
-
-export type ApprovalReason =
-  | "not-in-allowlist"
-  | "shell-operator"
-  | "inline-eval"
-  | "always-ask";
-
-interface ExecPolicyBase {
-  ask: "off" | "on-miss" | "always";
-  askFallback?: "deny" | "allowlist";
-}
-
-interface ExecPolicyDeny extends ExecPolicyBase {
-  security: "deny";
-}
-
-interface ExecPolicyFull extends ExecPolicyBase {
-  security: "full";
-  /** Additional env prefixes to strip (on top of LD_*, DYLD_*) */
-  envFilter?: string[];
-}
-
-interface ExecPolicyAllowlist extends ExecPolicyBase {
-  security: "allowlist";
-  allowedCommands?: string[];
-  /** Keyword blocklist — matches anywhere in command string (intentionally aggressive) */
-  deniedCommands?: string[];
-  /** Additional env prefixes to strip (on top of LD_*, DYLD_*) */
-  envFilter?: string[];
-  /** Allow -c/-e flags on interpreters (default: false = blocked) */
-  allowInlineEval?: boolean;
-}
-
-export type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
-
-export interface ApprovalRequest {
-  requestId: string;
-  command: string;
-  binary: string;
-  reason: ApprovalReason;
-}
-
-export interface ApprovalResponse {
-  approved: boolean;
-  allowAlways?: boolean;
-}
-
-// ── Sandbox Backend (ADR-010) ────────────────────────────
-
-export interface SandboxExecRequest {
-  tool: string;
-  args: Record<string, unknown>;
-  permissions: SandboxPermission[];
-  networkAllow?: string[];
-  timeoutSec?: number;
-  execPolicy: ExecPolicy;
-  toolsConfig?: { restrictToWorkspace?: boolean; workspaceDir?: string; agentId?: string };
-  onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
-}
-
-export interface SandboxBackend {
-  readonly kind: "local" | "cloud";
-  readonly supportsFullShell: boolean;
-  execute(req: SandboxExecRequest): Promise<ToolResult>;
-  close(): Promise<void>;
-}
-
 // ── Sandbox Config ───────────────────────────────────────
 
 export interface SandboxConfig {
@@ -200,7 +147,7 @@ export interface SandboxConfig {
   allowedPermissions: SandboxPermission[];
   networkAllow?: string[];
   maxDurationSec?: number;
-  execPolicy?: ExecPolicy;
+  execPolicy?: import("../agent/sandbox_types.ts").ExecPolicy;
   approvalTimeoutSec?: number;
 }
 
@@ -228,42 +175,3 @@ export interface AgentEntry {
   channelRouting?: ChannelRouting;
 }
 
-// ── Observability types (cross-domain: written by agent/, read by orchestration/) ──
-
-export interface AgentStatusValue {
-  status: "running" | "alive" | "stopped";
-  startedAt?: string;
-  lastHeartbeat?: string;
-  stoppedAt?: string;
-  model?: string;
-}
-
-export interface ActiveTaskEntry {
-  taskId: string;
-  sessionId: string;
-  traceId?: string;
-  contextId?: string;
-  startedAt: string;
-}
-
-export interface AgentStatusEntry {
-  agentId: string;
-  status: "running" | "alive" | "stopped";
-  startedAt?: string;
-  lastHeartbeat?: string;
-  stoppedAt?: string;
-  model?: string;
-  activeTask?: ActiveTaskEntry | null;
-}
-
-export interface TaskObservationEntry {
-  taskId: string;
-  from: string;
-  to: string;
-  message: string;
-  status: string;
-  result?: string;
-  traceId?: string;
-  contextId?: string;
-  timestamp: string;
-}

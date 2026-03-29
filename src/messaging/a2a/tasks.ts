@@ -75,6 +75,34 @@ export class TaskStore {
     return nextTask;
   }
 
+  async appendHistoryMessage(
+    taskId: string,
+    message: A2AMessage,
+  ): Promise<Task | null> {
+    const kv = await this.getKv();
+    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
+    if (!entry.value) return null;
+
+    const nextTask: Task = {
+      ...entry.value,
+      history: [...entry.value.history, message],
+    };
+    await kv.set(["a2a_tasks", taskId], nextTask);
+    return nextTask;
+  }
+
+  async startWorking(taskId: string): Promise<Task | null> {
+    return await this.updateStatus(taskId, "WORKING");
+  }
+
+  async completeTask(taskId: string, message: A2AMessage): Promise<Task | null> {
+    return await this.updateStatus(taskId, "COMPLETED", message);
+  }
+
+  async failTask(taskId: string, message: A2AMessage): Promise<Task | null> {
+    return await this.updateStatus(taskId, "FAILED", message);
+  }
+
   async addArtifact(taskId: string, artifact: Artifact): Promise<Task | null> {
     const kv = await this.getKv();
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
@@ -86,18 +114,19 @@ export class TaskStore {
   }
 
   async addMessage(taskId: string, message: A2AMessage): Promise<Task | null> {
-    const kv = await this.getKv();
-    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
-    if (!entry.value) return null;
-
-    const task = entry.value;
-    task.history.push(message);
-    await kv.set(["a2a_tasks", taskId], task);
-    return task;
+    return await this.appendHistoryMessage(taskId, message);
   }
 
   async cancel(taskId: string): Promise<Task | null> {
     return await this.updateStatus(taskId, "CANCELED");
+  }
+
+  async cancelTask(taskId: string): Promise<Task | null> {
+    return await this.cancel(taskId);
+  }
+
+  canAcceptUpdates(task: Task): boolean {
+    return !isTerminalTaskState(task.status.state);
   }
 
   async listByContext(contextId: string): Promise<Task[]> {

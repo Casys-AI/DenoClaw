@@ -11,6 +11,7 @@ import { AgentError, DenoClawError } from "../../shared/errors.ts";
 import {
   classifyRefusalTerminalState,
   createCanonicalTask,
+  transitionTask,
 } from "./internal_contract.ts";
 import { createAwaitedInputMetadata } from "./input_metadata.ts";
 import type { A2AMessage, Artifact, Task } from "./types.ts";
@@ -47,7 +48,7 @@ export function mapLocalTextInputToTask(input: TaskTextInput): Task {
   return createCanonicalTask({
     id: taskId,
     contextId,
-    message: createTextMessage(input.message, input.role ?? "user"),
+    initialMessage: createTextMessage(input.message, input.role ?? "user"),
     metadata: {
       localRuntime: {
         requestId: input.requestId,
@@ -68,15 +69,14 @@ export function mapTaskResultToCompletion(
     parts: [{ kind: "text", text: content }],
   };
 
-  return {
+  const withArtifact = {
     ...task,
     artifacts: [...task.artifacts, artifact],
-    status: {
-      state: "COMPLETED",
-      timestamp: new Date().toISOString(),
-      message: createTextMessage(content, "agent"),
-    },
   };
+
+  return transitionTask(withArtifact, "COMPLETED", {
+    statusMessage: createTextMessage(content, "agent"),
+  });
 }
 
 export function mapTaskErrorToTerminalStatus(
@@ -86,42 +86,32 @@ export function mapTaskErrorToTerminalStatus(
   const normalized = normalizeTaskError(error);
   const state = classifyRefusalTerminalState(normalized.reason);
 
-  return {
-    ...task,
-    status: {
-      state,
-      timestamp: new Date().toISOString(),
-      message: createTextMessage(normalized.message, "agent"),
-      metadata: {
-        errorCode: normalized.code,
-        ...(normalized.context ? { errorContext: normalized.context } : {}),
-      },
+  return transitionTask(task, state, {
+    statusMessage: createTextMessage(normalized.message, "agent"),
+    metadata: {
+      errorCode: normalized.code,
+      ...(normalized.context ? { errorContext: normalized.context } : {}),
     },
-  };
+  });
 }
 
 export function mapApprovalPauseToInputRequiredTask(
   task: Task,
   approval: ApprovalPauseInput,
 ): Task {
-  return {
-    ...task,
-    status: {
-      state: "INPUT_REQUIRED",
-      timestamp: new Date().toISOString(),
-      message: createTextMessage(
-        approval.prompt ?? `Awaiting approval for ${approval.binary}`,
-        "agent",
-      ),
-      metadata: createAwaitedInputMetadata({
-        kind: "approval",
-        command: approval.command,
-        binary: approval.binary,
-        prompt: approval.prompt,
-        continuationToken: approval.continuationToken,
-      }),
-    },
-  };
+  return transitionTask(task, "INPUT_REQUIRED", {
+    statusMessage: createTextMessage(
+      approval.prompt ?? `Awaiting approval for ${approval.binary}`,
+      "agent",
+    ),
+    metadata: createAwaitedInputMetadata({
+      kind: "approval",
+      command: approval.command,
+      binary: approval.binary,
+      prompt: approval.prompt,
+      continuationToken: approval.continuationToken,
+    }),
+  });
 }
 
 function createTextMessage(

@@ -6,6 +6,13 @@
 
 **A2A over transport X, persisted in KV, correlated by task/context ids.**
 
+## Glossaire (runtime ↔ lifecycle canonique)
+
+- **Canonical task lifecycle**: la machine d'état A2A (`SUBMITTED` → `WORKING` → terminal/`INPUT_REQUIRED`) et ses transitions validées via `src/messaging/a2a/internal_contract.ts`.
+- **Canonical task message**: un objet `A2AMessage` qui porte l'intention de travail (message initial ou continuation).
+- **Broker task envelope**: une enveloppe de transport broker (`task_submit`, `task_continue`, etc.) qui route le travail mais ne redéfinit jamais la sémantique de lifecycle.
+- **Runtime protocol**: la plomberie d'exécution locale (LLM/tool/worker wiring). Ce n'est pas un deuxième modèle de tâche.
+
 The architecture has three layers, each with a distinct role (ADR-001):
 
 - **Broker** (Deno Deploy) = central orchestrator (LLM proxy, cron, message

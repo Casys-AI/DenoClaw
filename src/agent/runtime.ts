@@ -24,6 +24,8 @@ import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
 import {
   assertRuntimeTaskMessage,
+  extractContinuationTaskMessage,
+  extractSubmitTaskMessage,
   isRuntimeTaskMessage,
   type RuntimeTaskContinueMessage,
   type RuntimeTaskSubmitMessage,
@@ -174,7 +176,8 @@ export class AgentRuntime {
     msg: RuntimeTaskSubmitMessage,
   ): Promise<void> {
     const payload = msg.payload;
-    const inputText = this.extractTextFromMessage(payload.message);
+    const taskMessage = extractSubmitTaskMessage(payload);
+    const inputText = this.extractTextFromMessage(taskMessage);
     log.info(
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
@@ -185,7 +188,7 @@ export class AgentRuntime {
       canonicalTask: createCanonicalTask({
         id: payload.taskId,
         contextId: payload.contextId,
-        message: payload.message,
+        initialMessage: taskMessage,
       }),
       reportWorkingTransition: true,
     });
@@ -204,13 +207,14 @@ export class AgentRuntime {
       );
     }
 
+    const continuationMessage = extractContinuationTaskMessage(payload);
     const resumed = transitionTask(existing, "WORKING", {
-      message: payload.message,
+      statusMessage: continuationMessage,
     });
-    resumed.history = [...existing.history, payload.message];
+    resumed.history = [...existing.history, continuationMessage];
     await this.reportCanonicalTaskResult(resumed);
 
-    const inputText = this.extractTextFromMessage(payload.message);
+    const inputText = this.extractTextFromMessage(continuationMessage);
     log.info(
       `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );

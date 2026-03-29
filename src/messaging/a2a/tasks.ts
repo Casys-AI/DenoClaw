@@ -34,7 +34,7 @@ export class TaskStore {
 
     const task = createCanonicalTask({
       id: taskId,
-      message,
+      initialMessage: message,
       contextId,
     });
 
@@ -67,7 +67,7 @@ export class TaskStore {
       return task;
     }
 
-    const nextTask = transitionTask(task, state, { message });
+    const nextTask = transitionTask(task, state, { statusMessage: message });
     if (message) nextTask.history = [...nextTask.history, message];
 
     await kv.set(["a2a_tasks", taskId], nextTask);

@@ -57,14 +57,26 @@ export interface ToolResponsePayload {
 export interface BrokerTaskSubmitPayload {
   targetAgent: string;
   taskId: string;
-  message: A2AMessage;
+  /**
+   * Canonical task input message for lifecycle creation.
+   * Prefer `taskMessage`; `message` is a temporary alias for compatibility.
+   */
+  taskMessage?: A2AMessage;
+  /** @deprecated Use `taskMessage`. */
+  message?: A2AMessage;
   contextId?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface BrokerTaskContinuePayload {
   taskId: string;
-  message: A2AMessage;
+  /**
+   * Canonical continuation input for lifecycle resume.
+   * Prefer `continuationMessage`; `message` remains a compatibility alias.
+   */
+  continuationMessage?: A2AMessage;
+  /** @deprecated Use `continuationMessage`. */
+  message?: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 

@@ -16,13 +16,25 @@ export type RefusalTerminalReason = "user" | "policy" | "runtime" | "unknown";
 
 export interface CanonicalTaskInit {
   id: string;
-  message: A2AMessage;
+  /**
+   * First user intent message that initializes the canonical task lifecycle.
+   * Prefer `initialMessage`; `message` is a temporary alias.
+   */
+  initialMessage?: A2AMessage;
+  /** @deprecated Use `initialMessage`. */
+  message?: A2AMessage;
   contextId?: string;
   metadata?: Record<string, unknown>;
   timestamp?: string;
 }
 
 export interface TaskTransitionOptions {
+  /**
+   * Canonical status update message attached to the next transition.
+   * Prefer `statusMessage`; `message` is a temporary alias.
+   */
+  statusMessage?: A2AMessage;
+  /** @deprecated Use `statusMessage`. */
   message?: A2AMessage;
   metadata?: Record<string, unknown>;
   timestamp?: string;
@@ -33,6 +45,15 @@ export function resolveTaskContextId(taskId: string, contextId?: string): string
 }
 
 export function createCanonicalTask(init: CanonicalTaskInit): Task {
+  const initialMessage = init.initialMessage ?? init.message;
+  if (!initialMessage) {
+    throw new DenoClawError(
+      "INVALID_TASK_TRANSITION",
+      { taskId: init.id },
+      "createCanonicalTask requires an initialMessage",
+    );
+  }
+
   return {
     id: init.id,
     contextId: resolveTaskContextId(init.id, init.contextId),
@@ -41,7 +62,7 @@ export function createCanonicalTask(init: CanonicalTaskInit): Task {
       timestamp: init.timestamp ?? new Date().toISOString(),
     },
     artifacts: [],
-    history: [init.message],
+    history: [initialMessage],
     metadata: init.metadata,
   };
 }
@@ -70,13 +91,14 @@ export function transitionTask(
   options: TaskTransitionOptions = {},
 ): Task {
   assertValidTaskTransition(task.status.state, state);
+  const statusMessage = options.statusMessage ?? options.message;
 
   return {
     ...task,
     status: {
       state,
       timestamp: options.timestamp ?? new Date().toISOString(),
-      ...(options.message ? { message: options.message } : {}),
+      ...(statusMessage ? { message: statusMessage } : {}),
       ...(options.metadata ? { metadata: options.metadata } : {}),
     },
   };

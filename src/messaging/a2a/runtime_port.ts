@@ -15,21 +15,26 @@ export interface A2ARuntimePort {
   submitTask(request: SubmitTaskRequest): Promise<Task>;
   continueTask(request: ContinueTaskRequest): Promise<Task | null>;
   getTask(taskId: string): Promise<Task | null>;
-  streamTaskEvents(taskId: string): AsyncIterable<RuntimeTaskEvent>;
+  streamTaskEvents(taskId: string): AsyncIterable<CanonicalTaskLifecycleEvent>;
   cancelTask(taskId: string): Promise<Task | null>;
 }
 
 export interface SubmitTaskRequest {
   taskId: string;
-  message: A2AMessage;
+  canonicalMessage?: A2AMessage;
+  /** @deprecated Use `canonicalMessage`. */
+  message?: A2AMessage;
   contextId?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface ContinueTaskRequest {
   taskId: string;
-  message: A2AMessage;
+  canonicalMessage?: A2AMessage;
+  /** @deprecated Use `canonicalMessage`. */
+  message?: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 
 export type RuntimeTaskEvent = TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
+export type CanonicalTaskLifecycleEvent = RuntimeTaskEvent;

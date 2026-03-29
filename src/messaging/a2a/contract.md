@@ -7,7 +7,7 @@ This directory defines the canonical A2A task contract used by public transports
 Import public A2A types and ports from `src/messaging/a2a/mod.ts`.
 
 - protocol types: `Task`, `TaskStatus`, `TaskState`, events, messages, agent card types
-- runtime port: `A2ARuntimePort`, `SubmitTaskRequest`, `ContinueTaskRequest`, `RuntimeTaskEvent`
+- runtime port: `A2ARuntimePort`, `SubmitTaskRequest`, `ContinueTaskRequest`, `CanonicalTaskLifecycleEvent` (`RuntimeTaskEvent` alias temporaire)
 - transport entrypoints: `A2AClient`, `A2AServer`
 
 ## Internal contract

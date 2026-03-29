@@ -4,6 +4,7 @@
  * Only truly shared types belong here.
  * Domain-specific types live in their own domain (agent/types.ts, messaging/types.ts, etc.).
  */
+import type { Task } from "../messaging/a2a/types.ts";
 
 // ── Messages ──────────────────────────────────────────────
 
@@ -102,6 +103,16 @@ export interface AgentBrokerPort {
   ): Promise<ToolResult>;
   close(): void;
 }
+
+/** Canonical task operations required by the agent runtime. */
+export interface AgentCanonicalTaskPort {
+  getTask(taskId: string): Promise<Task | null>;
+  reportTaskResult(task: Task): Promise<Task>;
+}
+
+/** Official broker contract consumed by the agent runtime. */
+export interface AgentRuntimeBrokerPort
+  extends AgentBrokerPort, AgentCanonicalTaskPort {}
 
 // ── Sandbox permissions (cross-domain: used by agent/tools, orchestration, config) ─
 

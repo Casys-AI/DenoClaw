@@ -32,7 +32,7 @@ import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 import type { TraceCorrelationIds, TraceWriter } from "../telemetry/traces.ts";
 
-import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
+import type { ApprovalRequest, ApprovalResponse } from "./sandbox_types.ts";
 
 export type AskApprovalFn = (req: ApprovalRequest) => Promise<ApprovalResponse>;
 

@@ -7,7 +7,7 @@ import {
 import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
-import type { ApprovalRequest } from "../shared/types.ts";
+import type { ApprovalRequest } from "./sandbox_types.ts";
 
 // ── Stubs ────────────────────────────────────────────────
 

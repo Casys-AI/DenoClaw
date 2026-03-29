@@ -1,5 +1,5 @@
 import type { BrokerMessage } from "./types.ts";
-import type { SandboxPermission, ToolResult } from "../shared/types.ts";
+import type { SandboxPermission, ToolResult } from "../shared/mod.ts";
 import { ToolRegistry } from "../agent/tools/registry.ts";
 import { ShellTool } from "../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../agent/tools/file.ts";

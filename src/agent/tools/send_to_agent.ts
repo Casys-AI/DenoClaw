@@ -2,7 +2,7 @@ import type {
   SandboxPermission,
   ToolDefinition,
   ToolResult,
-} from "../../shared/types.ts";
+} from "../../shared/mod.ts";
 import { BaseTool } from "./registry.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 

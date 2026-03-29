@@ -4,7 +4,7 @@ import type {
   ExecPolicy,
   SandboxConfig,
   SandboxExecRequest,
-} from "../../../shared/types.ts";
+} from "../../../shared/mod.ts";
 
 // ── Helpers ──
 

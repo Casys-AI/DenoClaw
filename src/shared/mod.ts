@@ -20,28 +20,35 @@ export {
   getSkillsDir,
   truncate,
 } from "./helpers.ts";
+
 export type {
-  ActiveTaskEntry,
   AgentBrokerPort,
-  AgentEntry,
-  AgentStatusEntry,
-  AgentStatusValue,
-  ApprovalReason,
-  ApprovalRequest,
-  ApprovalResponse,
   BrokerEnvelope,
-  ChannelRouting,
-  ExecPolicy,
   LLMResponse,
   Message,
   MessageRole,
+  StructuredError,
+  ToolCall,
+  ToolDefinition,
+  ToolResult,
+} from "./contracts/broker.ts";
+
+export type { AgentEntry, ChannelRouting } from "./contracts/agent_registry.ts";
+
+export type {
+  ApprovalReason,
+  ApprovalRequest,
+  ApprovalResponse,
+  ExecPolicy,
   SandboxBackend,
   SandboxConfig,
   SandboxExecRequest,
   SandboxPermission,
-  StructuredError,
+} from "./contracts/sandbox.ts";
+
+export type {
+  ActiveTaskEntry,
+  AgentStatusEntry,
+  AgentStatusValue,
   TaskObservationEntry,
-  ToolCall,
-  ToolDefinition,
-  ToolResult,
-} from "./types.ts";
+} from "./contracts/observability.ts";

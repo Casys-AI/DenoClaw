@@ -4,7 +4,7 @@ import type {
   AgentResponse,
   ToolsConfig,
 } from "./types.ts";
-import type { SandboxConfig } from "../shared/types.ts";
+import type { SandboxConfig } from "../shared/mod.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { createSandboxBackend } from "./tools/backends/factory.ts";
@@ -32,7 +32,7 @@ import { log } from "../shared/log.ts";
 import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
 import type { TraceCorrelationIds, TraceWriter } from "../telemetry/traces.ts";
 
-import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
+import type { ApprovalRequest, ApprovalResponse } from "../shared/mod.ts";
 
 export type AskApprovalFn = (req: ApprovalRequest) => Promise<ApprovalResponse>;
 

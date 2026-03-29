@@ -9,7 +9,7 @@ import type {
   SandboxPermission,
   ToolDefinition,
   ToolResult,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 import type { AgentResponse } from "./types.ts";
 import { BaseTool } from "./tools/registry.ts";
 import { ProviderManager } from "../llm/manager.ts";

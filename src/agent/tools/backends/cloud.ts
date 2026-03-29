@@ -19,7 +19,7 @@ import type {
   SandboxExecRequest,
   SandboxPermission,
   ToolResult,
-} from "../../../shared/types.ts";
+} from "../../../shared/mod.ts";
 import { log } from "../../../shared/log.ts";
 
 const TOOLS_LOCAL_PATH = new URL("../", import.meta.url).pathname;

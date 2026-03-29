@@ -1,4 +1,4 @@
-import type { SandboxPermission } from "../shared/types.ts";
+import type { SandboxPermission } from "../shared/mod.ts";
 
 export const DENOCLAW_TUNNEL_PROTOCOL = "denoclaw.tunnel.v1";
 export const TUNNEL_IDLE_TIMEOUT_SECONDS = 30;

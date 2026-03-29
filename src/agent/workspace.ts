@@ -1,4 +1,4 @@
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry } from "../shared/mod.ts";
 import {
   ensureDir,
   fileExists,

@@ -5,7 +5,7 @@ import {
   parseCommand,
   ShellTool,
 } from "./shell.ts";
-import type { ExecPolicy } from "../../shared/types.ts";
+import type { ExecPolicy } from "../../shared/mod.ts";
 
 const shell = new ShellTool();
 

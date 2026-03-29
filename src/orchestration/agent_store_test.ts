@@ -1,6 +1,6 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import { AgentStore } from "./agent_store.ts";
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry } from "../shared/mod.ts";
 
 const AGENT_A: AgentEntry = {
   model: "claude-3-5-haiku-20241022",

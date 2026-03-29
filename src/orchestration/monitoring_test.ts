@@ -7,7 +7,7 @@ import {
 import type {
   AgentStatusValue,
   TaskObservationEntry,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 
 // ── buildWatchKeys ─────────────────────────────────────────
 

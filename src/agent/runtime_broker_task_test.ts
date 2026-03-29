@@ -10,7 +10,7 @@ import type {
   LLMResponse,
   Message,
   ToolResult,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 
 type BrokerTaskPortStub = AgentBrokerPort & {

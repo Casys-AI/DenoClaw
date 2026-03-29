@@ -1,6 +1,6 @@
 import type { A2AMessage } from "../messaging/a2a/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
-import type { BrokerEnvelope } from "../shared/types.ts";
+import type { BrokerEnvelope } from "../shared/mod.ts";
 
 export interface RuntimeTaskSubmitPayload {
   taskId: string;

@@ -8,7 +8,7 @@ import type {
   LLMResponse,
   SandboxPermission,
   StructuredError,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 
 interface BrokerEnvelopeBase<TType extends string, TPayload> {
   id: string;

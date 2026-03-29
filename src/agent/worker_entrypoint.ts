@@ -24,7 +24,7 @@ import { TraceWriter } from "../telemetry/traces.ts";
 import { generateId, getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
-import type { ApprovalRequest, ApprovalResponse } from "../shared/types.ts";
+import type { ApprovalRequest, ApprovalResponse } from "../shared/mod.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
   mapApprovalPauseToInputRequiredTask,

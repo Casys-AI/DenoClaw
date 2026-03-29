@@ -14,7 +14,7 @@ import type {
   Message,
   ToolDefinition,
   ToolResult,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import type { BrokerTransport } from "./transport.ts";
 import { KvQueueTransport } from "./transport.ts";

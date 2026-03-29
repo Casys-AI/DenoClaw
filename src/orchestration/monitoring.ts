@@ -9,7 +9,7 @@ import type {
   AgentStatusEntry,
   AgentStatusValue,
   TaskObservationEntry,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 
 export type {
   ActiveTaskEntry,

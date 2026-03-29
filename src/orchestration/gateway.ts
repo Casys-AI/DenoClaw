@@ -389,7 +389,7 @@ export class Gateway {
       try {
         const body = await req.json() as {
           agentId: string;
-          config: import("../shared/types.ts").AgentEntry;
+          config: import("../shared/mod.ts").AgentEntry;
         };
         if (!body.agentId || !body.config) {
           return Response.json({

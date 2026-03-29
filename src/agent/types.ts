@@ -1,9 +1,9 @@
 /**
  * Agent domain types.
- * Cross-domain types (AgentEntry, SandboxConfig, etc.) remain in src/shared/types.ts.
+ * Cross-domain types (AgentEntry, SandboxConfig, etc.) remain in src/shared/contracts/* and are re-exported by src/shared/mod.ts.
  */
 
-import type { AgentEntry, SandboxConfig, ToolCall } from "../shared/types.ts";
+import type { AgentEntry, SandboxConfig, ToolCall } from "../shared/mod.ts";
 
 export interface AgentConfig {
   model: string;

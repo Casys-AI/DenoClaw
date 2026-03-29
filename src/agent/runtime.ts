@@ -3,7 +3,7 @@ import type {
   ApprovalReason,
   BrokerEnvelope,
   ToolResult,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";

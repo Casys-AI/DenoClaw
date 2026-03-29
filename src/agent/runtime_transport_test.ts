@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import type { BrokerEnvelope } from "../shared/types.ts";
+import type { BrokerEnvelope } from "../shared/mod.ts";
 import {
   assertRuntimeTaskMessage,
   isRuntimeTaskMessage,

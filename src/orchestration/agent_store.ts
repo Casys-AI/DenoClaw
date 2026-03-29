@@ -5,7 +5,7 @@
  * Used by the gateway for CRUD API and by the broker at boot to load agents.
  */
 
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry } from "../shared/mod.ts";
 import { log } from "../shared/log.ts";
 
 const AGENT_PREFIX = ["config", "agents"];

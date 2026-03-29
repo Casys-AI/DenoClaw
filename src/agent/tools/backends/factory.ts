@@ -6,7 +6,7 @@
  * Fail-closed: "cloud" without token = error.
  */
 
-import type { SandboxBackend, SandboxConfig } from "../../../shared/types.ts";
+import type { SandboxBackend, SandboxConfig } from "../../../shared/mod.ts";
 import { ToolError } from "../../../shared/errors.ts";
 import { LocalProcessBackend } from "./local.ts";
 import { DenoSandboxBackend } from "./cloud.ts";

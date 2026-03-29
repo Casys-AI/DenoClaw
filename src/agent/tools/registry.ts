@@ -6,7 +6,7 @@ import type {
   SandboxPermission,
   ToolDefinition,
   ToolResult,
-} from "../../shared/types.ts";
+} from "../../shared/mod.ts";
 import type { ToolsConfig } from "../types.ts";
 import { log } from "../../shared/log.ts";
 

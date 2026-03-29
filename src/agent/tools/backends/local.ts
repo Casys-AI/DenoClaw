@@ -13,7 +13,7 @@ import type {
   SandboxExecRequest,
   SandboxPermission,
   ToolResult,
-} from "../../../shared/types.ts";
+} from "../../../shared/mod.ts";
 import { checkExecPolicy, filterEnv } from "../shell.ts";
 import { log } from "../../../shared/log.ts";
 

@@ -12,7 +12,7 @@ import type {
   SandboxPermission,
   StructuredError,
   ToolResult,
-} from "../shared/types.ts";
+} from "../shared/mod.ts";
 import type { Config } from "../config/types.ts";
 import type { BuiltinToolName } from "../agent/tools/types.ts";
 import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";

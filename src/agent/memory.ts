@@ -1,4 +1,4 @@
-import type { Message } from "../shared/types.ts";
+import type { Message } from "../shared/mod.ts";
 import type { LongTermFact, MemoryPort } from "./memory_port.ts";
 import { log } from "../shared/log.ts";
 

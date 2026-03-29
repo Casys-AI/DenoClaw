@@ -1,5 +1,5 @@
 import type { AgentCard, AgentSkill } from "./types.ts";
-import type { AgentEntry } from "../../shared/types.ts";
+import type { AgentEntry } from "../../shared/mod.ts";
 import type { AgentsConfig } from "../../agent/types.ts";
 
 /**

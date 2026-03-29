@@ -2,7 +2,7 @@
  * Agent tools domain types — phase 2 DDD migration.
  */
 
-import type { SandboxPermission } from "../../shared/types.ts";
+import type { SandboxPermission } from "../../shared/mod.ts";
 
 export type BuiltinToolName =
   | "shell"

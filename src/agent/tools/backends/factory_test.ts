@@ -1,7 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { createSandboxBackend } from "./factory.ts";
 import { LocalProcessBackend } from "./local.ts";
-import type { SandboxConfig } from "../../../shared/types.ts";
+import type { SandboxConfig } from "../../../shared/mod.ts";
 
 const baseSandbox: SandboxConfig = {
   allowedPermissions: ["read", "run"],

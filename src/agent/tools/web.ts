@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolResult } from "../../shared/types.ts";
+import type { ToolDefinition, ToolResult } from "../../shared/mod.ts";
 import { BaseTool } from "./registry.ts";
 
 export class WebFetchTool extends BaseTool {

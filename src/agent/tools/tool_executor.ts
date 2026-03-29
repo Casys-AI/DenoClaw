@@ -13,7 +13,7 @@
 import { ShellTool } from "./shell.ts";
 import { ReadFileTool, WriteFileTool } from "./file.ts";
 import { WebFetchTool } from "./web.ts";
-import type { ToolResult } from "../../shared/types.ts";
+import type { ToolResult } from "../../shared/mod.ts";
 
 interface ExecutorInput {
   tool: string;

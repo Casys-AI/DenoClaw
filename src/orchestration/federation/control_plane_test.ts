@@ -13,11 +13,11 @@ Deno.test("federation control-plane method guard", () => {
 Deno.test("federation control-plane router dispatches", async () => {
   const seen: string[] = [];
   const router = createFederationControlRouter({
-    federation_link_open: async () => seen.push("open"),
-    federation_link_ack: async () => seen.push("ack"),
-    federation_catalog_sync: async () => seen.push("sync"),
-    federation_route_probe: async () => seen.push("probe"),
-    federation_link_close: async () => seen.push("close"),
+    federation_link_open: async () => { seen.push("open"); },
+    federation_link_ack: async () => { seen.push("ack"); },
+    federation_catalog_sync: async () => { seen.push("sync"); },
+    federation_route_probe: async () => { seen.push("probe"); },
+    federation_link_close: async () => { seen.push("close"); },
   });
 
   const envelope: FederationControlEnvelope = {

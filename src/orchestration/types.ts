@@ -153,9 +153,6 @@ export type BrokerTaskResultMessage = BrokerEnvelope<
   "task_result",
   BrokerTaskResultPayload
 >;
-<<<<<<< HEAD
-export type BrokerErrorMessage = BrokerEnvelope<"error", StructuredError>;
-=======
 export type BrokerFederationLinkOpenMessage = BrokerEnvelope<
   "federation_link_open",
   FederationLinkOpenPayload
@@ -177,7 +174,6 @@ export type BrokerFederationLinkCloseMessage = BrokerEnvelope<
   FederationLinkClosePayload
 >;
 export type BrokerErrorMessage = BrokerEnvelope<"error", StructuredError>;
->>>>>>> 70fb751 (test: enforce bilateral federation policy and A2A non-regression)
 
 /** Broker-level runtime operations that are not canonical task semantics. */
 export type BrokerRuntimeMessage =

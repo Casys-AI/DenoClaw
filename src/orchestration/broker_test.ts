@@ -50,18 +50,45 @@ async function seedPeerPolicy(
   });
 }
 
+
+function createQueueCollector(kv: Deno.Kv): BrokerMessage[] {
+  const messages: BrokerMessage[] = [];
+  kv.listenQueue((raw: unknown) => {
+    messages.push(raw as BrokerMessage);
+  });
+  return messages;
+}
+
+async function waitForCollectedMessage(
+  messages: BrokerMessage[],
+  predicate: (message: BrokerMessage) => boolean,
+): Promise<BrokerMessage> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const match = messages.find(predicate);
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for collected message");
+}
+
 function waitForQueuedMessage(
   kv: Deno.Kv,
   predicate: (message: BrokerMessage) => boolean,
 ): Promise<BrokerMessage> {
+  let settled = false;
+
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      settled = true;
       reject(new Error("Timed out waiting for queued message"));
     }, 5_000);
 
     kv.listenQueue((raw: unknown) => {
+      if (settled) return;
       const message = raw as BrokerMessage;
       if (!predicate(message)) return;
+      settled = true;
       clearTimeout(timer);
       resolve(message);
     });
@@ -517,12 +544,7 @@ Deno.test("BrokerServer keeps canonical A2A task flow after federation control m
       timestamp: new Date().toISOString(),
     });
 
-    const submitForwardedPromise = waitForQueuedMessage(
-      kv,
-      (message) =>
-        message.type === "task_submit" && message.to === "agent-beta" &&
-        message.payload.taskId === "task-a2a-regression",
-    );
+    const queuedMessages = createQueueCollector(kv);
 
     const submitted = await broker.submitAgentTask("agent-alpha", {
       targetAgent: "agent-beta",
@@ -531,18 +553,16 @@ Deno.test("BrokerServer keeps canonical A2A task flow after federation control m
     });
 
     assertEquals(submitted.status.state, "SUBMITTED");
-    const submitForwarded = await submitForwardedPromise as Extract<
+    const submitForwarded = await waitForCollectedMessage(
+      queuedMessages,
+      (message) =>
+        message.type === "task_submit" && message.to === "agent-beta" &&
+        message.payload.taskId === "task-a2a-regression",
+    ) as Extract<
       BrokerMessage,
       { type: "task_submit" }
     >;
     assertEquals(submitForwarded.payload.targetAgent, "agent-beta");
-
-    const continuedForwardedPromise = waitForQueuedMessage(
-      kv,
-      (message) =>
-        message.type === "task_continue" && message.to === "agent-beta" &&
-        message.payload.taskId === submitted.id,
-    );
 
     await kv.set(["a2a_tasks", submitted.id], {
       ...submitted,
@@ -557,13 +577,18 @@ Deno.test("BrokerServer keeps canonical A2A task flow after federation control m
       message: createMessage("Continue please"),
     });
 
-    const continuedForwarded = await continuedForwardedPromise as Extract<
+    const continuedForwarded = await waitForCollectedMessage(
+      queuedMessages,
+      (message) =>
+        message.type === "task_continue" && message.to === "agent-beta" &&
+        message.payload.taskId === submitted.id,
+    ) as Extract<
       BrokerMessage,
       { type: "task_continue" }
     >;
     assertEquals(continuedForwarded.payload.taskId, submitted.id);
 
-    await broker.cancelTask("agent-alpha", { taskId: submitted.id });
+    await broker.cancelTask({ taskId: submitted.id });
     const canceled = await broker.getTask({ taskId: submitted.id });
     assertEquals(canceled?.status.state, "CANCELED");
 

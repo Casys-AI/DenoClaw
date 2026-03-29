@@ -2,6 +2,7 @@ import { assertEquals, assertExists } from "@std/assert";
 import { BrokerClient } from "./client.ts";
 import type { BrokerMessage } from "./types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
+import type { AgentRuntimeBrokerPort } from "../shared/types.ts";
 
 function createTask(taskId: string): Task {
   return {
@@ -200,4 +201,26 @@ Deno.test("BrokerClient.reportTaskResult round-trips canonical task updates", as
     kv.close();
     await Deno.remove(kvPath);
   }
+});
+
+Deno.test("BrokerClient satisfies the official AgentRuntimeBrokerPort contract", () => {
+  const client = new BrokerClient("agent-contract", {
+    transport: {
+      start: () => Promise.resolve(),
+      close: () => {},
+      send: () =>
+        Promise.resolve({
+          id: crypto.randomUUID(),
+          from: "broker",
+          to: "agent-contract",
+          type: "task_result",
+          payload: { task: createTask("contract-task") },
+          timestamp: new Date().toISOString(),
+        } as BrokerMessage),
+    },
+  });
+
+  const runtimePort: AgentRuntimeBrokerPort = client;
+  assertExists(runtimePort);
+  client.close();
 });

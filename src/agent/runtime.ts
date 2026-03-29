@@ -1,5 +1,5 @@
 import type {
-  AgentBrokerPort,
+  AgentRuntimeBrokerPort,
   ApprovalReason,
   BrokerEnvelope,
   ToolResult,
@@ -42,15 +42,10 @@ import {
  * KV Queue listener in local mode. The runtime does not assume any
  * specific transport mechanism.
  */
-type BrokerCanonicalTaskPort = AgentBrokerPort & {
-  getTask(taskId: string): Promise<Task | null>;
-  reportTaskResult(task: Task): Promise<Task>;
-};
-
 export class AgentRuntime {
   private agentId: string;
   private config: AgentConfig;
-  private broker: AgentBrokerPort;
+  private broker: AgentRuntimeBrokerPort;
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
   private skills: SkillsLoader;
@@ -61,7 +56,7 @@ export class AgentRuntime {
   constructor(
     agentId: string,
     config: AgentConfig,
-    broker: AgentBrokerPort,
+    broker: AgentRuntimeBrokerPort,
     maxIterations = 10,
   ) {
     this.agentId = agentId;
@@ -149,16 +144,10 @@ export class AgentRuntime {
       const taskId = payload?.taskId;
       if (taskId) {
         try {
-          const port = this.broker as Partial<BrokerCanonicalTaskPort>;
-          if (
-            typeof port.getTask === "function" &&
-            typeof port.reportTaskResult === "function"
-          ) {
-            const existing = await port.getTask(taskId);
-            if (existing) {
-              const failed = mapTaskErrorToTerminalStatus(existing, e);
-              await port.reportTaskResult(failed);
-            }
+          const existing = await this.broker.getTask(taskId);
+          if (existing) {
+            const failed = mapTaskErrorToTerminalStatus(existing, e);
+            await this.broker.reportTaskResult(failed);
           }
         } catch (reportErr) {
           log.error(
@@ -195,7 +184,7 @@ export class AgentRuntime {
     msg: RuntimeTaskContinueMessage,
   ): Promise<void> {
     const payload = msg.payload;
-    const existing = await this.getCanonicalTaskPort().getTask(payload.taskId);
+    const existing = await this.broker.getTask(payload.taskId);
     if (!existing) {
       throw new DenoClawError(
         "TASK_NOT_FOUND",
@@ -368,25 +357,6 @@ export class AgentRuntime {
     return text || "[non-text task payload]";
   }
 
-  private getCanonicalTaskPort(): BrokerCanonicalTaskPort {
-    const broker = this.broker as Partial<BrokerCanonicalTaskPort>;
-    if (typeof broker.getTask !== "function") {
-      throw new DenoClawError(
-        "BROKER_PORT_MISSING_METHOD",
-        { method: "getTask" },
-        "Use a BrokerClient that supports canonical task operations",
-      );
-    }
-    if (typeof broker.reportTaskResult !== "function") {
-      throw new DenoClawError(
-        "BROKER_PORT_MISSING_METHOD",
-        { method: "reportTaskResult" },
-        "Use a BrokerClient that supports canonical task operations",
-      );
-    }
-    return broker as BrokerCanonicalTaskPort;
-  }
-
   private extractApprovalPause(
     result: ToolResult,
   ):
@@ -422,7 +392,7 @@ export class AgentRuntime {
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {
-    await this.getCanonicalTaskPort().reportTaskResult(task);
+    await this.broker.reportTaskResult(task);
   }
 
   async stop(): Promise<void> {

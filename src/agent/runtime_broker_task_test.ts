@@ -2,23 +2,17 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { AgentRuntime } from "./runtime.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type {
-  RuntimeTaskContinueMessage,
-  RuntimeTaskSubmitMessage,
-} from "./runtime_transport.ts";
-import type {
-  AgentBrokerPort,
+  AgentRuntimeBrokerPort,
   LLMResponse,
   Message,
   ToolResult,
 } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 
-type BrokerTaskPortStub = AgentBrokerPort & {
+type BrokerTaskPortStub = AgentRuntimeBrokerPort & {
   reportedTasks: Task[];
   currentTask: Task | null;
   lastExecCorrelation?: { taskId?: string; contextId?: string };
-  getTask(taskId: string): Promise<Task | null>;
-  reportTaskResult(task: Task): Promise<Task>;
 };
 
 class MemoryStub implements MemoryPort {
@@ -118,8 +112,6 @@ function createRuntime(
         _facts: unknown[],
       ): Message[];
     };
-    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
-    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
   };
 
   runtimeAny.getMemory = (_sessionId: string) => Promise.resolve(memory);
@@ -137,11 +129,7 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
   const broker = createBrokerStub("completed");
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
-  const runtimeAny = runtime as unknown as {
-    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
-  };
-
-  await runtimeAny.handleTaskSubmitMessage({
+  await runtime.handleIncomingMessage({
     id: "msg-1",
     from: "agent-alpha",
     to: "agent-beta",
@@ -193,11 +181,7 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
   };
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
-  const runtimeAny = runtime as unknown as {
-    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
-  };
-
-  await runtimeAny.handleTaskContinueMessage({
+  await runtime.handleIncomingMessage({
     id: "msg-2",
     from: "agent-alpha",
     to: "agent-beta",
@@ -268,11 +252,7 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
 
   const memory = new MemoryStub();
   const runtime = createRuntime(broker, memory);
-  const runtimeAny = runtime as unknown as {
-    handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
-  };
-
-  await runtimeAny.handleTaskSubmitMessage({
+  await runtime.handleIncomingMessage({
     id: "msg-approval",
     from: "agent-alpha",
     to: "agent-beta",
@@ -309,6 +289,53 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
     "assistant",
     "tool",
   ]);
+});
+
+Deno.test("AgentRuntime reports FAILED through official runtime broker port when execution errors", async () => {
+  const broker = createBrokerStub();
+  broker.complete = () => Promise.reject(new Error("LLM unavailable"));
+  broker.currentTask = {
+    id: "task-failure",
+    contextId: "ctx-failure",
+    status: {
+      state: "INPUT_REQUIRED",
+      timestamp: new Date().toISOString(),
+    },
+    artifacts: [],
+    history: [
+      {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Initial request" }],
+      },
+    ],
+  };
+
+  const memory = new MemoryStub();
+  const runtime = createRuntime(broker, memory);
+
+  await runtime.handleIncomingMessage({
+    id: "msg-failure",
+    from: "agent-alpha",
+    to: "agent-beta",
+    type: "task_continue",
+    timestamp: new Date().toISOString(),
+    payload: {
+      taskId: "task-failure",
+      message: {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Continue please" }],
+      },
+    },
+  });
+
+  assertEquals(broker.reportedTasks.map((task) => task.status.state), [
+    "WORKING",
+    "FAILED",
+  ]);
+  const failureArtifact = broker.reportedTasks[1]?.artifacts[0];
+  assertEquals(failureArtifact?.name, "error");
 });
 
 Deno.test("AgentRuntime rejects non-canonical broker envelopes fail-fast", async () => {

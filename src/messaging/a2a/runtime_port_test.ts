@@ -1,8 +1,8 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
 import type {
   A2ARuntimePort,
+  CanonicalTaskLifecycleEvent,
   ContinueTaskRequest,
-  RuntimeTaskEvent,
   SubmitTaskRequest,
 } from "./runtime_port.ts";
 import type {
@@ -12,16 +12,29 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from "./types.ts";
-import { createCanonicalTask } from "./internal_contract.ts";
+import { createCanonicalTask, transitionTask } from "./internal_contract.ts";
 
 class InMemoryRuntimePort implements A2ARuntimePort {
   #tasks = new Map<string, Task>();
-  #events = new Map<string, RuntimeTaskEvent[]>();
+  #events = new Map<string, CanonicalTaskLifecycleEvent[]>();
+
+  #resolveCanonicalMessage(
+    request: Pick<
+      SubmitTaskRequest | ContinueTaskRequest,
+      "canonicalMessage" | "message"
+    >,
+  ): A2AMessage {
+    const canonicalMessage = request.canonicalMessage ?? request.message;
+    if (!canonicalMessage) {
+      throw new Error("Missing canonical message");
+    }
+    return canonicalMessage;
+  }
 
   submitTask(request: SubmitTaskRequest): Promise<Task> {
     const task = createCanonicalTask({
       id: request.taskId,
-      message: request.message,
+      initialMessage: this.#resolveCanonicalMessage(request),
       contextId: request.contextId,
       metadata: request.metadata,
     });
@@ -40,16 +53,13 @@ class InMemoryRuntimePort implements A2ARuntimePort {
   continueTask(request: ContinueTaskRequest): Promise<Task | null> {
     const task = this.#tasks.get(request.taskId);
     if (!task) return Promise.resolve(null);
+    const continuationMessage = this.#resolveCanonicalMessage(request);
 
-    const continued: Task = {
-      ...task,
-      history: [...task.history, request.message],
-      status: {
-        state: "WORKING",
-        timestamp: new Date().toISOString(),
-        metadata: request.metadata,
-      },
-    };
+    const continued = transitionTask(
+      { ...task, history: [...task.history, continuationMessage] },
+      "WORKING",
+      { metadata: request.metadata },
+    );
     this.#tasks.set(request.taskId, continued);
     this.#events.get(request.taskId)?.push({
       kind: "taskStatusUpdate",
@@ -64,7 +74,9 @@ class InMemoryRuntimePort implements A2ARuntimePort {
     return Promise.resolve(this.#tasks.get(taskId) ?? null);
   }
 
-  async *streamTaskEvents(taskId: string): AsyncIterable<RuntimeTaskEvent> {
+  async *streamTaskEvents(
+    taskId: string,
+  ): AsyncIterable<CanonicalTaskLifecycleEvent> {
     for (const event of this.#events.get(taskId) ?? []) {
       yield event;
     }
@@ -114,7 +126,7 @@ Deno.test("A2A runtime port supports submit/get/continue/cancel flows", async ()
 
   const created = await port.submitTask({
     taskId,
-    message: createMessage("hello"),
+    canonicalMessage: createMessage("hello"),
   });
   assertEquals(created.id, taskId);
   assertEquals(created.contextId, taskId);
@@ -125,7 +137,7 @@ Deno.test("A2A runtime port supports submit/get/continue/cancel flows", async ()
 
   const resumed = await port.continueTask({
     taskId,
-    message: createMessage("continue"),
+    canonicalMessage: createMessage("continue"),
     metadata: { resumed: true },
   });
   assertEquals(resumed?.status.state, "WORKING");
@@ -142,7 +154,7 @@ Deno.test("A2A runtime port streams canonical status and artifact events", async
   await port.submitTask({
     taskId,
     contextId: "ctx-2",
-    message: createMessage("start"),
+    canonicalMessage: createMessage("start"),
   });
   port.recordArtifact(taskId, {
     artifactId: "artifact-1",
@@ -150,7 +162,7 @@ Deno.test("A2A runtime port streams canonical status and artifact events", async
     parts: [{ kind: "text", text: "done" }],
   });
 
-  const events = [] as RuntimeTaskEvent[];
+  const events = [] as CanonicalTaskLifecycleEvent[];
   for await (const event of port.streamTaskEvents(taskId)) {
     events.push(event);
   }

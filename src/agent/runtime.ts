@@ -10,6 +10,10 @@ import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import {
+  extractContinuationTaskMessage,
+  extractSubmitTaskMessage,
+} from "./runtime_transport.ts";
+import {
   createCanonicalTask,
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
@@ -168,7 +172,8 @@ export class AgentRuntime {
     msg: RuntimeTaskSubmitMessage,
   ): Promise<void> {
     const payload = msg.payload;
-    const inputText = this.extractTextFromMessage(payload.message);
+    const taskMessage = extractSubmitTaskMessage(payload);
+    const inputText = this.extractTextFromMessage(taskMessage);
     log.info(
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
@@ -179,7 +184,7 @@ export class AgentRuntime {
       canonicalTask: createCanonicalTask({
         id: payload.taskId,
         contextId: payload.contextId,
-        message: payload.message,
+        initialMessage: taskMessage,
       }),
       reportWorkingTransition: true,
     });
@@ -189,6 +194,7 @@ export class AgentRuntime {
     msg: RuntimeTaskContinueMessage,
   ): Promise<void> {
     const payload = msg.payload;
+    const continuationMessage = extractContinuationTaskMessage(payload);
     const existing = await this.canonicalTaskPort.getTask(payload.taskId);
     if (!existing) {
       throw new DenoClawError(
@@ -199,12 +205,12 @@ export class AgentRuntime {
     }
 
     const resumed = transitionTask(existing, "WORKING", {
-      message: payload.message,
+      statusMessage: continuationMessage,
     });
-    resumed.history = [...existing.history, payload.message];
+    resumed.history = [...existing.history, continuationMessage];
     await this.reportCanonicalTaskResult(resumed);
 
-    const inputText = this.extractTextFromMessage(payload.message);
+    const inputText = this.extractTextFromMessage(continuationMessage);
     log.info(
       `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );

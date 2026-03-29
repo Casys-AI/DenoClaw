@@ -2,6 +2,8 @@ import { assertEquals, assertThrows } from "@std/assert";
 import type { BrokerEnvelope } from "../shared/types.ts";
 import {
   assertRuntimeTaskMessage,
+  extractContinuationTaskMessage,
+  extractSubmitTaskMessage,
   isRuntimeTaskMessage,
 } from "./runtime_transport.ts";
 
@@ -30,5 +32,34 @@ Deno.test("runtime transport assertion rejects non-canonical broker envelopes", 
     },
     Error,
     "INVALID_BROKER_MESSAGE",
+  );
+});
+
+Deno.test("runtime transport extractors support canonical fields with legacy aliases", () => {
+  const canonicalInput = {
+    messageId: "m1",
+    role: "user" as const,
+    parts: [{ kind: "text" as const, text: "hello" }],
+  };
+
+  assertEquals(
+    extractSubmitTaskMessage({ taskId: "t1", taskMessage: canonicalInput }),
+    canonicalInput,
+  );
+  assertEquals(
+    extractContinuationTaskMessage({
+      taskId: "t1",
+      continuationMessage: canonicalInput,
+    }),
+    canonicalInput,
+  );
+
+  assertEquals(
+    extractSubmitTaskMessage({ taskId: "t1", message: canonicalInput }),
+    canonicalInput,
+  );
+  assertEquals(
+    extractContinuationTaskMessage({ taskId: "t1", message: canonicalInput }),
+    canonicalInput,
   );
 });

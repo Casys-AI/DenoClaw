@@ -26,3 +26,7 @@ Import public A2A types and ports from `src/messaging/a2a/mod.ts`.
 `INPUT_REQUIRED` details live under `status.metadata.awaitedInput`, using helpers from `input_metadata.ts`.
 
 When a task resumes, the runtime should emit a fresh `WORKING` status instead of carrying forward stale awaited-input metadata.
+
+## Naming compatibility
+
+During the migration, transport-facing payloads may still expose `message` as a legacy alias. New code should prefer `taskMessage`, `continuationMessage`, `initialMessage`, and `statusMessage` depending on the lifecycle stage.

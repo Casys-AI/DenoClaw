@@ -1,5 +1,6 @@
 import {
   appendArtifactToTask,
+  appendMessageToTask,
   assertValidTaskTransition,
   canTransitionTaskState,
   classifyRefusalTerminalState,
@@ -112,4 +113,13 @@ Deno.test("appendArtifactToTask does not mutate terminal tasks", () => {
   const nextWorkingTask = appendArtifactToTask(workingTask, artifact);
   assertEquals(nextWorkingTask.artifacts.length, 1);
   assertEquals(workingTask.artifacts.length, 0);
+});
+
+Deno.test("appendMessageToTask appends immutably", () => {
+  const task = createTask("WORKING");
+  const message = createMessage("follow-up");
+
+  const nextTask = appendMessageToTask(task, message);
+  assertEquals(nextTask.history.length, 2);
+  assertEquals(task.history.length, 1);
 });

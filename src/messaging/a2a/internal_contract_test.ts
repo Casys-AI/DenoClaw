@@ -35,13 +35,23 @@ function createTask(state: Task["status"]["state"]): Task {
 Deno.test("createCanonicalTask keeps a stable id and explicit context policy", () => {
   const task = createCanonicalTask({
     id: "task-1",
-    message: createMessage("hello"),
+    initialMessage: createMessage("hello"),
   });
 
   assertEquals(task.id, "task-1");
   assertEquals(task.contextId, "task-1");
   assertEquals(resolveTaskContextId("task-1"), "task-1");
   assertEquals(resolveTaskContextId("task-1", "ctx-9"), "ctx-9");
+});
+
+Deno.test("createCanonicalTask preserves legacy message alias for compatibility", () => {
+  const message = createMessage("hello");
+  const task = createCanonicalTask({
+    id: "task-legacy",
+    message,
+  });
+
+  assertEquals(task.history[0], message);
 });
 
 Deno.test("canTransitionTaskState allows only canonical transitions", () => {
@@ -83,6 +93,15 @@ Deno.test("transitionTask applies canonical status changes without leaking stale
   assertEquals(resumed.status.state, "WORKING");
   assertEquals(resumed.status.metadata, undefined);
   assertEquals(resumed.status.message, undefined);
+});
+
+Deno.test("transitionTask accepts statusMessage as canonical alias", () => {
+  const statusMessage = createMessage("working");
+  const resumed = transitionTask(createTask("SUBMITTED"), "WORKING", {
+    statusMessage,
+  });
+
+  assertEquals(resumed.status.message, statusMessage);
 });
 
 Deno.test("isTerminalTaskState marks only terminal states", () => {

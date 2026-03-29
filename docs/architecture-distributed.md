@@ -484,3 +484,14 @@ That is why the single-dispatcher pattern exists.
 7. **Inter-agent A2A** — HTTP routing + SSE streaming (long tasks)
 8. **Agent lifecycle** — Subhosting API v2 (Apps/Revisions)
 9. **Dashboard** — state observation through KV Watch (Broker KV)
+
+
+## Canonical task naming glossary
+
+- **canonical task message**: the domain-level A2A message that represents user intent or continuation input, independent from transport wrappers
+- **taskMessage**: preferred payload field for `task_submit` broker/runtime envelopes
+- **continuationMessage**: preferred payload field for `task_continue` broker/runtime envelopes
+- **initialMessage**: preferred field used to create the first canonical task history entry
+- **statusMessage**: preferred field attached to a task state transition
+- **message**: temporary compatibility alias kept during migration; not the long-term preferred field name
+

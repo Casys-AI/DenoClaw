@@ -101,3 +101,10 @@ export function appendArtifactToTask(task: Task, artifact: Artifact): Task {
     artifacts: [...task.artifacts, artifact],
   };
 }
+
+export function appendMessageToTask(task: Task, message: A2AMessage): Task {
+  return {
+    ...task,
+    history: [...task.history, message],
+  };
+}

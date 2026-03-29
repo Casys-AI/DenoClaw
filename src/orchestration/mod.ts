@@ -10,3 +10,4 @@ export { LocalRelay } from "./relay.ts";
 export { Gateway } from "./gateway.ts";
 export type { GatewayDeps } from "./gateway.ts";
 export * from "./monitoring.ts";
+export * from "./tool_execution_port.ts";

@@ -27,6 +27,7 @@ import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { log } from "./src/shared/log.ts";
 import { createDashboardHandler } from "./web/mod.ts";
+import { createToolExecutionAdapter } from "./src/agent/tools/backends/tool_execution_adapter.ts";
 
 const args = parseArgs(Deno.args, {
   string: [
@@ -271,7 +272,8 @@ To start:
 
 async function broker(config: Config): Promise<void> {
   const port = parseInt(args._[1] as string) || 3000;
-  const srv = new BrokerServer(config);
+  const toolExecution = createToolExecutionAdapter(["shell", "read_file", "write_file", "web_fetch"]);
+  const srv = new BrokerServer(config, { toolExecution });
   await srv.start(port);
 
   console.log(`Broker started on port ${port}`);
@@ -301,12 +303,13 @@ async function tunnel(): Promise<void> {
   console.log(`\nCapabilities:`);
   console.log(`  Tools: ${tools.join(", ")}`);
 
+  const toolExecution = createToolExecutionAdapter(tools);
   const relay = new LocalRelay({
     brokerUrl,
     inviteToken: token,
     capabilities: { tools },
     autoApprove: true,
-  });
+  }, { toolExecution });
 
   await relay.connect();
   console.log("\nTunnel connected. Press Ctrl+C to disconnect.");

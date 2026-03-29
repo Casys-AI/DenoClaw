@@ -14,9 +14,7 @@ import type {
   ToolResult,
 } from "../shared/types.ts";
 import type { Config } from "../config/types.ts";
-import type { BuiltinToolName } from "../agent/tools/types.ts";
-import { BUILTIN_TOOL_PERMISSIONS } from "../agent/tools/types.ts";
-import { checkExecPolicy } from "../agent/tools/shell.ts";
+import { createUnsupportedToolExecutionPort, type ToolExecutionPort } from "./tool_execution_port.ts";
 import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";
 import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
@@ -62,6 +60,7 @@ export interface BrokerServerDeps {
   metrics?: MetricsCollector;
   kv?: Deno.Kv;
   taskStore?: TaskStore;
+  toolExecution?: ToolExecutionPort;
 }
 
 interface ApprovalGrant {
@@ -109,6 +108,7 @@ export class BrokerServer {
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
   private taskStore: TaskStore;
+  private toolExecution: ToolExecutionPort;
   private tunnels = new Map<
     string,
     TunnelConnection
@@ -127,6 +127,7 @@ export class BrokerServer {
     this.kv = deps?.kv ?? null;
     this.ownsKv = !deps?.kv;
     this.taskStore = deps?.taskStore ?? new TaskStore(deps?.kv);
+    this.toolExecution = deps?.toolExecution ?? createUnsupportedToolExecutionPort();
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -414,7 +415,7 @@ export class BrokerServer {
     if (!command) return null;
 
     const policy = agentPolicy ?? defaultPolicy ?? DEFAULT_EXEC_POLICY;
-    const check = checkExecPolicy(command, policy);
+    const check = this.toolExecution.evaluateExecPolicy(command, policy);
     if (check.allowed) return null;
 
     if (
@@ -515,28 +516,11 @@ export class BrokerServer {
     await this.sendReply(reply);
   }
 
-  /**
-   * Resolve tool permissions (ADR-005).
-   * Built-in map = source of truth for known tools.
-   * Tunnel-advertised = custom tools that are not in the built-in map.
-   */
-  private isBuiltinTool(tool: string): tool is BuiltinToolName {
-    return tool in BUILTIN_TOOL_PERMISSIONS;
-  }
-
   private resolveToolPermissions(tool: string): SandboxPermission[] {
-    // 1. Built-in map (source of truth, cannot be overridden by a tunnel)
-    if (this.isBuiltinTool(tool)) return [...BUILTIN_TOOL_PERMISSIONS[tool]];
-
-    // 2. Tunnel-advertised (custom tools only)
-    for (const [_, t] of this.tunnels) {
-      if (t.capabilities.toolPermissions?.[tool]) {
-        return [...t.capabilities.toolPermissions[tool]];
-      }
-    }
-
-    // 3. Deny by default — unknown tool = no permissions
-    return [];
+    return this.toolExecution.resolveRequiredPermissions(
+      tool,
+      Array.from(this.tunnels.values()).map((connection) => connection.capabilities),
+    );
   }
 
 

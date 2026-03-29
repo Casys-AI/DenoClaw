@@ -17,7 +17,8 @@ import {
 } from "../shared/helpers.ts";
 import { ensureDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
-import type { AgentEntry, ApprovalReason } from "../shared/types.ts";
+import type { AgentEntry } from "../shared/types.ts";
+import type { ApprovalReason } from "./sandbox_types.ts";
 
 interface PendingRequest {
   resolve: (value: AgentResponse) => void;

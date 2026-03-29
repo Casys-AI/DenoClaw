@@ -8,11 +8,11 @@ import type {
 } from "./types.ts";
 import type {
   AgentEntry,
-  ExecPolicy,
   SandboxPermission,
   StructuredError,
   ToolResult,
 } from "../shared/types.ts";
+import type { ExecPolicy } from "../agent/sandbox_types.ts";
 import type { Config } from "../config/types.ts";
 import { AuthManager } from "./auth.ts";
 import { ProviderManager } from "../llm/manager.ts";

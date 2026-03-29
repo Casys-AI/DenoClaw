@@ -23,6 +23,8 @@ export {
 export type {
   ActiveTaskEntry,
   AgentBrokerPort,
+  AgentCanonicalTaskPort,
+  AgentLlmToolPort,
   AgentEntry,
   AgentStatusEntry,
   AgentStatusValue,

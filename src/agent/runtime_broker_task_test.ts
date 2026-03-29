@@ -6,14 +6,15 @@ import type {
   RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
 import type {
-  AgentBrokerPort,
+  AgentCanonicalTaskPort,
+  AgentLlmToolPort,
   LLMResponse,
   Message,
   ToolResult,
 } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 
-type BrokerTaskPortStub = AgentBrokerPort & {
+type BrokerTaskPortStub = AgentLlmToolPort & AgentCanonicalTaskPort<Task> & {
   reportedTasks: Task[];
   currentTask: Task | null;
   lastExecCorrelation?: { taskId?: string; contextId?: string };
@@ -105,6 +106,7 @@ function createRuntime(
       temperature: 0.2,
       maxTokens: 256,
     },
+    broker,
     broker,
   );
 

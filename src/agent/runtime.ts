@@ -1,5 +1,6 @@
 import type {
-  AgentBrokerPort,
+  AgentCanonicalTaskPort,
+  AgentLlmToolPort,
   ApprovalReason,
   BrokerEnvelope,
   ToolResult,
@@ -42,15 +43,12 @@ import {
  * KV Queue listener in local mode. The runtime does not assume any
  * specific transport mechanism.
  */
-type BrokerCanonicalTaskPort = AgentBrokerPort & {
-  getTask(taskId: string): Promise<Task | null>;
-  reportTaskResult(task: Task): Promise<Task>;
-};
 
 export class AgentRuntime {
   private agentId: string;
   private config: AgentConfig;
-  private broker: AgentBrokerPort;
+  private llmToolPort: AgentLlmToolPort;
+  private canonicalTaskPort: AgentCanonicalTaskPort<Task>;
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
   private skills: SkillsLoader;
@@ -61,12 +59,14 @@ export class AgentRuntime {
   constructor(
     agentId: string,
     config: AgentConfig,
-    broker: AgentBrokerPort,
+    llmToolPort: AgentLlmToolPort,
+    canonicalTaskPort: AgentCanonicalTaskPort<Task>,
     maxIterations = 10,
   ) {
     this.agentId = agentId;
     this.config = config;
-    this.broker = broker;
+    this.llmToolPort = llmToolPort;
+    this.canonicalTaskPort = canonicalTaskPort;
     this.context = new ContextBuilder(config);
     this.skills = new SkillsLoader();
     this.maxIterations = maxIterations;
@@ -91,7 +91,7 @@ export class AgentRuntime {
     log.info(`AgentRuntime started: ${this.agentId}`);
 
     await this.skills.loadSkills();
-    await this.broker.startListening();
+    await this.llmToolPort.startListening();
 
     const kv = await this.getKv();
     this.cron = new CronManager(kv);
@@ -149,16 +149,10 @@ export class AgentRuntime {
       const taskId = payload?.taskId;
       if (taskId) {
         try {
-          const port = this.broker as Partial<BrokerCanonicalTaskPort>;
-          if (
-            typeof port.getTask === "function" &&
-            typeof port.reportTaskResult === "function"
-          ) {
-            const existing = await port.getTask(taskId);
-            if (existing) {
-              const failed = mapTaskErrorToTerminalStatus(existing, e);
-              await port.reportTaskResult(failed);
-            }
+          const existing = await this.canonicalTaskPort.getTask(taskId);
+          if (existing) {
+            const failed = mapTaskErrorToTerminalStatus(existing, e);
+            await this.canonicalTaskPort.reportTaskResult(failed);
           }
         } catch (reportErr) {
           log.error(
@@ -195,7 +189,7 @@ export class AgentRuntime {
     msg: RuntimeTaskContinueMessage,
   ): Promise<void> {
     const payload = msg.payload;
-    const existing = await this.getCanonicalTaskPort().getTask(payload.taskId);
+    const existing = await this.canonicalTaskPort.getTask(payload.taskId);
     if (!existing) {
       throw new DenoClawError(
         "TASK_NOT_FOUND",
@@ -252,7 +246,7 @@ export class AgentRuntime {
           [],
         );
 
-        const response = await this.broker.complete(
+        const response = await this.llmToolPort.complete(
           contextMessages,
           this.config.model,
           this.config.temperature,
@@ -281,7 +275,7 @@ export class AgentRuntime {
               continue;
             }
 
-            const result = await this.broker.execTool(
+            const result = await this.llmToolPort.execTool(
               tc.function.name,
               args,
               { taskId: canonicalTask.id, contextId: canonicalTask.contextId },
@@ -368,25 +362,6 @@ export class AgentRuntime {
     return text || "[non-text task payload]";
   }
 
-  private getCanonicalTaskPort(): BrokerCanonicalTaskPort {
-    const broker = this.broker as Partial<BrokerCanonicalTaskPort>;
-    if (typeof broker.getTask !== "function") {
-      throw new DenoClawError(
-        "BROKER_PORT_MISSING_METHOD",
-        { method: "getTask" },
-        "Use a BrokerClient that supports canonical task operations",
-      );
-    }
-    if (typeof broker.reportTaskResult !== "function") {
-      throw new DenoClawError(
-        "BROKER_PORT_MISSING_METHOD",
-        { method: "reportTaskResult" },
-        "Use a BrokerClient that supports canonical task operations",
-      );
-    }
-    return broker as BrokerCanonicalTaskPort;
-  }
-
   private extractApprovalPause(
     result: ToolResult,
   ):
@@ -422,12 +397,12 @@ export class AgentRuntime {
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {
-    await this.getCanonicalTaskPort().reportTaskResult(task);
+    await this.canonicalTaskPort.reportTaskResult(task);
   }
 
   async stop(): Promise<void> {
     this.cron.close();
-    this.broker.close();
+    this.llmToolPort.close();
     for (const mem of this.memories.values()) {
       mem.close();
     }

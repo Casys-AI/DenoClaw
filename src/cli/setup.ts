@@ -348,9 +348,9 @@ await kv.set(["agents", agentId, "config"], {
 });
 kv.close();
 
-// Create the runtime with a real BrokerClient (implements AgentBrokerPort)
+// Create the runtime with a real BrokerClient (implements both runtime ports)
 const broker = new BrokerClient(agentId);
-const runtime = new AgentRuntime(agentId, { model }, broker);
+const runtime = new AgentRuntime(agentId, { model }, broker, broker);
 
 await runtime.start();
 await runtime.startKvQueueIntake();

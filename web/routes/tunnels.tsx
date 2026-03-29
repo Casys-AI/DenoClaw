@@ -1,11 +1,17 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
-import { getHealth } from "../lib/api-client.ts";
+import { getFederationStats, getHealth } from "../lib/api-client.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../lib/dashboard-auth.ts";
-import type { HealthResponse } from "../lib/types.ts";
+import type { FederationStatsSnapshot, HealthResponse } from "../lib/types.ts";
+import { formatCompact, formatLatency } from "../lib/format.ts";
+
+interface TunnelsData {
+  health: HealthResponse | null;
+  federation: FederationStatsSnapshot | null;
+}
 
 export const handler = {
   async GET(ctx: FreshContext) {
@@ -17,12 +23,17 @@ export const handler = {
       brokerUrl: dashboard.brokerUrl,
       token: dashboard.token,
     });
-    return page(health);
+    const federation = await getFederationStats({
+      brokerUrl: dashboard.brokerUrl,
+      token: dashboard.token,
+    });
+    return page({ health, federation } as TunnelsData);
   },
 };
 
-export default function Tunnels({ data }: { data: HealthResponse | null }) {
-  const tunnels = data?.tunnels ?? [];
+export default function Tunnels({ data }: { data: TunnelsData }) {
+  const tunnels = data.health?.tunnels ?? [];
+  const federation = data.federation;
 
   return (
     <div class="space-y-6">
@@ -31,7 +42,27 @@ export default function Tunnels({ data }: { data: HealthResponse | null }) {
       <div class="stats bg-base-100 shadow">
         <div class="stat">
           <div class="stat-title">Connected</div>
-          <div class="stat-value text-primary">{data?.tunnelCount ?? 0}</div>
+          <div class="stat-value text-primary">
+            {data.health?.tunnelCount ?? 0}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Federation Success</div>
+          <div class="stat-value text-success">
+            {formatCompact(federation?.successCount ?? 0)}
+          </div>
+          <div class="stat-desc">
+            {formatCompact(federation?.errorCount ?? 0)} errors
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Federation P95</div>
+          <div class="stat-value">
+            {formatLatency(Math.max(0, ...(federation?.links.map((l) => l.p95LatencyMs) ?? [])))}
+          </div>
+          <div class="stat-desc">
+            dead-letter: {formatCompact(federation?.deadLetterBacklog ?? 0)}
+          </div>
         </div>
       </div>
 

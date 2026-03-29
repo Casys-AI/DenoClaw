@@ -8,6 +8,7 @@ import type {
   AgentMetrics,
   AgentStatusEntry,
   CronJob,
+  FederationStatsSnapshot,
   HealthResponse,
   MetricsSummary,
 } from "./types.ts";
@@ -109,6 +110,12 @@ export async function getCronJobs(
   return await fetchJSON<CronJob[]>("/cron", options) ?? [];
 }
 
+export function getFederationStats(
+  options?: string | BrokerRequestOptions,
+): Promise<FederationStatsSnapshot | null> {
+  return fetchJSON<FederationStatsSnapshot>("/federation/stats", options);
+}
+
 export function getBrokerUrl(options?: string | BrokerRequestOptions): string {
   return resolveRequestOptions(options).brokerUrl;
 }
@@ -121,6 +128,7 @@ export interface InstanceData {
   summary: MetricsSummary | null;
   agents: AgentStatusEntry[];
   health: HealthResponse | null;
+  federation: FederationStatsSnapshot | null;
 }
 
 /** Fetch data from ALL configured instances in parallel. */
@@ -134,10 +142,11 @@ export function getAllInstancesData(
   const token = options?.token ?? API_TOKEN;
 
   return Promise.all(instances.map(async (instance): Promise<InstanceData> => {
-    const [summary, agents, health] = await Promise.all([
+    const [summary, agents, health, federation] = await Promise.all([
       getSummary({ brokerUrl: instance.url, token }),
       getAgents({ brokerUrl: instance.url, token }),
       getHealth({ brokerUrl: instance.url, token }),
+      getFederationStats({ brokerUrl: instance.url, token }),
     ]);
 
     return {
@@ -146,6 +155,7 @@ export function getAllInstancesData(
       summary,
       agents: agents.map((a) => ({ ...a, instance: instance.name })),
       health,
+      federation,
     };
   }));
 }

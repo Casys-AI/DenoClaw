@@ -1,7 +1,11 @@
 import type { BrokerTaskSubmitPayload } from "../types.ts";
 import type {
   BrokerIdentity,
+  FederationDeadLetter,
+  FederationSessionToken,
+  FederationStatsSnapshot,
   FederatedRoutePolicy,
+  FederatedSubmissionRecord,
   FederationLink,
   FederationLinkState,
   RemoteAgentCatalogEntry,
@@ -19,6 +23,10 @@ export interface FederationControlPort {
   acknowledgeLink(linkId: string, accepted: boolean): Promise<void>;
   terminateLink(linkId: string): Promise<void>;
   setLinkState(linkId: string, state: FederationLinkState): Promise<void>;
+  rotateLinkSession(
+    linkId: string,
+    ttlSeconds?: number,
+  ): Promise<FederationSessionToken>;
   listLinks(): Promise<FederationLink[]>;
   refreshTrust(remoteBrokerId: string): Promise<BrokerIdentity>;
 }
@@ -40,6 +48,10 @@ export interface FederationIdentityPort {
   getIdentity(brokerId: string): Promise<BrokerIdentity | null>;
   listIdentities(): Promise<BrokerIdentity[]>;
   revokeIdentity(brokerId: string): Promise<void>;
+  rotateIdentityKey(
+    brokerId: string,
+    nextPublicKey: string,
+  ): Promise<BrokerIdentity>;
 }
 
 export interface FederationPolicyPort {
@@ -61,6 +73,19 @@ export interface FederationRoutingPort {
     task: BrokerTaskSubmitPayload,
     remoteBrokerId: string,
   ): Promise<void>;
+}
+
+export interface FederationDeliveryPort {
+  getSubmissionRecord(
+    idempotencyKey: string,
+  ): Promise<FederatedSubmissionRecord | null>;
+  upsertSubmissionRecord(record: FederatedSubmissionRecord): Promise<void>;
+  moveToDeadLetter(entry: FederationDeadLetter): Promise<void>;
+  listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]>;
+}
+
+export interface FederationMetricsPort {
+  getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot>;
 }
 
 export interface CrossBrokerHopEvent {

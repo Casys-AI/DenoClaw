@@ -1,4 +1,5 @@
 import type {
+  BrokerFederationMessage,
   BrokerMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
@@ -36,6 +37,16 @@ import {
   getResumePayloadMetadata,
 } from "../messaging/a2a/input_metadata.ts";
 import type { Task } from "../messaging/a2a/types.ts";
+import {
+  createFederationControlRouter,
+  type FederatedRoutePolicy,
+  type FederationControlEnvelope,
+  type FederationControlHandlerMap,
+  FederationService,
+  isFederationControlMethod,
+  KvFederationAdapter,
+  mapInstanceTunnelToCatalog,
+} from "./federation/mod.ts";
 import {
   assertTunnelRegisterMessage,
   DENOCLAW_TUNNEL_PROTOCOL,
@@ -116,6 +127,11 @@ export class BrokerServer {
     string,
     TunnelConnection
   >();
+  private federationAdapter: KvFederationAdapter | null = null;
+  private federationService: FederationService | null = null;
+  private federationControlRouter = createFederationControlRouter(
+    this.getFederationControlHandlers(),
+  );
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
@@ -212,6 +228,13 @@ export class BrokerServer {
           break;
         case "task_result":
           await this.handleTaskResult(msg);
+          break;
+        case "federation_link_open":
+        case "federation_link_ack":
+        case "federation_catalog_sync":
+        case "federation_route_probe":
+        case "federation_link_close":
+          await this.handleFederationControlMessage(msg);
           break;
         default:
           log.warn(`Unknown message type: ${msg.type}`);
@@ -370,11 +393,13 @@ export class BrokerServer {
 
     try {
       const agentNetwork = agentConfig.value?.sandbox?.networkAllow;
-      const defaultNetwork = this.config.agents?.defaults?.sandbox?.networkAllow;
+      const defaultNetwork = this.config.agents?.defaults?.sandbox
+        ?.networkAllow;
       const maxDuration = agentConfig.value?.sandbox?.maxDurationSec ||
         this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
       const execPolicy = agentConfig.value?.sandbox?.execPolicy ??
-        this.config.agents?.defaults?.sandbox?.execPolicy ?? DEFAULT_EXEC_POLICY;
+        this.config.agents?.defaults?.sandbox?.execPolicy ??
+        DEFAULT_EXEC_POLICY;
 
       log.info(`Sandbox: ${req.tool} permissions=${JSON.stringify(granted)}`);
       const result = await this.toolExecution.executeTool({
@@ -387,7 +412,12 @@ export class BrokerServer {
         toolsConfig: { agentId: msg.from },
       });
 
-      this.metrics.recordToolCall(msg.from, req.tool, result.success, performance.now() - toolStart);
+      this.metrics.recordToolCall(
+        msg.from,
+        req.tool,
+        result.success,
+        performance.now() - toolStart,
+      );
       this.replyToolResult(msg.from, msg.id, result);
     } catch (e) {
       this.sendStructuredError(msg.from, msg.id, {
@@ -531,7 +561,6 @@ export class BrokerServer {
     }
     return this.toolExecution.resolveToolPermissions(tool, tunnelPermissions);
   }
-
 
   // ── Canonical task message handlers ─────────────────
 
@@ -864,6 +893,127 @@ export class BrokerServer {
     );
   }
 
+  // ── Federation control-plane ───────────────────────────
+
+  private async getFederationAdapter(): Promise<KvFederationAdapter> {
+    if (this.federationAdapter) return this.federationAdapter;
+    this.federationAdapter = new KvFederationAdapter(await this.getKv());
+    return this.federationAdapter;
+  }
+
+  private async getFederationService(): Promise<FederationService> {
+    if (this.federationService) return this.federationService;
+    const adapter = await this.getFederationAdapter();
+    this.federationService = new FederationService(adapter, adapter, adapter);
+    return this.federationService;
+  }
+
+  private getFederationControlHandlers(): FederationControlHandlerMap {
+    return {
+      federation_link_open: async (envelope) => {
+        const payload = envelope.payload as {
+          linkId: string;
+          localBrokerId: string;
+          remoteBrokerId: string;
+        };
+        const service = await this.getFederationService();
+        await service.openLink({
+          linkId: payload.linkId,
+          localBrokerId: payload.localBrokerId,
+          remoteBrokerId: payload.remoteBrokerId,
+          requestedBy: envelope.from,
+        });
+
+        const ack: Extract<BrokerMessage, { type: "federation_link_ack" }> = {
+          id: envelope.id,
+          from: "broker",
+          to: envelope.from,
+          type: "federation_link_ack",
+          payload: { linkId: payload.linkId, accepted: true },
+          timestamp: new Date().toISOString(),
+        };
+        await this.sendReply(ack);
+      },
+      federation_link_ack: async (envelope) => {
+        const payload = envelope.payload as {
+          linkId: string;
+          accepted: boolean;
+        };
+        const service = await this.getFederationService();
+        await service.acknowledgeLink(payload.linkId, payload.accepted);
+      },
+      federation_catalog_sync: async (envelope) => {
+        const payload = envelope.payload as {
+          remoteBrokerId: string;
+          agents: string[];
+        };
+        const service = await this.getFederationService();
+        await service.syncCatalog(
+          payload.remoteBrokerId,
+          payload.agents.map((agentId) => ({
+            remoteBrokerId: payload.remoteBrokerId,
+            agentId,
+            card: {},
+            capabilities: [],
+            visibility: "public",
+          })),
+        );
+      },
+      federation_route_probe: async (envelope) => {
+        const payload = envelope.payload as {
+          remoteBrokerId: string;
+          targetAgent: string;
+        };
+
+        const service = await this.getFederationService();
+        const result = await service.probeRoute({
+          requesterBrokerId: envelope.from,
+          remoteBrokerId: payload.remoteBrokerId,
+          targetAgent: payload.targetAgent,
+        });
+
+        const reply: Extract<BrokerMessage, { type: "federation_link_ack" }> = {
+          id: envelope.id,
+          from: "broker",
+          to: envelope.from,
+          type: "federation_link_ack",
+          payload: {
+            linkId: result.linkId,
+            accepted: result.accepted,
+            reason: result.reason,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        await this.sendReply(reply);
+      },
+      federation_link_close: async (envelope) => {
+        const payload = envelope.payload as { linkId: string };
+        const service = await this.getFederationService();
+        await service.closeLink(payload.linkId);
+      },
+    };
+  }
+
+  private async handleFederationControlMessage(
+    msg: BrokerFederationMessage,
+  ): Promise<void> {
+    if (!isFederationControlMethod(msg.type)) {
+      throw new DenoClawError(
+        "FEDERATION_METHOD_INVALID",
+        { type: msg.type },
+        "Use federation control-plane method names",
+      );
+    }
+    const envelope: FederationControlEnvelope = {
+      id: msg.id,
+      from: msg.from,
+      type: msg.type,
+      payload: msg.payload,
+      timestamp: msg.timestamp,
+    };
+    await this.federationControlRouter(envelope);
+  }
+
   // ── Tunnel management ───────────────────────────────
 
   private findTunnelForProvider(_model: string): WebSocket | null {
@@ -1017,6 +1167,58 @@ export class BrokerServer {
       return createSSEResponse(kv, agentIds);
     }
 
+    if (req.method === "GET" && url.pathname === "/federation/links") {
+      const adapter = await this.getFederationAdapter();
+      return Response.json(await adapter.listLinks());
+    }
+
+    if (req.method === "GET" && url.pathname === "/federation/catalog") {
+      const remoteBrokerId = url.searchParams.get("remoteBrokerId");
+      if (!remoteBrokerId) {
+        return Response.json({
+          error: {
+            code: "MISSING_REMOTE_BROKER_ID",
+            recovery: "Add ?remoteBrokerId=<broker-id>",
+          },
+        }, { status: 400 });
+      }
+      const adapter = await this.getFederationAdapter();
+      return Response.json(await adapter.listRemoteAgents(remoteBrokerId));
+    }
+
+    if (req.method === "GET" && url.pathname === "/federation/policy") {
+      const brokerId = url.searchParams.get("brokerId");
+      if (!brokerId) {
+        return Response.json({
+          error: {
+            code: "MISSING_BROKER_ID",
+            recovery: "Add ?brokerId=<broker-id>",
+          },
+        }, { status: 400 });
+      }
+      const adapter = await this.getFederationAdapter();
+      return Response.json(await adapter.getRoutePolicy(brokerId));
+    }
+
+    if (req.method === "PUT" && url.pathname === "/federation/policy") {
+      const body = await req.json().catch(() => null) as
+        | FederatedRoutePolicy
+        | null;
+      if (
+        !body || typeof body.policyId !== "string" || body.policyId.length === 0
+      ) {
+        return Response.json({
+          error: {
+            code: "INVALID_POLICY",
+            recovery: "Provide a valid FederatedRoutePolicy JSON body",
+          },
+        }, { status: 400 });
+      }
+      const adapter = await this.getFederationAdapter();
+      await adapter.setRoutePolicy(body.policyId, body);
+      return Response.json({ ok: true, policyId: body.policyId });
+    }
+
     return new Response("Not Found", { status: 404 });
   }
 
@@ -1140,6 +1342,13 @@ export class BrokerServer {
             capabilities: caps,
             registered: true,
           });
+          if (caps.type === "instance") {
+            const service = await this.getFederationService();
+            await service.syncCatalog(
+              tunnelId,
+              mapInstanceTunnelToCatalog(tunnelId, caps),
+            );
+          }
           log.info(
             `Tunnel registered: ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${
               caps.agents || []

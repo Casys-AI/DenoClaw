@@ -50,18 +50,45 @@ async function seedPeerPolicy(
   });
 }
 
+
+function createQueueCollector(kv: Deno.Kv): BrokerMessage[] {
+  const messages: BrokerMessage[] = [];
+  kv.listenQueue((raw: unknown) => {
+    messages.push(raw as BrokerMessage);
+  });
+  return messages;
+}
+
+async function waitForCollectedMessage(
+  messages: BrokerMessage[],
+  predicate: (message: BrokerMessage) => boolean,
+): Promise<BrokerMessage> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const match = messages.find(predicate);
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for collected message");
+}
+
 function waitForQueuedMessage(
   kv: Deno.Kv,
   predicate: (message: BrokerMessage) => boolean,
 ): Promise<BrokerMessage> {
+  let settled = false;
+
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      settled = true;
       reject(new Error("Timed out waiting for queued message"));
     }, 5_000);
 
     kv.listenQueue((raw: unknown) => {
+      if (settled) return;
       const message = raw as BrokerMessage;
       if (!predicate(message)) return;
+      settled = true;
       clearTimeout(timer);
       resolve(message);
     });
@@ -307,6 +334,263 @@ Deno.test("BrokerServer.continueAgentTask forwards canonical continuation withou
     assertEquals(forwarded.payload.metadata, {
       resume: { kind: "approval", approved: true },
     });
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer handles federation link open and acknowledges", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    const ackPromise = waitForQueuedMessage(
+      kv,
+      (message) =>
+        message.type === "federation_link_ack" &&
+        message.to === "broker-remote",
+    );
+
+    await broker.handleIncomingMessage({
+      id: "fed-open-1",
+      from: "broker-remote",
+      to: "broker",
+      type: "federation_link_open",
+      payload: {
+        linkId: "link-a-b",
+        localBrokerId: "broker-local",
+        remoteBrokerId: "broker-remote",
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const persisted = await kv.get(["federation", "links", "link-a-b"]);
+    assertExists(persisted.value);
+    assertEquals((persisted.value as { state: string }).state, "active");
+
+    const ack = await ackPromise as Extract<
+      BrokerMessage,
+      { type: "federation_link_ack" }
+    >;
+    assertEquals(ack.payload.linkId, "link-a-b");
+    assertEquals(ack.payload.accepted, true);
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer federation_route_probe evaluates policy and catalog then replies", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    await kv.set(["federation", "catalog", "broker-remote"], [{
+      remoteBrokerId: "broker-remote",
+      agentId: "agent-x",
+      card: {},
+      capabilities: ["chat"],
+      visibility: "public",
+    }]);
+    await kv.set(["federation", "policies", "broker-origin"], {
+      policyId: "broker-origin",
+      preferLocal: false,
+      preferredRemoteBrokerIds: ["broker-remote"],
+      denyAgentIds: [],
+      allowAgentIds: ["agent-x"],
+    });
+
+    const ackPromise = waitForQueuedMessage(
+      kv,
+      (message) =>
+        message.type === "federation_link_ack" &&
+        message.to === "broker-origin",
+    );
+
+    await broker.handleIncomingMessage({
+      id: "fed-probe-1",
+      from: "broker-origin",
+      to: "broker",
+      type: "federation_route_probe",
+      payload: {
+        remoteBrokerId: "broker-remote",
+        targetAgent: "agent-x",
+        taskId: "task-123",
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const ack = await ackPromise as Extract<
+      BrokerMessage,
+      { type: "federation_link_ack" }
+    >;
+    assertEquals(ack.payload.accepted, true);
+    assertEquals(ack.payload.reason, "route_available");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer federation_route_probe enforces bilateral policy", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    await kv.set(["federation", "catalog", "broker-remote"], [{
+      remoteBrokerId: "broker-remote",
+      agentId: "agent-denied-by-remote",
+      card: {},
+      capabilities: ["chat"],
+      visibility: "public",
+    }]);
+
+    await kv.set(["federation", "policies", "broker-origin"], {
+      policyId: "broker-origin",
+      preferLocal: false,
+      preferredRemoteBrokerIds: ["broker-remote"],
+      denyAgentIds: [],
+      allowAgentIds: ["agent-denied-by-remote"],
+    });
+
+    await kv.set(["federation", "policies", "broker-remote"], {
+      policyId: "broker-remote",
+      preferLocal: false,
+      preferredRemoteBrokerIds: ["broker-origin"],
+      denyAgentIds: ["agent-denied-by-remote"],
+      allowAgentIds: ["agent-denied-by-remote"],
+    });
+
+    const ackPromise = waitForQueuedMessage(
+      kv,
+      (message) =>
+        message.type === "federation_link_ack" &&
+        message.to === "broker-origin",
+    );
+
+    await broker.handleIncomingMessage({
+      id: "fed-probe-bilateral-1",
+      from: "broker-origin",
+      to: "broker",
+      type: "federation_route_probe",
+      payload: {
+        remoteBrokerId: "broker-remote",
+        targetAgent: "agent-denied-by-remote",
+        taskId: "task-456",
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const ack = await ackPromise as Extract<
+      BrokerMessage,
+      { type: "federation_link_ack" }
+    >;
+    assertEquals(ack.payload.accepted, false);
+    assertEquals(ack.payload.reason, "denied_by_policy");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+Deno.test("BrokerServer keeps canonical A2A task flow after federation control messages", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    await broker.handleIncomingMessage({
+      id: "fed-open-a2a-1",
+      from: "broker-remote",
+      to: "broker",
+      type: "federation_link_open",
+      payload: {
+        linkId: "link-a2a",
+        localBrokerId: "broker-local",
+        remoteBrokerId: "broker-remote",
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const queuedMessages = createQueueCollector(kv);
+
+    const submitted = await broker.submitAgentTask("agent-alpha", {
+      targetAgent: "agent-beta",
+      taskId: "task-a2a-regression",
+      message: createMessage("Still canonical"),
+    });
+
+    assertEquals(submitted.status.state, "SUBMITTED");
+    const submitForwarded = await waitForCollectedMessage(
+      queuedMessages,
+      (message) =>
+        message.type === "task_submit" && message.to === "agent-beta" &&
+        message.payload.taskId === "task-a2a-regression",
+    ) as Extract<
+      BrokerMessage,
+      { type: "task_submit" }
+    >;
+    assertEquals(submitForwarded.payload.targetAgent, "agent-beta");
+
+    await kv.set(["a2a_tasks", submitted.id], {
+      ...submitted,
+      status: {
+        state: "INPUT_REQUIRED",
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await broker.continueAgentTask("agent-alpha", {
+      taskId: submitted.id,
+      message: createMessage("Continue please"),
+    });
+
+    const continuedForwarded = await waitForCollectedMessage(
+      queuedMessages,
+      (message) =>
+        message.type === "task_continue" && message.to === "agent-beta" &&
+        message.payload.taskId === submitted.id,
+    ) as Extract<
+      BrokerMessage,
+      { type: "task_continue" }
+    >;
+    assertEquals(continuedForwarded.payload.taskId, submitted.id);
+
+    await broker.cancelTask({ taskId: submitted.id });
+    const canceled = await broker.getTask({ taskId: submitted.id });
+    assertEquals(canceled?.status.state, "CANCELED");
 
     await broker.stop();
   } finally {

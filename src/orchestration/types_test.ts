@@ -3,6 +3,7 @@ import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import type { BrokerMessage } from "./types.ts";
 import {
   isBrokerErrorMessage,
+  isBrokerFederationMessage,
   isBrokerRequestMessage,
   isBrokerResponseMessage,
   isBrokerRuntimeMessage,
@@ -118,4 +119,39 @@ Deno.test("Broker runtime classifier excludes task and error messages", () => {
   assertEquals(isBrokerErrorMessage(errorMessage), true);
   assertEquals(isBrokerRequestMessage(errorMessage), false);
   assertEquals(isBrokerResponseMessage(errorMessage), true);
+});
+
+Deno.test("Broker federation classifier isolates control-plane methods", () => {
+  const federationMessages: BrokerMessage[] = [
+    baseMessage("federation_link_open", {
+      linkId: "link-1",
+      localBrokerId: "broker-a",
+      remoteBrokerId: "broker-b",
+    }),
+    baseMessage("federation_link_ack", {
+      linkId: "link-1",
+      accepted: true,
+    }),
+    baseMessage("federation_catalog_sync", {
+      remoteBrokerId: "broker-b",
+      agents: ["agent-1"],
+    }),
+    baseMessage("federation_route_probe", {
+      remoteBrokerId: "broker-b",
+      targetAgent: "agent-1",
+      taskId: "task-1",
+    }),
+    baseMessage("federation_link_close", {
+      linkId: "link-1",
+    }),
+  ];
+
+  for (const message of federationMessages) {
+    assertEquals(isBrokerFederationMessage(message), true);
+    assertEquals(isBrokerTaskMessage(message), false);
+    assertEquals(isBrokerRuntimeMessage(message), false);
+    assertEquals(isBrokerErrorMessage(message), false);
+    assertEquals(isBrokerRequestMessage(message), true);
+    assertEquals(isBrokerResponseMessage(message), false);
+  }
 });

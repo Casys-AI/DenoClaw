@@ -26,3 +26,5 @@ export type {
   AgentStatusValue,
   TaskObservationEntry,
 } from "./monitoring_types.ts";
+
+export * from "./federation/mod.ts";

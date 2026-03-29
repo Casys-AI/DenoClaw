@@ -72,7 +72,6 @@ export interface BrokerTaskResultPayload {
   task: Task | null;
 }
 
-
 export function extractBrokerSubmitTaskMessage(payload: BrokerTaskSubmitPayload): A2AMessage {
   const taskMessage = payload.taskMessage ?? payload.message;
   if (!taskMessage) throw new Error("Broker task submit requires taskMessage");
@@ -83,6 +82,37 @@ export function extractBrokerContinuationMessage(payload: BrokerTaskContinuePayl
   const continuationMessage = payload.continuationMessage ?? payload.message;
   if (!continuationMessage) throw new Error("Broker task continue requires continuationMessage");
   return continuationMessage;
+}
+
+// ── Federation control-plane operations ─────────────────
+
+export interface FederationLinkOpenPayload {
+  linkId: string;
+  localBrokerId: string;
+  remoteBrokerId: string;
+}
+
+export interface FederationLinkAckPayload {
+  linkId: string;
+  accepted: boolean;
+  reason?: string;
+}
+
+export interface FederationCatalogSyncPayload {
+  remoteBrokerId: string;
+  agents: string[];
+}
+
+export interface FederationRouteProbePayload {
+  remoteBrokerId: string;
+  targetAgent: string;
+  taskId: string;
+  contextId?: string;
+}
+
+export interface FederationLinkClosePayload {
+  linkId: string;
+  reason?: string;
 }
 
 // ── Message envelope union ───────────────────────────────
@@ -123,6 +153,26 @@ export type BrokerTaskResultMessage = BrokerEnvelope<
   "task_result",
   BrokerTaskResultPayload
 >;
+export type BrokerFederationLinkOpenMessage = BrokerEnvelope<
+  "federation_link_open",
+  FederationLinkOpenPayload
+>;
+export type BrokerFederationLinkAckMessage = BrokerEnvelope<
+  "federation_link_ack",
+  FederationLinkAckPayload
+>;
+export type BrokerFederationCatalogSyncMessage = BrokerEnvelope<
+  "federation_catalog_sync",
+  FederationCatalogSyncPayload
+>;
+export type BrokerFederationRouteProbeMessage = BrokerEnvelope<
+  "federation_route_probe",
+  FederationRouteProbePayload
+>;
+export type BrokerFederationLinkCloseMessage = BrokerEnvelope<
+  "federation_link_close",
+  FederationLinkClosePayload
+>;
 export type BrokerErrorMessage = BrokerEnvelope<"error", StructuredError>;
 
 /** Broker-level runtime operations that are not canonical task semantics. */
@@ -140,6 +190,13 @@ export type BrokerTaskMessage =
   | BrokerTaskCancelMessage
   | BrokerTaskResultMessage;
 
+export type BrokerFederationMessage =
+  | BrokerFederationLinkOpenMessage
+  | BrokerFederationLinkAckMessage
+  | BrokerFederationCatalogSyncMessage
+  | BrokerFederationRouteProbeMessage
+  | BrokerFederationLinkCloseMessage;
+
 /**
  * Client/broker requests sent through BrokerTransport.
  *
@@ -149,6 +206,7 @@ export type BrokerTaskMessage =
 export type BrokerRequestMessage =
   | BrokerLLMRequestMessage
   | BrokerToolRequestMessage
+  | BrokerFederationMessage
   | BrokerTaskMessage;
 
 /** Valid broker replies for BrokerTransport request/response flows. */
@@ -169,6 +227,7 @@ export type BrokerResponseMessage =
  */
 export type BrokerMessage =
   | BrokerRuntimeMessage
+  | BrokerFederationMessage
   | BrokerTaskMessage
   | BrokerErrorMessage;
 
@@ -195,11 +254,21 @@ export function isBrokerErrorMessage(
   return message.type === "error";
 }
 
+export function isBrokerFederationMessage(
+  message: BrokerMessage,
+): message is BrokerFederationMessage {
+  return message.type === "federation_link_open" ||
+    message.type === "federation_link_ack" ||
+    message.type === "federation_catalog_sync" ||
+    message.type === "federation_route_probe" ||
+    message.type === "federation_link_close";
+}
+
 export function isBrokerRequestMessage(
   message: BrokerMessage,
 ): message is BrokerRequestMessage {
   return message.type === "llm_request" || message.type === "tool_request" ||
-    isBrokerTaskMessage(message);
+    isBrokerTaskMessage(message) || isBrokerFederationMessage(message);
 }
 
 export function isBrokerResponseMessage(

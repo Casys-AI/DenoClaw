@@ -6,6 +6,10 @@ import type {
   BrokerTaskSubmitPayload,
   TunnelCapabilities,
 } from "./types.ts";
+import {
+  extractBrokerContinuationMessage,
+  extractBrokerSubmitTaskMessage,
+} from "./types.ts";
 import type {
   AgentEntry,
   SandboxPermission,
@@ -572,9 +576,11 @@ export class BrokerServer {
   ): Promise<Task> {
     await this.assertPeerAccess(fromAgentId, payload.targetAgent);
 
+    const taskMessage = extractBrokerSubmitTaskMessage(payload);
+
     const task = await this.taskStore.create(
       payload.taskId,
-      payload.message,
+      taskMessage,
       payload.contextId,
     );
 
@@ -592,6 +598,7 @@ export class BrokerServer {
       payload: {
         ...payload,
         taskId: persistedTask.id,
+        taskMessage,
         contextId: persistedTask.contextId,
       },
       timestamp: new Date().toISOString(),
@@ -632,12 +639,13 @@ export class BrokerServer {
       );
     }
 
+    const continuationMessage = extractBrokerContinuationMessage(payload);
     const resume = getResumePayloadMetadata({ metadata: payload.metadata });
     if (resume?.approved === false) {
       const rejected = transitionTask(existing, "REJECTED", {
-        message: payload.message,
+        statusMessage: continuationMessage,
       });
-      rejected.history = [...existing.history, payload.message];
+      rejected.history = [...existing.history, continuationMessage];
       await this.writeTask(rejected);
       return rejected;
     }
@@ -670,7 +678,7 @@ export class BrokerServer {
       from: fromAgentId,
       to: targetAgentId,
       type: "task_continue",
-      payload,
+      payload: { ...payload, continuationMessage },
       timestamp: new Date().toISOString(),
     });
 

@@ -152,7 +152,7 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
     payload: {
       taskId: "task-1",
       contextId: "ctx-1",
-      message: {
+      taskMessage: {
         messageId: crypto.randomUUID(),
         role: "user",
         parts: [{ kind: "text", text: "Summarise this" }],
@@ -207,7 +207,7 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
     timestamp: new Date().toISOString(),
     payload: {
       taskId: "task-continue",
-      message: {
+      continuationMessage: {
         messageId: crypto.randomUUID(),
         role: "user",
         parts: [{ kind: "text", text: "Approved, continue" }],
@@ -283,7 +283,7 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
     payload: {
       taskId: "task-approval",
       contextId: "ctx-approval",
-      message: {
+      taskMessage: {
         messageId: crypto.randomUUID(),
         role: "user",
         parts: [{ kind: "text", text: "Check git status" }],

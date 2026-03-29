@@ -89,7 +89,7 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards can
       targetAgent: "agent-beta",
       taskId: "task-1",
       contextId: "ctx-1",
-      message: createMessage("Summarise this"),
+      taskMessage: createMessage("Summarise this"),
       metadata: { source: "test" },
     });
 
@@ -114,7 +114,7 @@ Deno.test("BrokerServer.submitAgentTask persists canonical task and forwards can
     assertEquals(forwarded.payload.taskId, "task-1");
     assertEquals(forwarded.payload.contextId, "ctx-1");
     assertEquals(forwarded.payload.targetAgent, "agent-beta");
-    assertEquals(forwarded.payload.message.parts[0], {
+    assertEquals(forwarded.payload.taskMessage?.parts[0], {
       kind: "text",
       text: "Summarise this",
     });
@@ -143,7 +143,7 @@ Deno.test("BrokerServer.recordTaskResult persists canonical execution progress a
       targetAgent: "agent-beta",
       taskId: "task-runtime",
       contextId: "ctx-runtime",
-      message: createMessage("Handle this"),
+      taskMessage: createMessage("Handle this"),
     });
 
     const working = await broker.recordTaskResult("agent-beta", {
@@ -216,7 +216,7 @@ Deno.test("BrokerServer.recordTaskResult rejects updates from non-target agents"
     const submitted = await broker.submitAgentTask("agent-alpha", {
       targetAgent: "agent-beta",
       taskId: "task-forbidden",
-      message: createMessage("Handle this"),
+      taskMessage: createMessage("Handle this"),
     });
 
     await assertRejects(
@@ -285,7 +285,7 @@ Deno.test("BrokerServer.continueAgentTask forwards canonical continuation withou
 
     const resumed = await broker.continueAgentTask("agent-alpha", {
       taskId: paused.id,
-      message: createMessage("Approved, continue"),
+      continuationMessage: createMessage("Approved, continue"),
       metadata: createResumePayloadMetadata({
         kind: "approval",
         approved: true,
@@ -300,7 +300,7 @@ Deno.test("BrokerServer.continueAgentTask forwards canonical continuation withou
       { type: "task_continue" }
     >;
     assertEquals(forwarded.payload.taskId, paused.id);
-    assertEquals(forwarded.payload.message.parts[0], {
+    assertEquals(forwarded.payload.continuationMessage?.parts[0], {
       kind: "text",
       text: "Approved, continue",
     });
@@ -330,7 +330,7 @@ Deno.test("BrokerServer.continueAgentTask classifies explicit refusal as REJECTE
     const submitted = await broker.submitAgentTask("agent-alpha", {
       targetAgent: "agent-beta",
       taskId: "task-reject",
-      message: createMessage("Dangerous action"),
+      taskMessage: createMessage("Dangerous action"),
     });
 
     await kv.set(["a2a_tasks", submitted.id], {
@@ -343,7 +343,7 @@ Deno.test("BrokerServer.continueAgentTask classifies explicit refusal as REJECTE
 
     const rejected = await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
-      message: createMessage("No"),
+      continuationMessage: createMessage("No"),
       metadata: createResumePayloadMetadata({
         kind: "approval",
         approved: false,
@@ -500,7 +500,7 @@ Deno.test("BrokerServer consumes one approved continuation to allow the next bro
     const submitted = await broker.submitAgentTask("agent-alpha", {
       targetAgent: "agent-beta",
       taskId: "task-resume-grant",
-      message: createMessage("Run git status"),
+      taskMessage: createMessage("Run git status"),
     });
 
     await kv.set(["a2a_tasks", submitted.id], {
@@ -518,7 +518,7 @@ Deno.test("BrokerServer consumes one approved continuation to allow the next bro
 
     await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
-      message: createMessage("Approved"),
+      continuationMessage: createMessage("Approved"),
       metadata: createResumePayloadMetadata({
         kind: "approval",
         approved: true,
@@ -605,7 +605,7 @@ Deno.test("BrokerServer rejects grant consumption when command does not match", 
     const submitted = await broker.submitAgentTask("agent-alpha", {
       targetAgent: "agent-beta",
       taskId: "task-mismatch",
-      message: createMessage("Run git status"),
+      taskMessage: createMessage("Run git status"),
     });
 
     // Pause with approval for "git status"
@@ -625,7 +625,7 @@ Deno.test("BrokerServer rejects grant consumption when command does not match", 
     // Approve "git status"
     await broker.continueAgentTask("agent-alpha", {
       taskId: submitted.id,
-      message: createMessage("Approved"),
+      continuationMessage: createMessage("Approved"),
       metadata: createResumePayloadMetadata({
         kind: "approval",
         approved: true,

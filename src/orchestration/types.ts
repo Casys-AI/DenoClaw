@@ -49,14 +49,18 @@ export interface ToolResponsePayload {
 export interface BrokerTaskSubmitPayload {
   targetAgent: string;
   taskId: string;
-  message: A2AMessage;
+  taskMessage?: A2AMessage;
+  /** @deprecated Use `taskMessage`. */
+  message?: A2AMessage;
   contextId?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface BrokerTaskContinuePayload {
   taskId: string;
-  message: A2AMessage;
+  continuationMessage?: A2AMessage;
+  /** @deprecated Use `continuationMessage`. */
+  message?: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 
@@ -66,6 +70,19 @@ export interface BrokerTaskQueryPayload {
 
 export interface BrokerTaskResultPayload {
   task: Task | null;
+}
+
+
+export function extractBrokerSubmitTaskMessage(payload: BrokerTaskSubmitPayload): A2AMessage {
+  const taskMessage = payload.taskMessage ?? payload.message;
+  if (!taskMessage) throw new Error("Broker task submit requires taskMessage");
+  return taskMessage;
+}
+
+export function extractBrokerContinuationMessage(payload: BrokerTaskContinuePayload): A2AMessage {
+  const continuationMessage = payload.continuationMessage ?? payload.message;
+  if (!continuationMessage) throw new Error("Broker task continue requires continuationMessage");
+  return continuationMessage;
 }
 
 // ── Message envelope union ───────────────────────────────

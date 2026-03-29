@@ -25,6 +25,7 @@ import { ConfigError, DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { createSSEResponse } from "./monitoring.ts";
 import { log } from "../shared/log.ts";
+import { AgentPolicyEntity } from "./agent_policy_entity.ts";
 import { TaskStore } from "../messaging/a2a/tasks.ts";
 import {
   assertValidTaskTransition,
@@ -818,27 +819,16 @@ export class BrokerServer {
       "config",
     ]);
 
-    const senderPeers = senderConfig.value?.peers || [];
-    if (!senderPeers.includes(targetAgentId) && !senderPeers.includes("*")) {
-      throw new DenoClawError(
-        "PEER_NOT_ALLOWED",
-        { from: fromAgentId, to: targetAgentId, senderPeers },
-        `Add "${targetAgentId}" to ${fromAgentId}.peers`,
-      );
-    }
-
-    const targetAccept = targetConfig.value?.acceptFrom || [];
-    if (!targetAccept.includes(fromAgentId) && !targetAccept.includes("*")) {
-      throw new DenoClawError(
-        "PEER_REJECTED",
-        {
-          from: fromAgentId,
-          to: targetAgentId,
-          targetAcceptFrom: targetAccept,
-        },
-        `Add "${fromAgentId}" to ${targetAgentId}.acceptFrom`,
-      );
-    }
+    AgentPolicyEntity.assertCanSendTask(
+      {
+        agentId: fromAgentId,
+        peers: senderConfig.value?.peers,
+      },
+      {
+        agentId: targetAgentId,
+        acceptFrom: targetConfig.value?.acceptFrom,
+      },
+    );
   }
 
   private async routeBrokerMessageToAgent(

@@ -9,8 +9,9 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from "./types.ts";
-import { A2A_ERRORS, TERMINAL_STATES } from "./types.ts";
+import { A2A_ERRORS } from "./types.ts";
 import { TaskStore } from "./tasks.ts";
+import { TaskEntity } from "./task_entity.ts";
 import { log } from "../../shared/log.ts";
 
 type TaskHandler = (task: Task, message: A2AMessage) => Promise<void>;
@@ -123,7 +124,7 @@ export class A2AServer {
           this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
         );
       }
-      if (TERMINAL_STATES.includes(existing.status.state)) {
+      if (TaskEntity.isTerminalState(existing.status.state)) {
         return Response.json(
           this.rpcError(
             rpc.id,
@@ -287,7 +288,7 @@ export class A2AServer {
         this.rpcError(rpc.id, A2A_ERRORS.TASK_NOT_FOUND, "Task not found"),
       );
     }
-    if (TERMINAL_STATES.includes(task.status.state)) {
+    if (TaskEntity.isTerminalState(task.status.state)) {
       return Response.json(
         this.rpcError(
           rpc.id,

@@ -29,3 +29,11 @@ export {
 } from "./runtime_port.ts";
 export { TaskStore } from "./tasks.ts";
 export { generateAgentCard, generateAllCards } from "./card.ts";
+
+export {
+  ALLOWED_TASK_STATE_TRANSITIONS,
+  type CanonicalTaskInit,
+  type RefusalTerminalReason,
+  TaskEntity,
+  type TaskTransitionOptions,
+} from "./task_entity.ts";

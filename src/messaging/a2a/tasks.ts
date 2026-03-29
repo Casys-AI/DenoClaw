@@ -1,11 +1,6 @@
 import type { A2AMessage, Artifact, Task, TaskState } from "./types.ts";
 import { log } from "../../shared/log.ts";
-import {
-  appendArtifactToTask,
-  createCanonicalTask,
-  isTerminalTaskState,
-  transitionTask,
-} from "./internal_contract.ts";
+import { TaskEntity } from "./task_entity.ts";
 
 /**
  * KV-backed Task store for A2A protocol.
@@ -32,7 +27,7 @@ export class TaskStore {
   ): Promise<Task> {
     const kv = await this.getKv();
 
-    const task = createCanonicalTask({
+    const task = TaskEntity.createCanonical({
       id: taskId,
       message,
       contextId,
@@ -60,15 +55,15 @@ export class TaskStore {
 
     const task = entry.value;
 
-    if (isTerminalTaskState(task.status.state)) {
+    if (TaskEntity.isTerminalState(task.status.state)) {
       log.warn(
         `A2A Task ${taskId} is in terminal state ${task.status.state}, cannot change to ${state}`,
       );
       return task;
     }
 
-    const nextTask = transitionTask(task, state, { message });
-    if (message) nextTask.history = [...nextTask.history, message];
+    let nextTask = new TaskEntity(task).transitionTo(state, { message }).task;
+    if (message) nextTask = new TaskEntity(nextTask).appendMessage(message).task;
 
     await kv.set(["a2a_tasks", taskId], nextTask);
     log.debug(`A2A Task ${taskId} → ${state}`);
@@ -80,7 +75,7 @@ export class TaskStore {
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
     if (!entry.value) return null;
 
-    const nextTask = appendArtifactToTask(entry.value, artifact);
+    const nextTask = new TaskEntity(entry.value).appendArtifact(artifact).task;
     await kv.set(["a2a_tasks", taskId], nextTask);
     return nextTask;
   }
@@ -90,10 +85,9 @@ export class TaskStore {
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
     if (!entry.value) return null;
 
-    const task = entry.value;
-    task.history.push(message);
-    await kv.set(["a2a_tasks", taskId], task);
-    return task;
+    const nextTask = new TaskEntity(entry.value).appendMessage(message).task;
+    await kv.set(["a2a_tasks", taskId], nextTask);
+    return nextTask;
   }
 
   async cancel(taskId: string): Promise<Task | null> {

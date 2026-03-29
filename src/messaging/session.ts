@@ -1,5 +1,6 @@
 import type { Session } from "./types.ts";
 import { log } from "../shared/log.ts";
+import { SessionEntity } from "./session_entity.ts";
 
 /**
  * KV-backed session manager — replaces file-based sessions.
@@ -29,22 +30,16 @@ export class SessionManager {
     const entry = await kv.get<Session>(this.key(sessionId));
 
     if (entry.value) {
-      const session = {
-        ...entry.value,
-        lastActivity: new Date().toISOString(),
-      };
+      const session = new SessionEntity(entry.value).touch().session;
       await kv.set(this.key(sessionId), session);
       return session;
     }
 
-    const session: Session = {
+    const session: Session = SessionEntity.createNew({
       id: sessionId,
       userId,
       channelType,
-      createdAt: new Date().toISOString(),
-      lastActivity: new Date().toISOString(),
-      metadata: {},
-    };
+    });
 
     await kv.set(this.key(sessionId), session);
     log.info(`Session created: ${sessionId}`);
@@ -75,7 +70,7 @@ export class SessionManager {
   async getActive(hours = 24): Promise<Session[]> {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
     const all = await this.listAll();
-    return all.filter((s) => s.lastActivity > cutoff);
+    return all.filter((session) => !new SessionEntity(session).isInactiveSince(cutoff));
   }
 
   async cleanup(days = 30): Promise<number> {
@@ -84,7 +79,7 @@ export class SessionManager {
     const all = await this.listAll();
     let count = 0;
     for (const s of all) {
-      if (s.lastActivity < cutoff) {
+      if (new SessionEntity(s).isInactiveSince(cutoff)) {
         await this.delete(s.id);
         count++;
       }

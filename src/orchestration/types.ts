@@ -5,19 +5,11 @@
 
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import type {
+  BrokerEnvelope,
   LLMResponse,
   SandboxPermission,
   StructuredError,
 } from "../shared/types.ts";
-
-interface BrokerEnvelopeBase<TType extends string, TPayload> {
-  id: string;
-  from: string;
-  to: string;
-  type: TType;
-  payload: TPayload;
-  timestamp: string;
-}
 
 // ── LLM ──────────────────────────────────────────────────
 
@@ -78,43 +70,43 @@ export interface BrokerTaskResultPayload {
 
 // ── Message envelope union ───────────────────────────────
 
-export type BrokerLLMRequestMessage = BrokerEnvelopeBase<
+export type BrokerLLMRequestMessage = BrokerEnvelope<
   "llm_request",
   LLMRequest
 >;
-export type BrokerLLMResponseMessage = BrokerEnvelopeBase<
+export type BrokerLLMResponseMessage = BrokerEnvelope<
   "llm_response",
   LLMResponsePayload
 >;
-export type BrokerToolRequestMessage = BrokerEnvelopeBase<
+export type BrokerToolRequestMessage = BrokerEnvelope<
   "tool_request",
   ToolRequest
 >;
-export type BrokerToolResponseMessage = BrokerEnvelopeBase<
+export type BrokerToolResponseMessage = BrokerEnvelope<
   "tool_response",
   ToolResponsePayload
 >;
-export type BrokerTaskSubmitMessage = BrokerEnvelopeBase<
+export type BrokerTaskSubmitMessage = BrokerEnvelope<
   "task_submit",
   BrokerTaskSubmitPayload
 >;
-export type BrokerTaskContinueMessage = BrokerEnvelopeBase<
+export type BrokerTaskContinueMessage = BrokerEnvelope<
   "task_continue",
   BrokerTaskContinuePayload
 >;
-export type BrokerTaskGetMessage = BrokerEnvelopeBase<
+export type BrokerTaskGetMessage = BrokerEnvelope<
   "task_get",
   BrokerTaskQueryPayload
 >;
-export type BrokerTaskCancelMessage = BrokerEnvelopeBase<
+export type BrokerTaskCancelMessage = BrokerEnvelope<
   "task_cancel",
   BrokerTaskQueryPayload
 >;
-export type BrokerTaskResultMessage = BrokerEnvelopeBase<
+export type BrokerTaskResultMessage = BrokerEnvelope<
   "task_result",
   BrokerTaskResultPayload
 >;
-export type BrokerErrorMessage = BrokerEnvelopeBase<"error", StructuredError>;
+export type BrokerErrorMessage = BrokerEnvelope<"error", StructuredError>;
 
 /** Broker-level runtime operations that are not canonical task semantics. */
 export type BrokerRuntimeMessage =

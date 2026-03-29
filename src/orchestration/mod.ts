@@ -10,3 +10,9 @@ export { LocalRelay } from "./relay.ts";
 export { Gateway } from "./gateway.ts";
 export type { GatewayDeps } from "./gateway.ts";
 export * from "./monitoring.ts";
+export type {
+  ActiveTaskEntry,
+  AgentStatusEntry,
+  AgentStatusValue,
+  TaskObservationEntry,
+} from "./monitoring_types.ts";

@@ -7,13 +7,11 @@
  */
 
 import type {
-  ExecPolicy,
-  SandboxBackend,
   SandboxConfig,
-  SandboxExecRequest,
   SandboxPermission,
   ToolResult,
 } from "../../../shared/types.ts";
+import type { ExecPolicy, SandboxBackend, SandboxExecRequest } from "../../sandbox_types.ts";
 import { checkExecPolicy, filterEnv } from "../shell.ts";
 import { log } from "../../../shared/log.ts";
 

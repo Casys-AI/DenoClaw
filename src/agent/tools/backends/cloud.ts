@@ -14,12 +14,11 @@
  */
 
 import type {
-  SandboxBackend,
   SandboxConfig,
-  SandboxExecRequest,
   SandboxPermission,
   ToolResult,
 } from "../../../shared/types.ts";
+import type { SandboxBackend, SandboxExecRequest } from "../../sandbox_types.ts";
 import { log } from "../../../shared/log.ts";
 
 const TOOLS_LOCAL_PATH = new URL("../", import.meta.url).pathname;

@@ -1,9 +1,5 @@
-import type {
-  ApprovalReason,
-  ExecPolicy,
-  ToolDefinition,
-  ToolResult,
-} from "../../shared/types.ts";
+import type { ToolDefinition, ToolResult } from "../../shared/types.ts";
+import type { ApprovalReason, ExecPolicy } from "../sandbox_types.ts";
 import { BaseTool } from "./registry.ts";
 
 /** Shell operators that indicate command chaining — blocked in allowlist mode. */

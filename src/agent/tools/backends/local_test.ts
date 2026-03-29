@@ -1,10 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { LocalProcessBackend } from "./local.ts";
-import type {
-  ExecPolicy,
-  SandboxConfig,
-  SandboxExecRequest,
-} from "../../../shared/types.ts";
+import type { SandboxConfig } from "../../../shared/types.ts";
+import type { ExecPolicy, SandboxExecRequest } from "../../sandbox_types.ts";
 
 // ── Helpers ──
 

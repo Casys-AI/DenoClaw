@@ -1,9 +1,9 @@
 import type {
   AgentBrokerPort,
-  ApprovalReason,
   BrokerEnvelope,
   ToolResult,
 } from "../shared/types.ts";
+import type { ApprovalReason } from "./sandbox_types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";

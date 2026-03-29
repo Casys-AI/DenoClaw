@@ -15,7 +15,8 @@
  */
 import type { AgentDefaults, ToolsConfig } from "./types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
-import type { AgentEntry, ApprovalReason } from "../shared/types.ts";
+import type { AgentEntry } from "../shared/types.ts";
+import type { ApprovalReason } from "./sandbox_types.ts";
 
 /** Minimal Config projection sent to the Worker (JSON-serializable). */
 export interface WorkerConfig {

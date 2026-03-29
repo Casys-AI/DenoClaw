@@ -21,6 +21,14 @@ export type {
   Skill,
   ToolsConfig,
 } from "./types.ts";
+export type {
+  ApprovalReason,
+  ApprovalRequest,
+  ApprovalResponse,
+  ExecPolicy,
+  SandboxBackend,
+  SandboxExecRequest,
+} from "./sandbox_types.ts";
 export type { AgentLoopDeps } from "./loop.ts";
 export { BaseTool, ToolRegistry } from "./tools/registry.ts";
 export { ShellTool } from "./tools/shell.ts";

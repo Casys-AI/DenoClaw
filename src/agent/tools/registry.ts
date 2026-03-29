@@ -1,12 +1,14 @@
 import type {
-  ApprovalRequest,
-  ApprovalResponse,
-  ExecPolicy,
-  SandboxBackend,
   SandboxPermission,
   ToolDefinition,
   ToolResult,
 } from "../../shared/types.ts";
+import type {
+  ApprovalRequest,
+  ApprovalResponse,
+  ExecPolicy,
+  SandboxBackend,
+} from "../sandbox_types.ts";
 import type { ToolsConfig } from "../types.ts";
 import { log } from "../../shared/log.ts";
 

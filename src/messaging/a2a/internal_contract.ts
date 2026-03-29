@@ -3,7 +3,7 @@ import { TERMINAL_STATES } from "./types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 
 export const ALLOWED_TASK_STATE_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  SUBMITTED: ["WORKING", "CANCELED", "FAILED", "REJECTED"],
+  SUBMITTED: ["WORKING", "INPUT_REQUIRED", "COMPLETED", "FAILED", "REJECTED", "CANCELED"],
   WORKING: ["WORKING", "INPUT_REQUIRED", "COMPLETED", "FAILED", "CANCELED", "REJECTED"],
   INPUT_REQUIRED: ["WORKING", "CANCELED", "FAILED", "REJECTED"],
   COMPLETED: [],

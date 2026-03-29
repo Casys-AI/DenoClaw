@@ -69,10 +69,9 @@ export function mapTaskResultToCompletion(
     parts: [{ kind: "text", text: content }],
   };
 
-  const workingTask = ensureTaskReadyForLifecycleTransition(task);
   const withArtifact = {
-    ...workingTask,
-    artifacts: [...workingTask.artifacts, artifact],
+    ...task,
+    artifacts: [...task.artifacts, artifact],
   };
 
   return transitionTask(withArtifact, "COMPLETED", {
@@ -100,7 +99,7 @@ export function mapApprovalPauseToInputRequiredTask(
   task: Task,
   approval: ApprovalPauseInput,
 ): Task {
-  return transitionTask(ensureTaskReadyForLifecycleTransition(task), "INPUT_REQUIRED", {
+  return transitionTask(task, "INPUT_REQUIRED", {
     statusMessage: createTextMessage(
       approval.prompt ?? `Awaiting approval for ${approval.binary}`,
       "agent",
@@ -116,11 +115,6 @@ export function mapApprovalPauseToInputRequiredTask(
 }
 
 
-function ensureTaskReadyForLifecycleTransition(task: Task): Task {
-  return task.status.state === "SUBMITTED"
-    ? transitionTask(task, "WORKING")
-    : task;
-}
 
 function createTextMessage(
   text: string,

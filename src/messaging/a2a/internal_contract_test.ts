@@ -56,6 +56,8 @@ Deno.test("createCanonicalTask preserves legacy message alias for compatibility"
 
 Deno.test("canTransitionTaskState allows only canonical transitions", () => {
   assertEquals(canTransitionTaskState("SUBMITTED", "WORKING"), true);
+  assertEquals(canTransitionTaskState("SUBMITTED", "INPUT_REQUIRED"), true);
+  assertEquals(canTransitionTaskState("SUBMITTED", "COMPLETED"), true);
   assertEquals(canTransitionTaskState("WORKING", "INPUT_REQUIRED"), true);
   assertEquals(canTransitionTaskState("INPUT_REQUIRED", "WORKING"), true);
   assertEquals(canTransitionTaskState("WORKING", "COMPLETED"), true);

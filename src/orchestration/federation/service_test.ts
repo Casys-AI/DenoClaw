@@ -8,7 +8,7 @@ Deno.test("FederationService.probeRoute applies requester and remote policies", 
 
   try {
     const adapter = new KvFederationAdapter(kv);
-    const service = new FederationService(adapter, adapter, adapter);
+    const service = new FederationService(adapter, adapter, adapter, adapter);
 
     await adapter.setRemoteCatalog("broker-b", [{
       remoteBrokerId: "broker-b",
@@ -57,6 +57,37 @@ Deno.test("FederationService.probeRoute applies requester and remote policies", 
     });
     assertEquals(deniedByRemote.accepted, false);
     assertEquals(deniedByRemote.reason, "denied_by_policy");
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
+
+Deno.test("FederationService manages broker identities through identity port", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const adapter = new KvFederationAdapter(kv);
+    const service = new FederationService(adapter, adapter, adapter, adapter);
+
+    await service.upsertIdentity({
+      brokerId: "broker-c",
+      instanceUrl: "https://broker-c.example.com",
+      publicKeys: ["pub-1", "pub-2"],
+      status: "trusted",
+    });
+
+    const one = await service.getIdentity("broker-c");
+    assertEquals(one?.publicKeys.length, 2);
+
+    const all = await service.listIdentities();
+    assertEquals(all.length, 1);
+
+    await service.revokeIdentity("broker-c");
+    const revoked = await service.getIdentity("broker-c");
+    assertEquals(revoked?.status, "revoked");
   } finally {
     kv.close();
     await Deno.remove(kvPath);

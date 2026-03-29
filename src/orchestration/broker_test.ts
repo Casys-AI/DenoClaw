@@ -1123,3 +1123,64 @@ Deno.test("BrokerServer routeToTunnel rejects saturated tunnels", async () => {
     await broker.stop();
   }
 });
+
+
+Deno.test("BrokerServer federation identity endpoints support CRUD lifecycle", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const putResponse = await (broker as unknown as { handleHttp(req: Request): Promise<Response> }).handleHttp(
+      new Request("http://localhost/federation/identity", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          brokerId: "broker-remote",
+          instanceUrl: "https://remote.example.com",
+          publicKeys: ["pub-1"],
+          status: "trusted",
+        }),
+      }),
+    );
+    assertEquals(putResponse.status, 200);
+
+    const getResponse = await (broker as unknown as { handleHttp(req: Request): Promise<Response> }).handleHttp(
+      new Request("http://localhost/federation/identity?brokerId=broker-remote"),
+    );
+    assertEquals(getResponse.status, 200);
+    const one = await getResponse.json();
+    assertEquals(one.brokerId, "broker-remote");
+    assertEquals(one.status, "trusted");
+
+    const listResponse = await (broker as unknown as { handleHttp(req: Request): Promise<Response> }).handleHttp(
+      new Request("http://localhost/federation/identities"),
+    );
+    assertEquals(listResponse.status, 200);
+    const all = await listResponse.json();
+    assertEquals(all.length, 1);
+
+    const deleteResponse = await (broker as unknown as { handleHttp(req: Request): Promise<Response> }).handleHttp(
+      new Request("http://localhost/federation/identity?brokerId=broker-remote", {
+        method: "DELETE",
+      }),
+    );
+    assertEquals(deleteResponse.status, 200);
+
+    const revokedResponse = await (broker as unknown as { handleHttp(req: Request): Promise<Response> }).handleHttp(
+      new Request("http://localhost/federation/identity?brokerId=broker-remote"),
+    );
+    const revoked = await revokedResponse.json();
+    assertEquals(revoked.status, "revoked");
+
+    await broker.stop();
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});

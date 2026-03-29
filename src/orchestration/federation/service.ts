@@ -1,9 +1,11 @@
 import type {
   FederationControlPort,
   FederationDiscoveryPort,
+  FederationIdentityPort,
   FederationPolicyPort,
 } from "./ports.ts";
 import type {
+  BrokerIdentity,
   FederatedRoutePolicy,
   FederationLink,
   RemoteAgentCatalogEntry,
@@ -44,6 +46,7 @@ export class FederationService {
     private readonly control: FederationControlPort,
     private readonly discovery: FederationDiscoveryPort,
     private readonly policy: FederationPolicyPort,
+    private readonly identity: FederationIdentityPort,
   ) {}
 
   async openLink(input: FederationLinkOpenInput): Promise<FederationLink> {
@@ -68,6 +71,22 @@ export class FederationService {
 
   async closeLink(linkId: string): Promise<void> {
     await this.control.terminateLink(linkId);
+  }
+
+  async upsertIdentity(identity: BrokerIdentity): Promise<void> {
+    await this.identity.upsertIdentity(identity);
+  }
+
+  async revokeIdentity(brokerId: string): Promise<void> {
+    await this.identity.revokeIdentity(brokerId);
+  }
+
+  async getIdentity(brokerId: string): Promise<BrokerIdentity | null> {
+    return await this.identity.getIdentity(brokerId);
+  }
+
+  async listIdentities(): Promise<BrokerIdentity[]> {
+    return await this.identity.listIdentities();
   }
 
   async probeRoute(

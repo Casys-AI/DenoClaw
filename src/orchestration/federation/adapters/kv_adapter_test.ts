@@ -73,3 +73,32 @@ Deno.test("KvFederationAdapter stores and reads route policy", async () => {
     await Deno.remove(kvPath);
   }
 });
+
+
+Deno.test("KvFederationAdapter identity lifecycle", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const adapter = new KvFederationAdapter(kv);
+    await adapter.upsertIdentity({
+      brokerId: "broker-a",
+      instanceUrl: "https://broker-a.example.com",
+      publicKeys: ["key-1"],
+      status: "trusted",
+    });
+
+    const stored = await adapter.getIdentity("broker-a");
+    assertExists(stored);
+    assertEquals(stored?.status, "trusted");
+
+    const all = await adapter.listIdentities();
+    assertEquals(all.length, 1);
+
+    await adapter.revokeIdentity("broker-a");
+    const revoked = await adapter.getIdentity("broker-a");
+    assertEquals(revoked?.status, "revoked");
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});

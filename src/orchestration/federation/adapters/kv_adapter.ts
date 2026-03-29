@@ -10,6 +10,7 @@ import type {
   EstablishFederationLinkInput,
   FederationControlPort,
   FederationDiscoveryPort,
+  FederationIdentityPort,
   FederationObservabilityPort,
   FederationPolicyPort,
 } from "../ports.ts";
@@ -19,6 +20,7 @@ export class KvFederationAdapter
     FederationControlPort,
     FederationDiscoveryPort,
     FederationPolicyPort,
+    FederationIdentityPort,
     FederationObservabilityPort {
   constructor(private readonly kv: Deno.Kv) {}
 
@@ -63,7 +65,7 @@ export class KvFederationAdapter
       publicKeys: [],
       status: "pending" as const,
     };
-    await this.kv.set(["federation", "identity", remoteBrokerId], identity);
+    await this.upsertIdentity(identity);
     return identity;
   }
 
@@ -91,6 +93,37 @@ export class KvFederationAdapter
     entries: RemoteAgentCatalogEntry[],
   ): Promise<void> {
     await this.kv.set(["federation", "catalog", remoteBrokerId], entries);
+  }
+
+  async upsertIdentity(identity: BrokerIdentity): Promise<void> {
+    await this.kv.set(["federation", "identity", identity.brokerId], identity);
+  }
+
+  async getIdentity(brokerId: string): Promise<BrokerIdentity | null> {
+    const entry = await this.kv.get<BrokerIdentity>([
+      "federation",
+      "identity",
+      brokerId,
+    ]);
+    return entry.value ?? null;
+  }
+
+  async listIdentities(): Promise<BrokerIdentity[]> {
+    const identities: BrokerIdentity[] = [];
+    for await (
+      const entry of this.kv.list<BrokerIdentity>({
+        prefix: ["federation", "identity"],
+      })
+    ) {
+      if (entry.value) identities.push(entry.value);
+    }
+    return identities;
+  }
+
+  async revokeIdentity(brokerId: string): Promise<void> {
+    const existing = await this.getIdentity(brokerId);
+    if (!existing) return;
+    await this.upsertIdentity({ ...existing, status: "revoked" });
   }
 
   async setRoutePolicy(

@@ -38,6 +38,7 @@ import {
 } from "../messaging/a2a/input_metadata.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
+  type BrokerIdentity,
   createFederationControlRouter,
   type FederatedRoutePolicy,
   type FederationControlEnvelope,
@@ -904,7 +905,12 @@ export class BrokerServer {
   private async getFederationService(): Promise<FederationService> {
     if (this.federationService) return this.federationService;
     const adapter = await this.getFederationAdapter();
-    this.federationService = new FederationService(adapter, adapter, adapter);
+    this.federationService = new FederationService(
+      adapter,
+      adapter,
+      adapter,
+      adapter,
+    );
     return this.federationService;
   }
 
@@ -1217,6 +1223,57 @@ export class BrokerServer {
       const adapter = await this.getFederationAdapter();
       await adapter.setRoutePolicy(body.policyId, body);
       return Response.json({ ok: true, policyId: body.policyId });
+    }
+
+    if (req.method === "GET" && url.pathname === "/federation/identities") {
+      const service = await this.getFederationService();
+      return Response.json(await service.listIdentities());
+    }
+
+    if (req.method === "GET" && url.pathname === "/federation/identity") {
+      const brokerId = url.searchParams.get("brokerId");
+      if (!brokerId) {
+        return Response.json({
+          error: {
+            code: "MISSING_BROKER_ID",
+            recovery: "Add ?brokerId=<broker-id>",
+          },
+        }, { status: 400 });
+      }
+      const service = await this.getFederationService();
+      return Response.json(await service.getIdentity(brokerId));
+    }
+
+    if (req.method === "PUT" && url.pathname === "/federation/identity") {
+      const body = await req.json().catch(() => null) as BrokerIdentity | null;
+      if (
+        !body || typeof body.brokerId !== "string" || body.brokerId.length === 0
+      ) {
+        return Response.json({
+          error: {
+            code: "INVALID_IDENTITY",
+            recovery: "Provide a valid BrokerIdentity JSON body",
+          },
+        }, { status: 400 });
+      }
+      const service = await this.getFederationService();
+      await service.upsertIdentity(body);
+      return Response.json({ ok: true, brokerId: body.brokerId });
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/federation/identity") {
+      const brokerId = url.searchParams.get("brokerId");
+      if (!brokerId) {
+        return Response.json({
+          error: {
+            code: "MISSING_BROKER_ID",
+            recovery: "Add ?brokerId=<broker-id>",
+          },
+        }, { status: 400 });
+      }
+      const service = await this.getFederationService();
+      await service.revokeIdentity(brokerId);
+      return Response.json({ ok: true, brokerId });
     }
 
     return new Response("Not Found", { status: 404 });

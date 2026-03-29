@@ -35,6 +35,13 @@ export interface FederationDiscoveryPort {
   ): Promise<Record<string, unknown> | null>;
 }
 
+export interface FederationIdentityPort {
+  upsertIdentity(identity: BrokerIdentity): Promise<void>;
+  getIdentity(brokerId: string): Promise<BrokerIdentity | null>;
+  listIdentities(): Promise<BrokerIdentity[]>;
+  revokeIdentity(brokerId: string): Promise<void>;
+}
+
 export interface FederationPolicyPort {
   setRoutePolicy(
     brokerId: string,

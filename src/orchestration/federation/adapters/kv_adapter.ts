@@ -69,6 +69,7 @@ export class KvFederationAdapter
       lastHeartbeatAt: new Date().toISOString(),
     };
     await this.kv.set(["federation", "links", link.linkId], link);
+    await this.ensureLinkStatsAggregate(link);
     return link;
   }
 
@@ -289,37 +290,7 @@ export class KvFederationAdapter
   }
 
   async recordCrossBrokerHop(event: CrossBrokerHopEvent): Promise<void> {
-    await this.kv.set(
-      ["federation", "events", event.taskId, crypto.randomUUID()],
-      event,
-    );
-    await this.updateLinkAggregate(event.remoteBrokerId, event.linkId, (link) => {
-      const latencySamples = [...link.latencySamples, event.latencyMs];
-      return {
-        ...link,
-        successCount: link.successCount + (event.success ? 1 : 0),
-        errorCount: link.errorCount +
-          (!event.success && event.errorKind !== "auth" ? 1 : 0),
-        p50LatencyMs: this.percentile(latencySamples, 50),
-        p95LatencyMs: this.percentile(latencySamples, 95),
-        lastTaskId: event.taskId,
-        lastTraceId: event.traceId,
-        lastOccurredAt: event.occurredAt,
-        latencySamples,
-      };
-    });
-    await this.updateSummaryAggregate(undefined, (summary) => ({
-      ...summary,
-      successCount: summary.successCount + (event.success ? 1 : 0),
-      errorCount: summary.errorCount +
-        (!event.success && event.errorKind !== "auth" ? 1 : 0),
-    }));
-    await this.updateSummaryAggregate(event.remoteBrokerId, (summary) => ({
-      ...summary,
-      successCount: summary.successCount + (event.success ? 1 : 0),
-      errorCount: summary.errorCount +
-        (!event.success && event.errorKind !== "auth" ? 1 : 0),
-    }));
+    await this.persistHopEvent(event);
 
     for (const subscriber of this.federationEventSubscribers.values()) {
       subscriber(event);
@@ -337,25 +308,7 @@ export class KvFederationAdapter
   }
 
   async recordFederationDenial(event: FederationDenialEvent): Promise<void> {
-    await this.kv.set(
-      ["federation", "denials", event.remoteBrokerId, crypto.randomUUID()],
-      event,
-    );
-    await this.updateLinkAggregate(event.remoteBrokerId, event.linkId, (link) => ({
-      ...link,
-      denials: this.incrementDenials(link.denials, event.kind),
-      lastTaskId: event.taskId,
-      lastTraceId: event.traceId,
-      lastOccurredAt: event.occurredAt,
-    }));
-    await this.updateSummaryAggregate(undefined, (summary) => ({
-      ...summary,
-      denials: this.incrementDenials(summary.denials, event.kind),
-    }));
-    await this.updateSummaryAggregate(event.remoteBrokerId, (summary) => ({
-      ...summary,
-      denials: this.incrementDenials(summary.denials, event.kind),
-    }));
+    await this.persistDenialEvent(event);
 
     for (const subscriber of this.federationEventSubscribers.values()) {
       subscriber(event);
@@ -411,23 +364,7 @@ export class KvFederationAdapter
       entry.remoteBrokerId,
       entry.deadLetterId,
     ];
-    const created = await this.kv
-      .atomic()
-      .check({ key, versionstamp: null })
-      .set(key, entry)
-      .commit();
-    if (!created.ok) {
-      await this.kv.set(key, entry);
-      return;
-    }
-    await this.updateSummaryAggregate(undefined, (summary) => ({
-      ...summary,
-      deadLetterBacklog: summary.deadLetterBacklog + 1,
-    }));
-    await this.updateSummaryAggregate(entry.remoteBrokerId, (summary) => ({
-      ...summary,
-      deadLetterBacklog: summary.deadLetterBacklog + 1,
-    }));
+    await this.persistDeadLetterEntry(key, entry);
   }
 
   async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
@@ -494,6 +431,16 @@ export class KvFederationAdapter
     }
   }
 
+  private incrementDeadLetterBacklog(
+    summary: FederationStatsSummaryAggregate | null | undefined,
+  ): FederationStatsSummaryAggregate {
+    const current = summary ?? this.emptySummaryAggregate();
+    return {
+      ...current,
+      deadLetterBacklog: current.deadLetterBacklog + 1,
+    };
+  }
+
   private summaryKey(remoteBrokerId?: string): Deno.KvKey {
     return remoteBrokerId
       ? ["federation", "stats", "summary", remoteBrokerId]
@@ -508,6 +455,15 @@ export class KvFederationAdapter
     return remoteBrokerId
       ? ["federation", "stats", "links", remoteBrokerId]
       : ["federation", "stats", "links"];
+  }
+
+  private async ensureLinkStatsAggregate(link: FederationLink): Promise<void> {
+    await this.updateSummaryAggregate(undefined, (summary) => summary);
+    await this.updateSummaryAggregate(link.remoteBrokerId, (summary) => summary);
+    await this.updateLinkAggregate(link.remoteBrokerId, link.linkId, (current) => ({
+      ...current,
+      lastOccurredAt: current.lastOccurredAt ?? link.lastHeartbeatAt,
+    }));
   }
 
   private async updateSummaryAggregate(
@@ -556,6 +512,189 @@ export class KvFederationAdapter
       if (committed.ok) return;
     }
     throw new Error(`Failed to update federation aggregate at ${key.join(":")}`);
+  }
+
+  private async persistHopEvent(event: CrossBrokerHopEvent): Promise<void> {
+    const eventKey: Deno.KvKey = [
+      "federation",
+      "events",
+      event.taskId,
+      crypto.randomUUID(),
+    ];
+    const globalSummaryKey = this.summaryKey();
+    const remoteSummaryKey = this.summaryKey(event.remoteBrokerId);
+    const linkAggregateKey = this.linkKey(event.remoteBrokerId, event.linkId);
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const [eventEntry, globalSummaryEntry, remoteSummaryEntry, linkEntry] =
+        await Promise.all([
+          this.kv.get<CrossBrokerHopEvent>(eventKey),
+          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
+          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
+          this.kv.get<FederationLinkStatsAggregate>(linkAggregateKey),
+        ]);
+      const latencySamples = [
+        ...(linkEntry.value?.latencySamples ?? []),
+        event.latencyMs,
+      ];
+      const nextLink: FederationLinkStatsAggregate = {
+        ...(linkEntry.value ??
+          this.emptyLinkAggregate(event.remoteBrokerId, event.linkId)),
+        successCount:
+          (linkEntry.value?.successCount ?? 0) + (event.success ? 1 : 0),
+        errorCount: (linkEntry.value?.errorCount ?? 0) +
+          (!event.success && event.errorKind !== "auth" ? 1 : 0),
+        p50LatencyMs: this.percentile(latencySamples, 50),
+        p95LatencyMs: this.percentile(latencySamples, 95),
+        lastTaskId: event.taskId,
+        lastTraceId: event.traceId,
+        lastOccurredAt: event.occurredAt,
+        latencySamples,
+      };
+      const nextGlobal: FederationStatsSummaryAggregate = {
+        ...(globalSummaryEntry.value ?? this.emptySummaryAggregate()),
+        successCount: (globalSummaryEntry.value?.successCount ?? 0) +
+          (event.success ? 1 : 0),
+        errorCount: (globalSummaryEntry.value?.errorCount ?? 0) +
+          (!event.success && event.errorKind !== "auth" ? 1 : 0),
+      };
+      const nextRemote: FederationStatsSummaryAggregate = {
+        ...(remoteSummaryEntry.value ?? this.emptySummaryAggregate()),
+        successCount: (remoteSummaryEntry.value?.successCount ?? 0) +
+          (event.success ? 1 : 0),
+        errorCount: (remoteSummaryEntry.value?.errorCount ?? 0) +
+          (!event.success && event.errorKind !== "auth" ? 1 : 0),
+      };
+      const committed = await this.kv
+        .atomic()
+        .check({ key: eventKey, versionstamp: eventEntry.versionstamp })
+        .check({
+          key: globalSummaryKey,
+          versionstamp: globalSummaryEntry.versionstamp,
+        })
+        .check({
+          key: remoteSummaryKey,
+          versionstamp: remoteSummaryEntry.versionstamp,
+        })
+        .check({
+          key: linkAggregateKey,
+          versionstamp: linkEntry.versionstamp,
+        })
+        .set(eventKey, event)
+        .set(globalSummaryKey, nextGlobal)
+        .set(remoteSummaryKey, nextRemote)
+        .set(linkAggregateKey, nextLink)
+        .commit();
+      if (committed.ok) return;
+    }
+    throw new Error("Failed to persist federation hop aggregate");
+  }
+
+  private async persistDenialEvent(event: FederationDenialEvent): Promise<void> {
+    const eventKey: Deno.KvKey = [
+      "federation",
+      "denials",
+      event.remoteBrokerId,
+      crypto.randomUUID(),
+    ];
+    const globalSummaryKey = this.summaryKey();
+    const remoteSummaryKey = this.summaryKey(event.remoteBrokerId);
+    const linkAggregateKey = this.linkKey(event.remoteBrokerId, event.linkId);
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const [eventEntry, globalSummaryEntry, remoteSummaryEntry, linkEntry] =
+        await Promise.all([
+          this.kv.get<FederationDenialEvent>(eventKey),
+          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
+          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
+          this.kv.get<FederationLinkStatsAggregate>(linkAggregateKey),
+        ]);
+      const nextLink: FederationLinkStatsAggregate = {
+        ...(linkEntry.value ??
+          this.emptyLinkAggregate(event.remoteBrokerId, event.linkId)),
+        denials: this.incrementDenials(
+          linkEntry.value?.denials ?? this.emptyDenials(),
+          event.kind,
+        ),
+        lastTaskId: event.taskId,
+        lastTraceId: event.traceId,
+        lastOccurredAt: event.occurredAt,
+      };
+      const nextGlobal: FederationStatsSummaryAggregate = {
+        ...(globalSummaryEntry.value ?? this.emptySummaryAggregate()),
+        denials: this.incrementDenials(
+          globalSummaryEntry.value?.denials ?? this.emptyDenials(),
+          event.kind,
+        ),
+      };
+      const nextRemote: FederationStatsSummaryAggregate = {
+        ...(remoteSummaryEntry.value ?? this.emptySummaryAggregate()),
+        denials: this.incrementDenials(
+          remoteSummaryEntry.value?.denials ?? this.emptyDenials(),
+          event.kind,
+        ),
+      };
+      const committed = await this.kv
+        .atomic()
+        .check({ key: eventKey, versionstamp: eventEntry.versionstamp })
+        .check({
+          key: globalSummaryKey,
+          versionstamp: globalSummaryEntry.versionstamp,
+        })
+        .check({
+          key: remoteSummaryKey,
+          versionstamp: remoteSummaryEntry.versionstamp,
+        })
+        .check({
+          key: linkAggregateKey,
+          versionstamp: linkEntry.versionstamp,
+        })
+        .set(eventKey, event)
+        .set(globalSummaryKey, nextGlobal)
+        .set(remoteSummaryKey, nextRemote)
+        .set(linkAggregateKey, nextLink)
+        .commit();
+      if (committed.ok) return;
+    }
+    throw new Error("Failed to persist federation denial aggregate");
+  }
+
+  private async persistDeadLetterEntry(
+    key: Deno.KvKey,
+    entry: FederationDeadLetter,
+  ): Promise<void> {
+    const globalSummaryKey = this.summaryKey();
+    const remoteSummaryKey = this.summaryKey(entry.remoteBrokerId);
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
+        await Promise.all([
+          this.kv.get<FederationDeadLetter>(key),
+          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
+          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
+        ]);
+      if (deadLetterEntry.value) return;
+      const nextGlobal = this.incrementDeadLetterBacklog(
+        globalSummaryEntry.value,
+      );
+      const nextRemote = this.incrementDeadLetterBacklog(
+        remoteSummaryEntry.value,
+      );
+      const committed = await this.kv
+        .atomic()
+        .check({ key, versionstamp: deadLetterEntry.versionstamp })
+        .check({
+          key: globalSummaryKey,
+          versionstamp: globalSummaryEntry.versionstamp,
+        })
+        .check({
+          key: remoteSummaryKey,
+          versionstamp: remoteSummaryEntry.versionstamp,
+        })
+        .set(key, entry)
+        .set(globalSummaryKey, nextGlobal)
+        .set(remoteSummaryKey, nextRemote)
+        .commit();
+      if (committed.ok) return;
+    }
+    throw new Error("Failed to persist federation dead-letter aggregate");
   }
 
   private async readAggregatedFederationStats(

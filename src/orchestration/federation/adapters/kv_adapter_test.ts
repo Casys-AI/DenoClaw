@@ -360,6 +360,17 @@ Deno.test(
         linkId: "broker-a:broker-b",
         traceId: "trace-3",
       });
+      for await (const entry of kv.list({ prefix: ["federation", "events"] })) {
+        await kv.delete(entry.key);
+      }
+      for await (const entry of kv.list({ prefix: ["federation", "denials"] })) {
+        await kv.delete(entry.key);
+      }
+      for await (
+        const entry of kv.list({ prefix: ["federation", "dead-letter"] })
+      ) {
+        await kv.delete(entry.key);
+      }
 
       const stats = await adapter.getFederationStats("broker-b");
       assertEquals(stats.successCount, 2);

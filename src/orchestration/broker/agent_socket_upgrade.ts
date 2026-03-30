@@ -1,8 +1,8 @@
 import type { AuthManager } from "../auth.ts";
 import type { BrokerMessage } from "../types.ts";
 import { log } from "../../shared/log.ts";
-import { BrokerAgentRegistry } from "./agent_registry.ts";
-import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
+import type { BrokerAgentRegistry } from "./agent_registry.ts";
+import type { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
 import {
   DENOCLAW_AGENT_PROTOCOL,
   isAgentSocketRegisterMessage,

@@ -97,10 +97,10 @@ export interface GatewayWebSocketContext {
   wsClients: Map<string, WebSocket>;
 }
 
-export async function handleGatewayWebSocketUpgrade(
+export function handleGatewayWebSocketUpgrade(
   ctx: GatewayWebSocketContext,
   req: Request,
-): Promise<Response> {
+): Response {
   const upgrade = req.headers.get("upgrade") || "";
   if (upgrade.toLowerCase() !== "websocket") {
     return new Response("Expected WebSocket", { status: 426 });

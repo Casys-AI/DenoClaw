@@ -35,7 +35,7 @@ export interface GatewayHttpContext {
   githubOAuth: GitHubOAuth | null;
   agentStore: AgentStore | null;
   checkAuth(req: Request): Promise<Response | null>;
-  handleWebSocketUpgrade(req: Request): Promise<Response>;
+  handleWebSocketUpgrade(req: Request): Response | Promise<Response>;
 }
 
 export async function handleGatewayHttp(

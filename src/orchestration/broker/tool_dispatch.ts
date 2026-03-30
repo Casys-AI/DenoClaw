@@ -8,8 +8,8 @@ import type {
 import { log } from "../../shared/log.ts";
 import type { ToolExecutionPort } from "../tool_execution_port.ts";
 import type { BrokerToolRequestMessage } from "../types.ts";
-import { BrokerReplyDispatcher } from "./reply_dispatch.ts";
-import { BrokerTaskPersistence } from "./persistence.ts";
+import type { BrokerReplyDispatcher } from "./reply_dispatch.ts";
+import type { BrokerTaskPersistence } from "./persistence.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 
 const DEFAULT_EXEC_POLICY: ExecPolicy = {

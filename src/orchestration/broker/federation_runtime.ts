@@ -25,51 +25,51 @@ export function createBrokerFederationRoutingPort(
   deps: BrokerFederationRuntimeDeps,
 ): FederationRoutingPort {
   return {
-    resolveTarget: async (task, _policy, correlation) => {
+    resolveTarget: (task, _policy, correlation) => {
       const tunnel = deps.findRemoteBrokerConnection(
         correlation.remoteBrokerId,
       );
       const advertisedAgents = tunnel?.capabilities.agents ?? [];
       if (!tunnel) {
-        return {
+        return Promise.resolve({
           kind: "remote",
           remoteBrokerId: correlation.remoteBrokerId,
           reason: "remote_broker_unavailable",
-        };
+        });
       }
       if (
         advertisedAgents.length > 0 &&
         !advertisedAgents.includes(task.targetAgent)
       ) {
-        return {
+        return Promise.resolve({
           kind: "remote",
           remoteBrokerId: correlation.remoteBrokerId,
           reason: "target_not_advertised_by_remote_broker",
-        };
+        });
       }
-      return {
+      return Promise.resolve({
         kind: "remote",
         remoteBrokerId: correlation.remoteBrokerId,
         reason: "federation_task_submit",
-      };
+      });
     },
-    forwardTask: async (task, remoteBrokerId, correlation) => {
+    forwardTask: (task, remoteBrokerId, correlation) => {
       const taskMessage = extractBrokerSubmitTaskMessage(task);
       const localBrokerId = correlation.linkId.split(":")[0] || "broker";
       const remoteTunnel = deps.findRemoteBrokerConnection(remoteBrokerId);
       if (!remoteTunnel) {
-        throw new Error(
+        return Promise.reject(new Error(
           `federation_forward_failed:${remoteBrokerId}:remote_broker_unavailable`,
-        );
+        ));
       }
       const advertisedAgents = remoteTunnel.capabilities.agents ?? [];
       if (
         advertisedAgents.length > 0 &&
         !advertisedAgents.includes(task.targetAgent)
       ) {
-        throw new Error(
+        return Promise.reject(new Error(
           `federation_forward_failed:${remoteBrokerId}:target_not_advertised`,
-        );
+        ));
       }
       try {
         deps.routeToTunnel(remoteTunnel.ws, {
@@ -86,12 +86,14 @@ export function createBrokerFederationRoutingPort(
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
-        throw new Error(
+        return Promise.reject(new Error(
           `federation_forward_failed:${remoteBrokerId}:${
             error instanceof Error ? error.message : String(error)
           }`,
-        );
+        ));
       }
+
+      return Promise.resolve();
     },
   };
 }

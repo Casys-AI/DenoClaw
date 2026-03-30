@@ -22,7 +22,7 @@ import {
   extractBrokerSubmitTaskMessage,
 } from "../types.ts";
 import type { ApprovalGrant } from "./persistence.ts";
-import { BrokerTaskPersistence } from "./persistence.ts";
+import type { BrokerTaskPersistence } from "./persistence.ts";
 import type { TaskStore } from "../../messaging/a2a/tasks.ts";
 
 type BrokerTaskEnvelope = Extract<

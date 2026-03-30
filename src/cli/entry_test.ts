@@ -25,28 +25,28 @@ function createCliDeps(
 ): CliCommandDeps {
   const config = createConfig();
   return {
-    getConfig: async () => config,
-    getConfigOrDefault: async () => config,
-    createAgent: async () => {},
-    deleteAgent: async () => {},
-    listAgents: async () => {},
+    getConfig: () => Promise.resolve(config),
+    getConfigOrDefault: () => Promise.resolve(config),
+    createAgent: () => Promise.resolve(),
+    deleteAgent: () => Promise.resolve(),
+    listAgents: () => Promise.resolve(),
     printHelp: () => {},
     initCliFlags,
-    runInitWizard: async () => {},
-    setupProvider: async () => {},
-    setupChannel: async () => {},
-    setupAgent: async () => {},
-    deployBroker: async () => {},
-    publishAgent: async () => {},
-    showStatus: async () => {},
-    startAgentRuntime: async () => {},
-    startLocalGateway: async () => {},
-    startBrokerRuntime: async () => {},
-    startLocalTunnel: async () => {},
+    runInitWizard: () => Promise.resolve(),
+    setupProvider: () => Promise.resolve(),
+    setupChannel: () => Promise.resolve(),
+    setupAgent: () => Promise.resolve(),
+    deployBroker: () => Promise.resolve(),
+    publishAgent: () => Promise.resolve(),
+    showStatus: () => Promise.resolve(),
+    startAgentRuntime: () => Promise.resolve(),
+    startLocalGateway: () => Promise.resolve(),
+    startBrokerRuntime: () => Promise.resolve(),
+    startLocalTunnel: () => Promise.resolve(),
     humanLog,
     humanWarn,
     outputError,
-    streamBrokerLogs: async () => {},
+    streamBrokerLogs: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -69,8 +69,9 @@ function captureConsoleLogAsync(fn: () => Promise<void>): {
 Deno.test("runCli suppresses deprecated setup warnings in JSON mode", async () => {
   let called = false;
   const deps = createCliDeps({
-    setupProvider: async () => {
+    setupProvider: () => {
       called = true;
+      return Promise.resolve();
     },
   });
 
@@ -86,8 +87,9 @@ Deno.test("runCli suppresses deprecated setup warnings in JSON mode", async () =
 Deno.test("runCli forwards --yes to agent delete", async () => {
   let receivedYes: boolean | undefined;
   const deps = createCliDeps({
-    deleteAgent: async (_name, opts) => {
+    deleteAgent: (_name, opts) => {
       receivedYes = opts?.yes;
+      return Promise.resolve();
     },
   });
 

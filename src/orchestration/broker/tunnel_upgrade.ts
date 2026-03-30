@@ -4,7 +4,7 @@ import {
   mapInstanceTunnelToCatalog,
 } from "../federation/mod.ts";
 import type { TunnelCapabilities } from "../types.ts";
-import { TunnelRegistry } from "./tunnel_registry.ts";
+import type { TunnelRegistry } from "./tunnel_registry.ts";
 import {
   assertTunnelRegisterMessage,
   DENOCLAW_TUNNEL_PROTOCOL,

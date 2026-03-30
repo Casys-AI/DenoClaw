@@ -21,8 +21,20 @@ export interface CliArgs {
   prod?: boolean;
 }
 
+function stripTaskForwardSeparator(argv: string[]): string[] {
+  const separatorIndex = argv.indexOf("--");
+  if (separatorIndex === -1) return argv;
+
+  return [
+    ...argv.slice(0, separatorIndex),
+    ...argv.slice(separatorIndex + 1),
+  ];
+}
+
 export function parseCliArgs(argv: string[]): CliArgs {
-  return parseArgs(argv, {
+  const normalizedArgv = stripTaskForwardSeparator(argv);
+
+  return parseArgs(normalizedArgv, {
     string: [
       "message",
       "session",

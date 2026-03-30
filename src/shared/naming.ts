@@ -1,3 +1,5 @@
+const DENOCLAW_DEPLOY_PREFIX = "denoclaw";
+
 export function normalizeDeploySlug(value: string): string {
   const slug = value
     .trim()
@@ -13,20 +15,39 @@ export function normalizeDeploySlug(value: string): string {
   return slug;
 }
 
-export function deriveBrokerKvName(appName: string): string {
+export function deriveBrokerAppName(
+  projectName = DENOCLAW_DEPLOY_PREFIX,
+): string {
+  return `${normalizeDeploySlug(projectName)}-broker`;
+}
+
+export function deriveBrokerKvName(
+  appName = deriveBrokerAppName(),
+): string {
   return `${normalizeDeploySlug(appName)}-kv`;
 }
 
-export function deriveAgentAppName(agentId: string): string {
-  return normalizeDeploySlug(agentId);
+export function deriveAgentAppName(
+  agentId: string,
+  projectName = DENOCLAW_DEPLOY_PREFIX,
+): string {
+  return `${normalizeDeploySlug(projectName)}-agent-${
+    normalizeDeploySlug(agentId)
+  }`;
 }
 
-export function deriveAgentKvName(agentId: string): string {
-  return `${deriveAgentAppName(agentId)}-kv`;
+export function deriveAgentKvName(
+  agentId: string,
+  projectName = DENOCLAW_DEPLOY_PREFIX,
+): string {
+  return `${deriveAgentAppName(agentId, projectName)}-kv`;
 }
 
-export function deriveSandboxInstanceName(agentId: string): string {
-  return `${deriveAgentAppName(agentId)}-sandbox`;
+export function deriveSandboxInstanceName(
+  agentId: string,
+  projectName = DENOCLAW_DEPLOY_PREFIX,
+): string {
+  return `${deriveAgentAppName(agentId, projectName)}-sandbox`;
 }
 
 export function deriveDeployHostname(slug: string, org?: string): string {

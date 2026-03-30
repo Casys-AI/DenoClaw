@@ -6,7 +6,7 @@ import {
   requireDashboardSession,
 } from "../lib/dashboard-auth.ts";
 import type { FederationStatsSnapshot, HealthResponse } from "../lib/types.ts";
-import { formatCompact, formatLatency } from "../lib/format.ts";
+import { formatCompact, formatLatency, formatRelative } from "../lib/format.ts";
 
 interface TunnelsData {
   health: HealthResponse | null;
@@ -84,6 +84,71 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
           </div>
         </div>
       </div>
+
+      {hasFederation && federation.links.length > 0 && (
+        <div class="card bg-base-100 shadow">
+          <div class="card-body p-4">
+            <h2 class="card-title text-base font-display">Federation Links</h2>
+            <div class="overflow-x-auto">
+              <table class="table table-zebra">
+                <thead>
+                  <tr>
+                    <th>Link</th>
+                    <th>Remote</th>
+                    <th>Success</th>
+                    <th>Errors</th>
+                    <th>P95</th>
+                    <th>Latest Trace</th>
+                    <th>Last Activity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {federation.links.map((link) => (
+                    <tr key={link.linkId}>
+                      <td class="font-mono text-xs">{link.linkId}</td>
+                      <td class="font-mono text-xs">{link.remoteBrokerId}</td>
+                      <td class="font-data text-success">
+                        {formatCompact(link.successCount)}
+                      </td>
+                      <td class="font-data text-error">
+                        {formatCompact(link.errorCount)}
+                      </td>
+                      <td class="font-data">{formatLatency(link.p95LatencyMs)}</td>
+                      <td>
+                        {link.lastTraceId
+                          ? (
+                            <div class="space-y-1">
+                              <div
+                                class="badge badge-outline badge-primary font-data"
+                                title={link.lastTraceId}
+                              >
+                                {link.lastTraceId.slice(0, 8)}
+                              </div>
+                              {link.lastTaskId && (
+                                <div
+                                  class="text-[11px] font-mono text-neutral-content"
+                                  title={link.lastTaskId}
+                                >
+                                  {link.lastTaskId}
+                                </div>
+                              )}
+                            </div>
+                          )
+                          : <span class="text-xs text-neutral-content">none</span>}
+                      </td>
+                      <td class="text-xs text-neutral-content">
+                        {link.lastOccurredAt
+                          ? formatRelative(link.lastOccurredAt)
+                          : "no events"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tunnels.length === 0
         ? <div class="alert">No tunnels connected.</div>

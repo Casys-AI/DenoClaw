@@ -1,15 +1,20 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, type InstanceData } from "../lib/api-client.ts";
+import { selectLatestFederationLinkFromSnapshots } from "../lib/federation.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../lib/dashboard-auth.ts";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { StatusDot } from "../components/StatusBadge.tsx";
-import type { AgentStatusEntry, HealthResponse } from "../lib/types.ts";
+import type {
+  AgentStatusEntry,
+  FederationLinkStats,
+  HealthResponse,
+} from "../lib/types.ts";
 import NetworkGraph from "../islands/NetworkGraph.tsx";
-import { formatCompact, formatLatency } from "../lib/format.ts";
+import { formatCompact, formatLatency, formatRelative } from "../lib/format.ts";
 
 interface NetworkData {
   instances: InstanceData[];
@@ -23,6 +28,7 @@ interface NetworkData {
   federationDeadLetters: number;
   federationReportingCount: number;
   federationExpectedCount: number;
+  latestFederationLink: FederationLinkStats | null;
 }
 
 export const handler = {
@@ -72,6 +78,9 @@ export const handler = {
           instance.federation?.links.map((link) => link.p95LatencyMs) ?? [],
       ),
     );
+    const latestFederationLink = selectLatestFederationLinkFromSnapshots(
+      filteredInstances.map((instance) => instance.federation),
+    );
 
     return page({
       instances,
@@ -85,6 +94,7 @@ export const handler = {
       federationDeadLetters,
       federationReportingCount,
       federationExpectedCount,
+      latestFederationLink,
     } as NetworkData);
   },
 };
@@ -102,6 +112,7 @@ export default function Network({ data }: { data: NetworkData }) {
     federationDeadLetters,
     federationReportingCount,
     federationExpectedCount,
+    latestFederationLink,
   } = data;
   const tunnels = health?.tunnels ?? [];
   const hasFederation = federationReportingCount > 0;
@@ -185,6 +196,27 @@ export default function Network({ data }: { data: NetworkData }) {
                 {hasFederation
                   ? federationBacklogText
                   : "stats endpoint unavailable"}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Latest Federation Trace</div>
+              <div
+                class={`stat-value font-data ${
+                  latestFederationLink?.lastTraceId
+                    ? "text-primary text-lg"
+                    : "text-warning text-base"
+                }`}
+              >
+                {latestFederationLink?.lastTraceId
+                  ? latestFederationLink.lastTraceId.slice(0, 8)
+                  : "unavailable"}
+              </div>
+              <div class="stat-desc">
+                {latestFederationLink?.lastOccurredAt
+                  ? `${latestFederationLink.lastTaskId ?? "task unknown"} · ${
+                    formatRelative(latestFederationLink.lastOccurredAt)
+                  }`
+                  : "no federation trace yet"}
               </div>
             </div>
           </div>

@@ -6,17 +6,24 @@ import {
   getAllInstancesData,
   type InstanceData,
 } from "../lib/api-client.ts";
+import { selectLatestFederationLinkFromSnapshots } from "../lib/federation.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../lib/dashboard-auth.ts";
-import { formatCompact, formatCost, formatLatency } from "../lib/format.ts";
+import {
+  formatCompact,
+  formatCost,
+  formatLatency,
+  formatRelative,
+} from "../lib/format.ts";
 import { StatusDot } from "../components/StatusBadge.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { AlertStrip } from "../components/AlertStrip.tsx";
 import type {
   AgentMetrics,
+  FederationLinkStats,
   AgentStatusEntry,
   MetricsSummary,
   TaskObservationEntry,
@@ -36,6 +43,7 @@ interface OverviewData {
   federationP95LatencyMs: number;
   federationReportingCount: number;
   federationExpectedCount: number;
+  latestFederationLink: FederationLinkStats | null;
 }
 
 export const handler = {
@@ -81,6 +89,9 @@ export const handler = {
     const federationP95LatencyMs = linkP95s.length > 0
       ? Math.max(...linkP95s)
       : 0;
+    const latestFederationLink = selectLatestFederationLinkFromSnapshots(
+      filtered.map((instance) => instance.federation),
+    );
 
     // Fetch per-agent metrics
     const metrics: AgentMetrics[] = [];
@@ -127,6 +138,7 @@ export const handler = {
       federationP95LatencyMs,
       federationReportingCount,
       federationExpectedCount,
+      latestFederationLink,
     } as OverviewData);
   },
 };
@@ -146,6 +158,7 @@ export default function Overview({ data }: { data: OverviewData }) {
     federationP95LatencyMs,
     federationReportingCount,
     federationExpectedCount,
+    latestFederationLink,
   } = data;
   const running = agents.filter(
     (a) => a.status === "running" || a.status === "alive",
@@ -268,6 +281,27 @@ export default function Overview({ data }: { data: OverviewData }) {
             {hasFederation
               ? federationBacklogText
               : "stats endpoint unavailable"}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Latest Federation Trace</div>
+          <div
+            class={`stat-value font-data ${
+              latestFederationLink?.lastTraceId
+                ? "text-primary text-lg"
+                : "text-warning text-base"
+            }`}
+          >
+            {latestFederationLink?.lastTraceId
+              ? latestFederationLink.lastTraceId.slice(0, 8)
+              : "unavailable"}
+          </div>
+          <div class="stat-desc">
+            {latestFederationLink?.lastOccurredAt
+              ? `${latestFederationLink.lastTaskId ?? "task unknown"} · ${
+                formatRelative(latestFederationLink.lastOccurredAt)
+              }`
+              : "no federation trace yet"}
           </div>
         </div>
       </div>

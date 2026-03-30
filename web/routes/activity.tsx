@@ -2,12 +2,16 @@ import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import ActivityFeed from "../islands/ActivityFeed.tsx";
 import { getFederationStats } from "../lib/api-client.ts";
+import { selectLatestFederationLink } from "../lib/federation.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../lib/dashboard-auth.ts";
-import { formatCompact, formatLatency } from "../lib/format.ts";
-import type { FederationStatsSnapshot } from "../lib/types.ts";
+import { formatCompact, formatLatency, formatRelative } from "../lib/format.ts";
+import type {
+  FederationLinkStats,
+  FederationStatsSnapshot,
+} from "../lib/types.ts";
 
 export const handler = {
   async GET(ctx: FreshContext) {
@@ -19,19 +23,25 @@ export const handler = {
       brokerUrl: config.brokerUrl,
       token: config.token,
     });
-    return page({ brokerUrl: config.brokerUrl, federation });
+    const latestFederationLink = selectLatestFederationLink(federation);
+    return page({ brokerUrl: config.brokerUrl, federation, latestFederationLink });
   },
 };
 
 export default function Activity({
   data,
 }: {
-  data: { brokerUrl: string; federation: FederationStatsSnapshot | null };
+  data: {
+    brokerUrl: string;
+    federation: FederationStatsSnapshot | null;
+    latestFederationLink: FederationLinkStats | null;
+  };
 }) {
-  const hasFederation = data.federation !== null;
+  const federation = data.federation;
+  const hasFederation = federation !== null;
   const p95 = Math.max(
     0,
-    ...(data.federation?.links.map((link) => link.p95LatencyMs) ?? []),
+    ...(federation?.links.map((link) => link.p95LatencyMs) ?? []),
   );
   return (
     <div class="space-y-4">
@@ -45,7 +55,7 @@ export default function Activity({
             }`}
           >
             {hasFederation
-              ? formatCompact(data.federation.successCount)
+              ? formatCompact(federation?.successCount ?? 0)
               : "unavailable"}
           </div>
         </div>
@@ -57,7 +67,7 @@ export default function Activity({
             }`}
           >
             {hasFederation
-              ? formatCompact(data.federation.errorCount)
+              ? formatCompact(federation?.errorCount ?? 0)
               : "unavailable"}
           </div>
         </div>
@@ -72,10 +82,29 @@ export default function Activity({
           </div>
           <div class="stat-desc">
             {hasFederation
-              ? `dead-letter: ${
-                formatCompact(data.federation.deadLetterBacklog)
-              }`
+              ? `dead-letter: ${formatCompact(federation?.deadLetterBacklog ?? 0)}`
               : "stats endpoint unavailable"}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Latest Federation Trace</div>
+          <div
+            class={`stat-value font-data ${
+              data.latestFederationLink?.lastTraceId
+                ? "text-primary text-lg"
+                : "text-warning text-base"
+            }`}
+          >
+            {data.latestFederationLink?.lastTraceId
+              ? data.latestFederationLink.lastTraceId.slice(0, 8)
+              : "unavailable"}
+          </div>
+          <div class="stat-desc">
+            {data.latestFederationLink?.lastOccurredAt
+              ? `${data.latestFederationLink.lastTaskId ?? "task unknown"} · ${
+                formatRelative(data.latestFederationLink.lastOccurredAt)
+              }`
+              : "no federation trace yet"}
           </div>
         </div>
       </div>

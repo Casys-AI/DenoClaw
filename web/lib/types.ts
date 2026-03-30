@@ -88,6 +88,9 @@ export interface FederationLinkStats {
   errorCount: number;
   p50LatencyMs: number;
   p95LatencyMs: number;
+  lastTaskId?: string;
+  lastTraceId?: string;
+  lastOccurredAt?: string;
 }
 
 export interface FederationStatsSnapshot {

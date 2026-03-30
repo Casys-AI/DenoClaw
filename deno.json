@@ -55,6 +55,6 @@
   "unstable": ["kv", "cron"],
   "deploy": {
     "org": "casys",
-    "app": "alice"
+    "app": "denoclaw"
   }
 }

@@ -267,6 +267,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/cli/publish.ts`
   - `src/cli/publish_entry.ts`
   - `src/cli/publish_kv.ts`
+- telemetry metrics are now split between:
+  - `src/telemetry/metrics.ts`
+  - `src/telemetry/metrics_queries.ts`
+  - `src/telemetry/metrics_types.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -318,6 +322,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/cli/publish_kv.ts`: 93 lines
   - `src/cli/setup/broker_deploy.ts`: 320 lines
   - `src/cli/setup/broker_deploy_naming.ts`: 52 lines
+  - `src/telemetry/metrics.ts`: 269 lines
+  - `src/telemetry/metrics_queries.ts`: 335 lines
+  - `src/telemetry/metrics_types.ts`: 58 lines
   - `src/orchestration/transport.ts`: 364 lines
   - `src/orchestration/transport_request_tracker.ts`: 49 lines
   - `src/orchestration/transport_websocket_runtime.ts`: 182 lines

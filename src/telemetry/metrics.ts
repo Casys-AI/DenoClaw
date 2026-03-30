@@ -1,4 +1,30 @@
 import { log } from "../shared/log.ts";
+import {
+  listAgentMetrics,
+  readA2AFrequencyMatrix,
+  readAgentMetrics,
+  readHourlyA2A,
+  readHourlyMetrics,
+  readHourlyToolUsage,
+  readToolBreakdown,
+  summarizeMetrics,
+} from "./metrics_queries.ts";
+import type {
+  A2AFrequencyEntry,
+  AgentMetrics,
+  HourlyA2ABucket,
+  HourlyBucket,
+  HourlyToolBucket,
+  ToolMetrics,
+} from "./metrics_types.ts";
+export type {
+  A2AFrequencyEntry,
+  AgentMetrics,
+  HourlyA2ABucket,
+  HourlyBucket,
+  HourlyToolBucket,
+  ToolMetrics,
+} from "./metrics_types.ts";
 
 /**
  * Metrics collector — KV-backed, queryable via /stats endpoint.
@@ -11,30 +37,6 @@ import { log } from "../shared/log.ts";
  *
  * Uses Deno KV atomic sum for lock-free counters.
  */
-
-export interface AgentMetrics {
-  agentId: string;
-  llm: {
-    calls: number;
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    estimatedCostUsd: number;
-    avgLatencyMs: number;
-  };
-  tools: {
-    calls: number;
-    successes: number;
-    failures: number;
-    avgLatencyMs: number;
-  };
-  a2a: {
-    messagesSent: number;
-    messagesReceived: number;
-    peersContacted: string[];
-  };
-  lastActivity: string;
-}
 
 // Rough cost estimates per 1M tokens (input + output averaged)
 const COST_PER_MILLION_TOKENS: Record<string, number> = {
@@ -195,89 +197,11 @@ export class MetricsCollector {
   // ── Query metrics ──────────────────────────────────
 
   async getAgentMetrics(agentId: string): Promise<AgentMetrics> {
-    const kv = await this.getKv();
-
-    const get = async (key: Deno.KvKey) => {
-      const entry = await kv.get<Deno.KvU64>(key);
-      return Number(entry.value?.value ?? 0n);
-    };
-
-    const llmCalls = await get(["metrics", agentId, "llm", "calls"]);
-    const promptTokens = await get(["metrics", agentId, "llm", "promptTokens"]);
-    const completionTokens = await get([
-      "metrics",
-      agentId,
-      "llm",
-      "completionTokens",
-    ]);
-    const totalTokens = await get(["metrics", agentId, "llm", "totalTokens"]);
-    const totalCostMicro = await get([
-      "metrics",
-      agentId,
-      "llm",
-      "totalCostMicro",
-    ]);
-    const llmLatency = await get(["metrics", agentId, "llm", "totalLatencyMs"]);
-
-    const toolCalls = await get(["metrics", agentId, "tools", "calls"]);
-    const toolSuccesses = await get(["metrics", agentId, "tools", "successes"]);
-    const toolFailures = await get(["metrics", agentId, "tools", "failures"]);
-    const toolLatency = await get([
-      "metrics",
-      agentId,
-      "tools",
-      "totalLatencyMs",
-    ]);
-
-    const a2aSent = await get(["metrics", agentId, "a2a", "sent"]);
-    const a2aReceived = await get(["metrics", agentId, "a2a", "received"]);
-    const peersEntry = await kv.get<string[]>([
-      "metrics",
-      agentId,
-      "a2a",
-      "peers",
-    ]);
-
-    return {
-      agentId,
-      llm: {
-        calls: llmCalls,
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        estimatedCostUsd: totalCostMicro / 1_000_000,
-        avgLatencyMs: llmCalls > 0 ? Math.round(llmLatency / llmCalls) : 0,
-      },
-      tools: {
-        calls: toolCalls,
-        successes: toolSuccesses,
-        failures: toolFailures,
-        avgLatencyMs: toolCalls > 0 ? Math.round(toolLatency / toolCalls) : 0,
-      },
-      a2a: {
-        messagesSent: a2aSent,
-        messagesReceived: a2aReceived,
-        peersContacted: peersEntry.value || [],
-      },
-      lastActivity: new Date().toISOString(),
-    };
+    return await readAgentMetrics(await this.getKv(), agentId);
   }
 
   async getAllMetrics(): Promise<AgentMetrics[]> {
-    const kv = await this.getKv();
-    const agentIds = new Set<string>();
-
-    // Discover all agents with metrics
-    for await (const entry of kv.list({ prefix: ["metrics"] })) {
-      const agentId = entry.key[1] as string;
-      agentIds.add(agentId);
-    }
-
-    const results: AgentMetrics[] = [];
-    for (const agentId of agentIds) {
-      results.push(await this.getAgentMetrics(agentId));
-    }
-    return results;
+    return await listAgentMetrics(await this.getKv());
   }
 
   async getSummary(): Promise<{
@@ -288,52 +212,13 @@ export class MetricsCollector {
     totalToolCalls: number;
     totalA2AMessages: number;
   }> {
-    const all = await this.getAllMetrics();
-    return {
-      totalAgents: all.length,
-      totalLLMCalls: all.reduce((s, a) => s + a.llm.calls, 0),
-      totalTokens: all.reduce((s, a) => s + a.llm.totalTokens, 0),
-      totalCostUsd: all.reduce((s, a) => s + a.llm.estimatedCostUsd, 0),
-      totalToolCalls: all.reduce((s, a) => s + a.tools.calls, 0),
-      totalA2AMessages: all.reduce((s, a) => s + a.a2a.messagesSent, 0),
-    };
+    return summarizeMetrics(await this.getAllMetrics());
   }
 
   // ── Per-tool breakdown ────────────────────────────
 
   async getToolBreakdown(agentId: string): Promise<ToolMetrics[]> {
-    const kv = await this.getKv();
-    const toolNames = new Set<string>();
-
-    for await (
-      const entry of kv.list({
-        prefix: ["metrics", agentId, "tools", "by_name"],
-      })
-    ) {
-      toolNames.add(entry.key[4] as string);
-    }
-
-    const get = async (key: Deno.KvKey) => {
-      const entry = await kv.get<Deno.KvU64>(key);
-      return Number(entry.value?.value ?? 0n);
-    };
-
-    const results: ToolMetrics[] = [];
-    for (const tool of toolNames) {
-      const prefix = ["metrics", agentId, "tools", "by_name", tool];
-      const calls = await get([...prefix, "calls"]);
-      const successes = await get([...prefix, "successes"]);
-      const failures = await get([...prefix, "failures"]);
-      const latency = await get([...prefix, "totalLatencyMs"]);
-      results.push({
-        tool,
-        calls,
-        successes,
-        failures,
-        avgLatencyMs: calls > 0 ? Math.round(latency / calls) : 0,
-      });
-    }
-    return results;
+    return await readToolBreakdown(await this.getKv(), agentId);
   }
 
   // ── Hourly time-series ───────────────────────────
@@ -343,40 +228,7 @@ export class MetricsCollector {
     from: string,
     to: string,
   ): Promise<HourlyBucket[]> {
-    const kv = await this.getKv();
-    const bucketMap = new Map<string, HourlyBucket>();
-
-    for await (
-      const entry of kv.list<Deno.KvU64>({
-        prefix: ["metrics_hourly", agentId],
-      })
-    ) {
-      // Key: ["metrics_hourly", agentId, provider, hourBucket, metric]
-      const provider = entry.key[2] as string;
-      const hour = entry.key[3] as string;
-      const metric = entry.key[4] as string;
-
-      if (hour < from.slice(0, 13) || hour > to.slice(0, 13)) continue;
-
-      const bucketKey = `${hour}:${provider}`;
-      if (!bucketMap.has(bucketKey)) {
-        bucketMap.set(bucketKey, {
-          hour,
-          provider,
-          calls: 0,
-          tokens: 0,
-          costUsd: 0,
-        });
-      }
-
-      const bucket = bucketMap.get(bucketKey)!;
-      const val = Number((entry.value as Deno.KvU64)?.value ?? 0n);
-      if (metric === "calls") bucket.calls = val;
-      else if (metric === "tokens") bucket.tokens = val;
-      else if (metric === "cost_micro") bucket.costUsd = val / 1_000_000;
-    }
-
-    return [...bucketMap.values()].sort((a, b) => a.hour.localeCompare(b.hour));
+    return await readHourlyMetrics(await this.getKv(), agentId, from, to);
   }
 
   // ── Hourly A2A time-series ───────────────────────
@@ -386,32 +238,7 @@ export class MetricsCollector {
     from: string,
     to: string,
   ): Promise<HourlyA2ABucket[]> {
-    const kv = await this.getKv();
-    const fromH = from.slice(0, 13);
-    const toH = to.slice(0, 13);
-    const buckets: HourlyA2ABucket[] = [];
-
-    for await (
-      const entry of kv.list<Deno.KvU64>({
-        prefix: ["metrics_hourly", agentId, "a2a"],
-      })
-    ) {
-      // Key: ["metrics_hourly", agentId, "a2a", hour, "sent"|"received"]
-      const hour = entry.key[3] as string;
-      const direction = entry.key[4] as string;
-      if (hour < fromH || hour > toH) continue;
-
-      let bucket = buckets.find((b) => b.hour === hour);
-      if (!bucket) {
-        bucket = { hour, sent: 0, received: 0 };
-        buckets.push(bucket);
-      }
-      const val = Number((entry.value as Deno.KvU64)?.value ?? 0n);
-      if (direction === "sent") bucket.sent = val;
-      else if (direction === "received") bucket.received = val;
-    }
-
-    return buckets.sort((a, b) => a.hour.localeCompare(b.hour));
+    return await readHourlyA2A(await this.getKv(), agentId, from, to);
   }
 
   // ── Agent→Agent frequency matrix ─────────────────
@@ -420,42 +247,7 @@ export class MetricsCollector {
     from: string,
     to: string,
   ): Promise<A2AFrequencyEntry[]> {
-    const kv = await this.getKv();
-    const fromH = from.slice(0, 13);
-    const toH = to.slice(0, 13);
-    const matrix = new Map<string, A2AFrequencyEntry>();
-
-    for await (
-      const entry of kv.list<Deno.KvU64>({ prefix: ["metrics_hourly"] })
-    ) {
-      // Key: ["metrics_hourly", fromAgent, "a2a_to", toAgent, hour, "calls"]
-      if (entry.key[2] !== "a2a_to") continue;
-      const fromAgent = entry.key[1] as string;
-      const toAgent = entry.key[3] as string;
-      const hour = entry.key[4] as string;
-      if (hour < fromH || hour > toH) continue;
-
-      const pairKey = `${fromAgent}→${toAgent}`;
-      if (!matrix.has(pairKey)) {
-        matrix.set(pairKey, {
-          fromAgent,
-          toAgent,
-          totalCalls: 0,
-          hourlyBreakdown: [],
-        });
-      }
-      const e = matrix.get(pairKey)!;
-      const val = Number((entry.value as Deno.KvU64)?.value ?? 0n);
-      e.totalCalls += val;
-      e.hourlyBreakdown.push({ hour, calls: val });
-    }
-
-    // Sort hourly breakdowns
-    for (const e of matrix.values()) {
-      e.hourlyBreakdown.sort((a, b) => a.hour.localeCompare(b.hour));
-    }
-
-    return [...matrix.values()].sort((a, b) => b.totalCalls - a.totalCalls);
+    return await readA2AFrequencyMatrix(await this.getKv(), from, to);
   }
 
   // ── Hourly tool usage ────────────────────────────
@@ -465,26 +257,7 @@ export class MetricsCollector {
     from: string,
     to: string,
   ): Promise<HourlyToolBucket[]> {
-    const kv = await this.getKv();
-    const fromH = from.slice(0, 13);
-    const toH = to.slice(0, 13);
-    const buckets: HourlyToolBucket[] = [];
-
-    for await (
-      const entry of kv.list<Deno.KvU64>({
-        prefix: ["metrics_hourly", agentId, "tool"],
-      })
-    ) {
-      // Key: ["metrics_hourly", agentId, "tool", hour, toolName, "calls"]
-      const hour = entry.key[3] as string;
-      const tool = entry.key[4] as string;
-      if (hour < fromH || hour > toH) continue;
-
-      const val = Number((entry.value as Deno.KvU64)?.value ?? 0n);
-      buckets.push({ hour, tool, calls: val });
-    }
-
-    return buckets.sort((a, b) => a.hour.localeCompare(b.hour));
+    return await readHourlyToolUsage(await this.getKv(), agentId, from, to);
   }
 
   close(): void {
@@ -493,41 +266,4 @@ export class MetricsCollector {
       this.kv = null;
     }
   }
-}
-
-// ── Additional types ───────────────────────────────
-
-export interface ToolMetrics {
-  tool: string;
-  calls: number;
-  successes: number;
-  failures: number;
-  avgLatencyMs: number;
-}
-
-export interface HourlyBucket {
-  hour: string; // "YYYY-MM-DDTHH"
-  provider: string;
-  calls: number;
-  tokens: number;
-  costUsd: number;
-}
-
-export interface HourlyA2ABucket {
-  hour: string;
-  sent: number;
-  received: number;
-}
-
-export interface A2AFrequencyEntry {
-  fromAgent: string;
-  toAgent: string;
-  totalCalls: number;
-  hourlyBreakdown: { hour: string; calls: number }[];
-}
-
-export interface HourlyToolBucket {
-  hour: string;
-  tool: string;
-  calls: number;
 }

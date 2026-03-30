@@ -6,4 +6,4 @@ export { showStatus } from "./status.ts";
 export {
   generateAgentEntrypoint,
   publishAgent,
-} from "./subhosting_publish.ts";
+} from "./agent_publish.ts";

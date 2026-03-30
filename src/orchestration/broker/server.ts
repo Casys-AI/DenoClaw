@@ -37,7 +37,7 @@ import {
 } from "./agent_socket_upgrade.ts";
 import { BrokerAgentRegistry } from "./agent_registry.ts";
 import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
-import { type BrokerHttpContext, handleBrokerHttp } from "./http_router.ts";
+import { type BrokerHttpContext, handleBrokerHttp } from "./http_routes.ts";
 import { BrokerTaskPersistence } from "./persistence.ts";
 import { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import { BrokerTaskDispatcher } from "./task_dispatch.ts";

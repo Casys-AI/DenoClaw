@@ -2,13 +2,11 @@ import type {
   AgentCanonicalTaskPort,
   AgentLlmToolPort,
   BrokerEnvelope,
-  ToolResult,
 } from "../shared/types.ts";
-import type { ApprovalReason } from "./sandbox_types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import type { AgentConfig } from "./types.ts";
 import type { MemoryPort } from "./memory_port.ts";
-import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import type { Task } from "../messaging/a2a/types.ts";
 import {
   extractContinuationTaskMessage,
   extractSubmitTaskMessage,
@@ -17,11 +15,7 @@ import {
   createCanonicalTask,
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
-import {
-  mapApprovalPauseToInputRequiredTask,
-  mapTaskErrorToTerminalStatus,
-  mapTaskResultToCompletion,
-} from "../messaging/a2a/task_mapping.ts";
+import { mapTaskErrorToTerminalStatus } from "../messaging/a2a/task_mapping.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { ContextBuilder } from "./context.ts";
 import { SkillsLoader } from "./skills.ts";
@@ -33,6 +27,8 @@ import {
   type RuntimeTaskContinueMessage,
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
+import { executeAgentConversation } from "./runtime_conversation.ts";
+import { extractRuntimeTaskText } from "./runtime_message_mapping.ts";
 
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
@@ -175,12 +171,17 @@ export class AgentRuntime {
   ): Promise<void> {
     const payload = msg.payload;
     const taskMessage = extractSubmitTaskMessage(payload);
-    const inputText = this.extractTextFromMessage(taskMessage);
+    const inputText = extractRuntimeTaskText(taskMessage);
     log.info(
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
-    await this.executeConversation({
+    await executeAgentConversation({
+      config: this.config,
+      llmToolPort: this.llmToolPort,
+      context: this.context,
+      skills: this.skills,
+      memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),
       fromAgentId: msg.from,
       inputText,
       canonicalTask: createCanonicalTask({
@@ -189,6 +190,8 @@ export class AgentRuntime {
         initialMessage: taskMessage,
       }),
       reportWorkingTransition: true,
+      maxIterations: this.maxIterations,
+      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
     });
   }
 
@@ -212,198 +215,26 @@ export class AgentRuntime {
     resumed.history = [...existing.history, continuationMessage];
     await this.reportCanonicalTaskResult(resumed);
 
-    const inputText = this.extractTextFromMessage(continuationMessage);
+    const inputText = extractRuntimeTaskText(continuationMessage);
     log.info(
       `Canonical continuation received from ${msg.from}: ${
         inputText.slice(0, 100)
       }`,
     );
 
-    await this.executeConversation({
+    await executeAgentConversation({
+      config: this.config,
+      llmToolPort: this.llmToolPort,
+      context: this.context,
+      skills: this.skills,
+      memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),
       fromAgentId: msg.from,
       inputText,
       canonicalTask: resumed,
       reportWorkingTransition: false,
+      maxIterations: this.maxIterations,
+      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
     });
-  }
-
-  private async executeConversation(options: {
-    fromAgentId: string;
-    inputText: string;
-    canonicalTask: Task;
-    reportWorkingTransition: boolean;
-  }): Promise<void> {
-    const sessionId = `agent:${options.fromAgentId}:${this.agentId}`;
-    const memory = await this.getMemory(sessionId);
-    let canonicalTask = options.canonicalTask;
-
-    if (options.reportWorkingTransition) {
-      canonicalTask = transitionTask(canonicalTask, "WORKING");
-      await this.reportCanonicalTaskResult(canonicalTask);
-    }
-
-    await memory.addMessage({ role: "user", content: options.inputText });
-
-    try {
-      let iteration = 0;
-      while (iteration < this.maxIterations) {
-        iteration++;
-
-        const skillsList = this.skills.getSkills();
-        const contextMessages = this.context.buildContextMessages(
-          memory.getMessages(),
-          skillsList,
-          [],
-        );
-
-        const response = await this.llmToolPort.complete(
-          contextMessages,
-          this.config.model,
-          this.config.temperature,
-          this.config.maxTokens,
-        );
-
-        if (response.toolCalls?.length) {
-          await memory.addMessage({
-            role: "assistant",
-            content: response.content || "",
-            tool_calls: response.toolCalls,
-          });
-
-          for (const tc of response.toolCalls) {
-            let args: Record<string, unknown>;
-            try {
-              args = JSON.parse(tc.function.arguments);
-            } catch {
-              await memory.addMessage({
-                role: "tool",
-                content:
-                  `Error [INVALID_JSON]: bad arguments for ${tc.function.name}`,
-                name: tc.function.name,
-                tool_call_id: tc.id,
-              });
-              continue;
-            }
-
-            const result = await this.llmToolPort.execTool(
-              tc.function.name,
-              args,
-              { taskId: canonicalTask.id, contextId: canonicalTask.contextId },
-            );
-
-            const approvalPause = this.extractApprovalPause(result);
-            if (approvalPause) {
-              await memory.addMessage({
-                role: "tool",
-                content:
-                  `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
-                name: tc.function.name,
-                tool_call_id: tc.id,
-              });
-              const pausedTask = mapApprovalPauseToInputRequiredTask(
-                canonicalTask,
-                {
-                  command: approvalPause.command,
-                  binary: approvalPause.binary,
-                  prompt: approvalPause.prompt,
-                },
-              );
-              await this.reportCanonicalTaskResult(pausedTask);
-              log.info(
-                `Canonical task paused in INPUT_REQUIRED for ${options.fromAgentId}`,
-              );
-              return;
-            }
-
-            await memory.addMessage({
-              role: "tool",
-              content: result.success
-                ? result.output
-                : `Error [${result.error?.code}]: ${
-                  JSON.stringify(result.error?.context)
-                }\nRecovery: ${result.error?.recovery ?? "none"}`,
-              name: tc.function.name,
-              tool_call_id: tc.id,
-            });
-          }
-
-          continue;
-        }
-
-        await memory.addMessage({
-          role: "assistant",
-          content: response.content,
-        });
-
-        const completedTask = mapTaskResultToCompletion(
-          canonicalTask,
-          response.content,
-        );
-        await this.reportCanonicalTaskResult(completedTask);
-        log.info(
-          `Canonical task completed for ${options.fromAgentId} (${iteration} iterations)`,
-        );
-        return;
-      }
-
-      await this.reportCanonicalTaskResult(
-        mapTaskErrorToTerminalStatus(
-          canonicalTask,
-          new Error("Max iterations reached."),
-        ),
-      );
-    } catch (error) {
-      await this.reportCanonicalTaskResult(
-        mapTaskErrorToTerminalStatus(canonicalTask, error),
-      );
-      throw error;
-    }
-  }
-
-  private extractTextFromMessage(message: A2AMessage): string {
-    const text = message.parts
-      .filter((part): part is Extract<typeof part, { kind: "text" }> =>
-        part.kind === "text"
-      )
-      .map((part) => part.text)
-      .join("\n")
-      .trim();
-
-    return text || "[non-text task payload]";
-  }
-
-  private extractApprovalPause(
-    result: ToolResult,
-  ):
-    | {
-      command: string;
-      binary: string;
-      reason: ApprovalReason;
-      prompt: string;
-    }
-    | null {
-    if (result.success || result.error?.code !== "EXEC_APPROVAL_REQUIRED") {
-      return null;
-    }
-
-    const context = result.error.context;
-    if (!context || typeof context !== "object") return null;
-
-    const command = typeof context.command === "string"
-      ? context.command
-      : null;
-    const binary = typeof context.binary === "string" ? context.binary : null;
-    const reason = typeof context.reason === "string"
-      ? context.reason as ApprovalReason
-      : null;
-    if (!command || !binary || !reason) return null;
-
-    return {
-      command,
-      binary,
-      reason,
-      prompt: `Awaiting approval for ${binary}: ${command}`,
-    };
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {

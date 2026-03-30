@@ -244,6 +244,11 @@ After landing the refactor into the local checkpoint branch:
   `src/orchestration/broker/http_routes.ts`
 - compatibility wrappers remain in place, but internal code no longer depends on
   them by default
+- deployed agent auth/bootstrap concerns are now split between:
+  - `src/agent/deploy_runtime.ts`
+  - `src/agent/deploy_runtime_auth.ts`
+- broker deploy naming migration is now isolated in:
+  - `src/cli/setup/broker_deploy_naming.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -267,6 +272,11 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/broker/federation_control_handlers.ts`: 211 lines
   - `src/orchestration/federation/service.ts`: 268 lines
   - `src/orchestration/federation/identity_manager.ts`: 82 lines
+  - `src/agent/runtime.ts`: 261 lines
+  - `src/agent/runtime_conversation.ts`: 154 lines
+  - `src/agent/runtime_message_mapping.ts`: 47 lines
+  - `src/agent/deploy_runtime.ts`: 130 lines
+  - `src/agent/deploy_runtime_auth.ts`: 66 lines
   - `src/agent/worker_entrypoint.ts`: 345 lines
   - `src/agent/worker_runtime_run.ts`: 93 lines
   - `src/agent/worker_runtime_peer_delivery.ts`: 111 lines
@@ -274,6 +284,8 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/worker_pool_lifecycle.ts`: 198 lines
   - `src/agent/worker_pool_approval.ts`: 54 lines
   - `src/agent/worker_pool_types.ts`: 39 lines
+  - `src/cli/setup/broker_deploy.ts`: 320 lines
+  - `src/cli/setup/broker_deploy_naming.ts`: 52 lines
   - `src/orchestration/transport.ts`: 364 lines
   - `src/orchestration/transport_request_tracker.ts`: 49 lines
   - `src/orchestration/transport_websocket_runtime.ts`: 182 lines

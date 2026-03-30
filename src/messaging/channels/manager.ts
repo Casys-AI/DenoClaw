@@ -1,4 +1,5 @@
 import type { BaseChannel } from "./base.ts";
+import type { OutboundChannelMessage } from "../types.ts";
 import type { MessageBus } from "../bus.ts";
 import { ChannelError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
@@ -47,11 +48,9 @@ export class ChannelManager {
     log.info("All channels stopped");
   }
 
-  async send(
+  async sendMessage(
     channelType: string,
-    userId: string,
-    content: string,
-    metadata?: Record<string, unknown>,
+    message: OutboundChannelMessage,
   ): Promise<void> {
     const ch = this.channels.get(channelType);
     if (!ch) {
@@ -61,7 +60,20 @@ export class ChannelManager {
         `Use one of: ${[...this.channels.keys()].join(", ")}`,
       );
     }
-    await ch.send(userId, content, metadata);
+    await ch.send(message);
+  }
+
+  async send(
+    channelType: string,
+    userId: string,
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.sendMessage(channelType, {
+      address: { channelType, userId, roomId: userId },
+      content,
+      metadata,
+    });
   }
 
   getChannel(type: string): BaseChannel | undefined {

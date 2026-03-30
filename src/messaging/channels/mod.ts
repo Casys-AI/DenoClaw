@@ -1,4 +1,4 @@
-export { BaseChannel, type OnMessage } from "./base.ts";
+export { BaseChannel, type ChannelAdapter, type OnMessage } from "./base.ts";
 export { ConsoleChannel } from "./console.ts";
 export { TelegramChannel } from "./telegram.ts";
 export { WebhookChannel } from "./webhook.ts";

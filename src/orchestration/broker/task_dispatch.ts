@@ -7,7 +7,8 @@ import {
   getAwaitedInputMetadata,
   getResumePayloadMetadata,
 } from "../../messaging/a2a/input_metadata.ts";
-import type { Task } from "../../messaging/a2a/types.ts";
+import type { A2AMessage, Task } from "../../messaging/a2a/types.ts";
+import type { ChannelMessage } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { generateId } from "../../shared/helpers.ts";
 import type {
@@ -22,7 +23,10 @@ import {
   extractBrokerSubmitTaskMessage,
 } from "../types.ts";
 import type { ApprovalGrant } from "./persistence.ts";
-import type { BrokerTaskPersistence } from "./persistence.ts";
+import type {
+  BrokerTaskMetadata,
+  BrokerTaskPersistence,
+} from "./persistence.ts";
 import type { TaskStore } from "../../messaging/a2a/tasks.ts";
 
 type BrokerTaskEnvelope = Extract<
@@ -53,37 +57,68 @@ export class BrokerTaskDispatcher {
       payload.targetAgent,
     );
 
-    const taskMessage = extractBrokerSubmitTaskMessage(payload);
-    const task = await this.deps.taskStore.create(
-      payload.taskId,
-      taskMessage,
-      payload.contextId,
-    );
-
-    const persistedTask = await this.deps.persistence.persistTaskMetadata(
-      task,
-      {
+    return await this.submitRoutedTask({
+      from: fromAgentId,
+      targetAgent: payload.targetAgent,
+      taskId: payload.taskId,
+      contextId: payload.contextId,
+      taskMessage: extractBrokerSubmitTaskMessage(payload),
+      forwardedMetadata: payload.metadata,
+      brokerMetadata: {
         submittedBy: fromAgentId,
         targetAgent: payload.targetAgent,
         ...(payload.metadata ? { request: payload.metadata } : {}),
       },
-    );
-
-    await this.deps.routeTaskMessage(payload.targetAgent, {
-      id: generateId(),
-      from: fromAgentId,
-      to: payload.targetAgent,
-      type: "task_submit",
-      payload: {
-        ...payload,
-        taskId: persistedTask.id,
-        taskMessage,
-        contextId: persistedTask.contextId,
-      },
-      timestamp: new Date().toISOString(),
     });
+  }
 
-    return persistedTask;
+  async submitChannelTask(
+    message: ChannelMessage,
+    input: {
+      targetAgent: string;
+      taskId: string;
+      contextId?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Task> {
+    const brokerMetadata: BrokerTaskMetadata = {
+      submittedBy: `channel:${message.channelType}`,
+      targetAgent: input.targetAgent,
+      ...(message.metadata || input.metadata
+        ? {
+          request: {
+            ...(input.metadata ? { ingress: input.metadata } : {}),
+            ...(message.metadata ? { channelMessage: message.metadata } : {}),
+          },
+        }
+        : {}),
+      channel: {
+        channelType: message.channelType,
+        sessionId: message.sessionId,
+        userId: message.userId,
+        address: message.address,
+      },
+    };
+
+    return await this.submitRoutedTask({
+      from: `channel:${message.channelType}`,
+      targetAgent: input.targetAgent,
+      taskId: input.taskId,
+      contextId: input.contextId ?? message.sessionId,
+      taskMessage: createChannelTaskMessage(message),
+      forwardedMetadata: {
+        ...(input.metadata ?? {}),
+        channel: {
+          channelType: message.channelType,
+          sessionId: message.sessionId,
+          userId: message.userId,
+          address: message.address,
+          timestamp: message.timestamp,
+        },
+        ...(message.metadata ? { channelMessage: message.metadata } : {}),
+      },
+      brokerMetadata,
+    });
   }
 
   async getTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
@@ -159,6 +194,85 @@ export class BrokerTaskDispatcher {
     await this.deps.routeTaskMessage(targetAgentId, {
       id: generateId(),
       from: fromAgentId,
+      to: targetAgentId,
+      type: "task_continue",
+      payload: { ...payload, continuationMessage },
+      timestamp: new Date().toISOString(),
+    });
+
+    return updated;
+  }
+
+  async continueChannelTask(
+    message: ChannelMessage,
+    payload: BrokerTaskContinuePayload,
+  ): Promise<Task | null> {
+    const existing = await this.deps.taskStore.get(payload.taskId);
+    if (!existing) return null;
+
+    const brokerMetadata = this.deps.persistence.getTaskBrokerMetadata(
+      existing,
+    );
+    const targetAgentId = typeof brokerMetadata.targetAgent === "string"
+      ? brokerMetadata.targetAgent
+      : undefined;
+    if (!targetAgentId) {
+      throw new DenoClawError(
+        "TASK_TARGET_UNKNOWN",
+        { taskId: existing.id, brokerMetadata },
+        "Broker task metadata is missing targetAgent",
+      );
+    }
+
+    this.assertChannelAccess(message, brokerMetadata);
+
+    if (existing.status.state !== "INPUT_REQUIRED") {
+      throw new DenoClawError(
+        "TASK_NOT_WAITING_FOR_INPUT",
+        { taskId: existing.id, state: existing.status.state },
+        "Only INPUT_REQUIRED tasks can be resumed through channel continuation",
+      );
+    }
+
+    const continuationMessage = extractBrokerContinuationMessage(payload);
+    const resume = getResumePayloadMetadata({ metadata: payload.metadata });
+    if (resume?.approved === false) {
+      const rejected = transitionTask(existing, "REJECTED", {
+        statusMessage: continuationMessage,
+      });
+      rejected.history = [...existing.history, continuationMessage];
+      await this.deps.persistence.writeTask(rejected);
+      return rejected;
+    }
+
+    let updated = existing;
+    if (resume?.approved === true) {
+      const awaitedInput = getAwaitedInputMetadata(existing.status);
+      const command = awaitedInput?.kind === "approval"
+        ? awaitedInput.command
+        : "*";
+      const binary = awaitedInput?.kind === "approval" && awaitedInput.binary
+        ? awaitedInput.binary
+        : command;
+      const pendingResumes = this.deps.persistence.getPendingResumes(
+        brokerMetadata,
+      );
+      const grant: ApprovalGrant = {
+        kind: "approval",
+        approved: true,
+        command,
+        binary,
+        grantedAt: new Date().toISOString(),
+      };
+      updated = await this.deps.persistence.persistTaskMetadata(existing, {
+        ...brokerMetadata,
+        pendingResumes: { ...pendingResumes, [command]: grant },
+      });
+    }
+
+    await this.deps.routeTaskMessage(targetAgentId, {
+      id: generateId(),
+      from: `channel:${message.channelType}`,
       to: targetAgentId,
       type: "task_continue",
       payload: { ...payload, continuationMessage },
@@ -249,4 +363,110 @@ export class BrokerTaskDispatcher {
     await this.deps.persistence.writeTask(persisted);
     return persisted;
   }
+
+  private async submitRoutedTask(input: {
+    from: string;
+    targetAgent: string;
+    taskId: string;
+    contextId?: string;
+    taskMessage: A2AMessage;
+    forwardedMetadata?: Record<string, unknown>;
+    brokerMetadata: BrokerTaskMetadata;
+  }): Promise<Task> {
+    const task = await this.deps.taskStore.create(
+      input.taskId,
+      input.taskMessage,
+      input.contextId,
+    );
+
+    const persistedTask = await this.deps.persistence.persistTaskMetadata(
+      task,
+      input.brokerMetadata,
+    );
+
+    await this.deps.routeTaskMessage(input.targetAgent, {
+      id: generateId(),
+      from: input.from,
+      to: input.targetAgent,
+      type: "task_submit",
+      payload: {
+        targetAgent: input.targetAgent,
+        taskId: persistedTask.id,
+        taskMessage: input.taskMessage,
+        contextId: persistedTask.contextId,
+        ...(input.forwardedMetadata
+          ? { metadata: input.forwardedMetadata }
+          : {}),
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    return persistedTask;
+  }
+
+  private assertChannelAccess(
+    message: ChannelMessage,
+    brokerMetadata: BrokerTaskMetadata,
+  ): void {
+    const channel = brokerMetadata.channel;
+    if (!channel) {
+      throw new DenoClawError(
+        "TASK_CHANNEL_CONTEXT_MISSING",
+        { sessionId: message.sessionId, channelType: message.channelType },
+        "Task was not created from a channel ingress context",
+      );
+    }
+    if (channel.channelType !== message.channelType) {
+      throw new DenoClawError(
+        "TASK_CHANNEL_MISMATCH",
+        {
+          expected: channel.channelType,
+          actual: message.channelType,
+          taskSessionId: channel.sessionId,
+          messageSessionId: message.sessionId,
+        },
+        "Resume the task through the same channel type that created it",
+      );
+    }
+    if (channel.sessionId !== message.sessionId) {
+      throw new DenoClawError(
+        "TASK_SESSION_MISMATCH",
+        {
+          expected: channel.sessionId,
+          actual: message.sessionId,
+          channelType: message.channelType,
+        },
+        "Resume the task through the same channel session",
+      );
+    }
+    if (channel.userId !== message.userId) {
+      throw new DenoClawError(
+        "TASK_USER_MISMATCH",
+        {
+          expected: channel.userId,
+          actual: message.userId,
+          channelType: message.channelType,
+        },
+        "Resume the task as the same channel user",
+      );
+    }
+  }
+}
+
+function createChannelTaskMessage(message: ChannelMessage): A2AMessage {
+  return {
+    messageId: message.id,
+    role: "user",
+    parts: [{ kind: "text", text: message.content }],
+    metadata: {
+      channel: {
+        channelType: message.channelType,
+        sessionId: message.sessionId,
+        userId: message.userId,
+        address: message.address,
+        timestamp: message.timestamp,
+      },
+      ...(message.metadata ? { channelMessage: message.metadata } : {}),
+    },
+  };
 }

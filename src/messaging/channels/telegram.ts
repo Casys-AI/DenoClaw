@@ -1,5 +1,9 @@
 import { BaseChannel, type OnMessage } from "./base.ts";
-import type { ChannelMessage, TelegramConfig } from "../types.ts";
+import type {
+  ChannelMessage,
+  OutboundChannelMessage,
+  TelegramConfig,
+} from "../types.ts";
 import { generateId } from "../../shared/helpers.ts";
 import { log } from "../../shared/log.ts";
 
@@ -68,13 +72,19 @@ export class TelegramChannel extends BaseChannel {
     await Promise.resolve();
   }
 
-  async send(userId: string, content: string): Promise<void> {
+  async send(message: OutboundChannelMessage): Promise<void> {
+    const chatId = message.address.roomId ?? message.address.userId;
+    if (!chatId) {
+      log.warn("Telegram: missing roomId/userId in outbound address");
+      return;
+    }
+
     const res = await fetch(`${this.baseUrl}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: parseInt(userId),
-        text: content,
+        chat_id: parseInt(chatId),
+        text: message.content,
         parse_mode: "Markdown",
       }),
     });
@@ -86,7 +96,10 @@ export class TelegramChannel extends BaseChannel {
         await fetch(`${this.baseUrl}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: parseInt(userId), text: content }),
+          body: JSON.stringify({
+            chat_id: parseInt(chatId),
+            text: message.content,
+          }),
         });
       } else {
         log.error(`Telegram: send error — ${errBody}`);
@@ -135,6 +148,12 @@ export class TelegramChannel extends BaseChannel {
       content: msg.text,
       channelType: "telegram",
       timestamp: new Date(msg.date * 1000).toISOString(),
+      address: {
+        channelType: "telegram",
+        userId,
+        roomId: msg.chat.id.toString(),
+        replyToMessageId: msg.message_id.toString(),
+      },
       metadata: {
         messageId: msg.message_id,
         chatId: msg.chat.id,

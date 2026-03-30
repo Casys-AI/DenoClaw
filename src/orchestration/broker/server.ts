@@ -8,6 +8,7 @@ import type {
 import type { StructuredError, ToolResult } from "../../shared/types.ts";
 import type { ExecPolicy } from "../../agent/sandbox_types.ts";
 import type { Config } from "../../config/types.ts";
+import type { ChannelMessage } from "../../messaging/types.ts";
 import { AuthManager } from "../auth.ts";
 import { ProviderManager } from "../../llm/manager.ts";
 import { MetricsCollector } from "../../telemetry/metrics.ts";
@@ -131,6 +132,29 @@ export class BrokerServer {
       getAuth: () => this.getAuth(),
       getFederationAdapter: () => this.getFederationAdapter(),
       getFederationService: () => this.getFederationService(),
+      submitChannelMessage: (message, input) =>
+        this.submitChannelMessage(message, input),
+      getTask: (taskId) => this.getTask({ taskId }),
+      continueChannelTask: (message, taskId) =>
+        this.continueChannelTask(message, {
+          taskId,
+          continuationMessage: {
+            messageId: message.id,
+            role: "user",
+            parts: [{ kind: "text", text: message.content }],
+            metadata: {
+              channel: {
+                channelType: message.channelType,
+                sessionId: message.sessionId,
+                userId: message.userId,
+                address: message.address,
+                timestamp: message.timestamp,
+              },
+              ...(message.metadata ? { channelMessage: message.metadata } : {}),
+            },
+          },
+          metadata: message.metadata,
+        }),
       handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
       handleTunnelMessage: (tunnelId, data) =>
         this.handleTunnelMessage(tunnelId, data),
@@ -264,6 +288,18 @@ export class BrokerServer {
     return await this.taskDispatcher.submitAgentTask(fromAgentId, payload);
   }
 
+  async submitChannelMessage(
+    message: ChannelMessage,
+    input: {
+      targetAgent: string;
+      taskId: string;
+      contextId?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Task> {
+    return await this.taskDispatcher.submitChannelTask(message, input);
+  }
+
   async getTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
     return await this.taskDispatcher.getTask(payload);
   }
@@ -273,6 +309,13 @@ export class BrokerServer {
     payload: BrokerTaskContinuePayload,
   ): Promise<Task | null> {
     return await this.taskDispatcher.continueAgentTask(fromAgentId, payload);
+  }
+
+  async continueChannelTask(
+    message: ChannelMessage,
+    payload: BrokerTaskContinuePayload,
+  ): Promise<Task | null> {
+    return await this.taskDispatcher.continueChannelTask(message, payload);
   }
 
   async cancelTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {

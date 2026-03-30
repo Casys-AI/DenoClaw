@@ -1,5 +1,5 @@
 import { BaseChannel, type OnMessage } from "./base.ts";
-import type { ChannelMessage } from "../types.ts";
+import type { ChannelMessage, OutboundChannelMessage } from "../types.ts";
 import { generateId } from "../../shared/helpers.ts";
 import { log } from "../../shared/log.ts";
 
@@ -48,6 +48,11 @@ export class ConsoleChannel extends BaseChannel {
         content: input,
         channelType: "console",
         timestamp: new Date().toISOString(),
+        address: {
+          channelType: "console",
+          userId: "local",
+          roomId: "console-default",
+        },
       };
 
       this.onMessage?.(msg);
@@ -59,8 +64,10 @@ export class ConsoleChannel extends BaseChannel {
     await Promise.resolve();
   }
 
-  async send(_userId: string, content: string): Promise<void> {
-    await Deno.stdout.write(new TextEncoder().encode(`\n${content}\n`));
+  async send(message: OutboundChannelMessage): Promise<void> {
+    await Deno.stdout.write(
+      new TextEncoder().encode(`\n${message.content}\n`),
+    );
   }
 
   isConnected(): boolean {

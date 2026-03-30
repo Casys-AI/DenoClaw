@@ -25,6 +25,7 @@ export {
   createRelayToolExecutionPort,
 } from "./bootstrap.ts";
 export * from "./monitoring.ts";
+export * from "./channel_ingress/mod.ts";
 export type {
   ActiveTaskEntry,
   AgentStatusEntry,

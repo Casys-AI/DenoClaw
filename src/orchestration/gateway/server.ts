@@ -165,21 +165,19 @@ export class Gateway {
         msg.sessionId,
         msg.content,
       );
-      await this.channels.send(
-        msg.channelType,
-        msg.userId,
-        result.content,
-        msg.metadata,
-      );
+      await this.channels.sendMessage(msg.channelType, {
+        address: msg.address,
+        content: result.content,
+        metadata: msg.metadata,
+      });
     } catch (e) {
       log.error("Message handling error", e);
       try {
-        await this.channels.send(
-          msg.channelType,
-          msg.userId,
-          "Sorry, an error occurred. Please try again.",
-          msg.metadata,
-        );
+        await this.channels.sendMessage(msg.channelType, {
+          address: msg.address,
+          content: "Sorry, an error occurred. Please try again.",
+          metadata: msg.metadata,
+        });
       } catch {
         // ignore send failure
       }

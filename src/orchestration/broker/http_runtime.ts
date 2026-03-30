@@ -1,4 +1,6 @@
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
+import type { Task } from "../../messaging/a2a/types.ts";
+import type { ChannelMessage } from "../../messaging/types.ts";
 import type {
   FederationService,
   KvFederationAdapter,
@@ -22,6 +24,20 @@ export interface BrokerHttpRuntimeDeps {
   getAuth(): Promise<AuthManager>;
   getFederationAdapter(): Promise<KvFederationAdapter>;
   getFederationService(): Promise<FederationService>;
+  submitChannelMessage(
+    message: ChannelMessage,
+    input: {
+      targetAgent: string;
+      taskId: string;
+      contextId?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Task>;
+  getTask(taskId: string): Promise<Task | null>;
+  continueChannelTask(
+    message: ChannelMessage,
+    taskId: string,
+  ): Promise<Task | null>;
   handleIncomingMessage(msg: BrokerMessage): Promise<void>;
   handleTunnelMessage(tunnelId: string, data: string): Promise<void>;
 }
@@ -73,6 +89,11 @@ export class BrokerHttpRuntime {
       metrics: this.deps.metrics,
       getKv: () => this.deps.getKv(),
       getAuth: () => this.deps.getAuth(),
+      submitChannelMessage: (message, input) =>
+        this.deps.submitChannelMessage(message, input),
+      getTask: (taskId) => this.deps.getTask(taskId),
+      continueChannelTask: (message, taskId) =>
+        this.deps.continueChannelTask(message, taskId),
       getFederationAdapter: () => this.deps.getFederationAdapter(),
       getFederationService: () => this.deps.getFederationService(),
       handleAgentSocketUpgrade: (req) => this.handleAgentSocketUpgrade(req),

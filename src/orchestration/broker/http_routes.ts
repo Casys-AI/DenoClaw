@@ -1,6 +1,9 @@
 import type { AuthManager } from "../auth.ts";
+import type { Task } from "../../messaging/a2a/types.ts";
+import type { ChannelMessage } from "../../messaging/types.ts";
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
 import type { AgentEntry } from "../../shared/types.ts";
+import { generateId } from "../../shared/helpers.ts";
 import { createSSEResponse } from "../monitoring.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
@@ -15,6 +18,20 @@ export interface BrokerHttpContext extends BrokerFederationHttpContext {
   metrics: MetricsCollector;
   getKv(): Promise<Deno.Kv>;
   getAuth(): Promise<AuthManager>;
+  submitChannelMessage(
+    message: ChannelMessage,
+    input: {
+      targetAgent: string;
+      taskId: string;
+      contextId?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<Task>;
+  getTask(taskId: string): Promise<Task | null>;
+  continueChannelTask(
+    message: ChannelMessage,
+    taskId: string,
+  ): Promise<Task | null>;
   handleAgentSocketUpgrade(req: Request): Promise<Response>;
   handleTunnelUpgrade(req: Request): Promise<Response>;
 }
@@ -121,6 +138,91 @@ export async function handleBrokerHttp(
     return Response.json({ ok: true, agentId: body.agentId });
   }
 
+  if (req.method === "POST" && url.pathname === "/ingress/messages") {
+    const body = (await req.json().catch(() => null)) as {
+      message?: ChannelMessage;
+      route?: {
+        agentId?: string;
+        taskId?: string;
+        contextId?: string;
+        metadata?: Record<string, unknown>;
+      };
+    } | null;
+    const message = body?.message;
+    if (!isChannelMessage(message)) {
+      return Response.json(
+        {
+          error: {
+            code: "INVALID_CHANNEL_MESSAGE",
+            recovery:
+              "Provide { message, route? } with a canonical channel message",
+          },
+        },
+        { status: 400 },
+      );
+    }
+    const routeAgentId = body?.route?.agentId ??
+      (
+        typeof message.metadata?.agentId === "string"
+          ? message.metadata.agentId
+          : undefined
+      );
+    if (!routeAgentId) {
+      return Response.json(
+        {
+          error: {
+            code: "CHANNEL_ROUTE_MISSING",
+            recovery: "Provide route.agentId or message.metadata.agentId",
+          },
+        },
+        { status: 400 },
+      );
+    }
+
+    const task = await ctx.submitChannelMessage(message, {
+      targetAgent: routeAgentId,
+      taskId: body?.route?.taskId || generateId(),
+      contextId: body?.route?.contextId,
+      metadata: body?.route?.metadata,
+    });
+    return Response.json({ task });
+  }
+
+  const ingressTaskMatch = url.pathname.match(/^\/ingress\/tasks\/([^/]+)$/);
+  if (req.method === "GET" && ingressTaskMatch) {
+    return Response.json({
+      task: await ctx.getTask(decodeURIComponent(ingressTaskMatch[1])),
+    });
+  }
+
+  const ingressContinueMatch = url.pathname.match(
+    /^\/ingress\/tasks\/([^/]+)\/continue$/,
+  );
+  if (req.method === "POST" && ingressContinueMatch) {
+    const body = (await req.json().catch(() => null)) as {
+      message?: ChannelMessage;
+    } | null;
+    if (!isChannelMessage(body?.message)) {
+      return Response.json(
+        {
+          error: {
+            code: "INVALID_CHANNEL_MESSAGE",
+            recovery:
+              "Provide { message } with the channel continuation payload",
+          },
+        },
+        { status: 400 },
+      );
+    }
+
+    return Response.json({
+      task: await ctx.continueChannelTask(
+        body.message,
+        decodeURIComponent(ingressContinueMatch[1]),
+      ),
+    });
+  }
+
   const federationResponse = await handleBrokerFederationHttpRoute(
     ctx,
     req,
@@ -129,4 +231,19 @@ export async function handleBrokerHttp(
   if (federationResponse) return federationResponse;
 
   return new Response("Not Found", { status: 404 });
+}
+
+function isChannelMessage(value: unknown): value is ChannelMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Record<string, unknown>;
+  const address = message.address;
+  return typeof message.id === "string" &&
+    typeof message.sessionId === "string" &&
+    typeof message.userId === "string" &&
+    typeof message.content === "string" &&
+    typeof message.channelType === "string" &&
+    typeof message.timestamp === "string" &&
+    typeof address === "object" &&
+    address !== null &&
+    typeof (address as Record<string, unknown>).channelType === "string";
 }

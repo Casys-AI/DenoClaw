@@ -60,6 +60,18 @@ function createQueueCollector(kv: Deno.Kv): BrokerMessage[] {
   return messages;
 }
 
+function withBrokerAuth(init: RequestInit = {}): RequestInit {
+  const token = Deno.env.get("DENOCLAW_API_TOKEN");
+  if (!token) return init;
+
+  const headers = new Headers(init.headers);
+  if (!headers.has("authorization")) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
+
+  return { ...init, headers };
+}
+
 async function waitForCollectedMessage(
   messages: BrokerMessage[],
   predicate: (message: BrokerMessage) => boolean,
@@ -1286,6 +1298,212 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer /ingress/messages persists a channel-backed task and routes canonical task_submit",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
+
+    try {
+      const forwardedPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "task_submit" && message.to === "agent-beta",
+      );
+
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/ingress/messages", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer ingress-secret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              id: "telegram-msg-1",
+              sessionId: "telegram-123",
+              userId: "123",
+              content: "Bonjour broker",
+              channelType: "telegram",
+              timestamp: new Date().toISOString(),
+              address: {
+                channelType: "telegram",
+                userId: "123",
+                roomId: "123",
+              },
+              metadata: {
+                username: "alice",
+              },
+            },
+            route: {
+              agentId: "agent-beta",
+              taskId: "channel-task-1",
+            },
+          }),
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { task: Task };
+      assertEquals(body.task.id, "channel-task-1");
+      assertEquals(body.task.contextId, "telegram-123");
+      assertEquals(body.task.metadata?.broker, {
+        submittedBy: "channel:telegram",
+        targetAgent: "agent-beta",
+        request: {
+          channelMessage: {
+            username: "alice",
+          },
+        },
+        channel: {
+          channelType: "telegram",
+          sessionId: "telegram-123",
+          userId: "123",
+          address: {
+            channelType: "telegram",
+            userId: "123",
+            roomId: "123",
+          },
+        },
+      });
+
+      const forwarded = (await forwardedPromise) as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
+      assertEquals(forwarded.payload.targetAgent, "agent-beta");
+      assertEquals(forwarded.from, "channel:telegram");
+      assertEquals(forwarded.payload.taskMessage?.parts[0], {
+        kind: "text",
+        text: "Bonjour broker",
+      });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer /ingress/tasks/:id/continue routes canonical task_continue for the same channel session",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
+
+    try {
+      const initialMessage = {
+        id: "telegram-msg-2",
+        sessionId: "telegram-999",
+        userId: "999",
+        content: "Need approval",
+        channelType: "telegram",
+        timestamp: new Date().toISOString(),
+        address: {
+          channelType: "telegram",
+          userId: "999",
+          roomId: "999",
+        },
+      };
+
+      const submitted = await broker.submitChannelMessage(
+        initialMessage,
+        {
+          targetAgent: "agent-beta",
+          taskId: "channel-task-2",
+        },
+      );
+
+      await broker.recordTaskResult("agent-beta", {
+        task: {
+          ...submitted,
+          status: {
+            state: "INPUT_REQUIRED",
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      const forwardedPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "task_continue" && message.to === "agent-beta",
+      );
+
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/ingress/tasks/channel-task-2/continue", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer ingress-secret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              ...initialMessage,
+              id: "telegram-msg-3",
+              content: "Approved, continue",
+            },
+          }),
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { task: Task };
+      assertEquals(body.task.id, "channel-task-2");
+      assertEquals(body.task.status.state, "INPUT_REQUIRED");
+
+      const forwarded = (await forwardedPromise) as Extract<
+        BrokerMessage,
+        { type: "task_continue" }
+      >;
+      assertEquals(forwarded.from, "channel:telegram");
+      assertEquals(forwarded.payload.taskId, "channel-task-2");
+      assertEquals(forwarded.payload.continuationMessage?.parts[0], {
+        kind: "text",
+        text: "Approved, continue",
+      });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer rejects tunnel upgrades without the canonical subprotocol",
   async () => {
     const broker = new BrokerServer(createConfig(), {
@@ -1462,13 +1680,15 @@ Deno.test(
         broker as unknown as { handleHttp(req: Request): Promise<Response> }
       ).handleHttp(
         new Request("http://localhost/federation/identity", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            brokerId: "broker-remote",
-            instanceUrl: "https://remote.example.com",
-            publicKeys: ["pub-1"],
-            status: "trusted",
+          ...withBrokerAuth({
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              brokerId: "broker-remote",
+              instanceUrl: "https://remote.example.com",
+              publicKeys: ["pub-1"],
+              status: "trusted",
+            }),
           }),
         }),
       );
@@ -1479,6 +1699,7 @@ Deno.test(
       ).handleHttp(
         new Request(
           "http://localhost/federation/identity?brokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       assertEquals(getResponse.status, 200);
@@ -1488,7 +1709,9 @@ Deno.test(
 
       const listResponse = await (
         broker as unknown as { handleHttp(req: Request): Promise<Response> }
-      ).handleHttp(new Request("http://localhost/federation/identities"));
+      ).handleHttp(
+        new Request("http://localhost/federation/identities", withBrokerAuth()),
+      );
       assertEquals(listResponse.status, 200);
       const all = await listResponse.json();
       assertEquals(all.length, 1);
@@ -1498,9 +1721,9 @@ Deno.test(
       ).handleHttp(
         new Request(
           "http://localhost/federation/identity?brokerId=broker-remote",
-          {
+          withBrokerAuth({
             method: "DELETE",
-          },
+          }),
         ),
       );
       assertEquals(deleteResponse.status, 200);
@@ -1510,6 +1733,7 @@ Deno.test(
       ).handleHttp(
         new Request(
           "http://localhost/federation/identity?brokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       const revoked = await revokedResponse.json();
@@ -1670,6 +1894,7 @@ Deno.test(
       const statsResponse = await handleHttp(
         new Request(
           "http://localhost/federation/stats?remoteBrokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       assertEquals(statsResponse.status, 200);
@@ -1685,6 +1910,7 @@ Deno.test(
       const deadLettersResponse = await handleHttp(
         new Request(
           "http://localhost/federation/dead-letters?remoteBrokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       assertEquals(deadLettersResponse.status, 200);
@@ -1696,11 +1922,13 @@ Deno.test(
 
       const invalidReplayResponse = await handleHttp(
         new Request("http://localhost/federation/dead-letter/replay", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            remoteBrokerId: "broker-remote",
-            deadLetterId: "",
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              remoteBrokerId: "broker-remote",
+              deadLetterId: "",
+            }),
           }),
         }),
       );
@@ -1708,11 +1936,13 @@ Deno.test(
 
       const missingReplayResponse = await handleHttp(
         new Request("http://localhost/federation/dead-letter/replay", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            remoteBrokerId: "broker-remote",
-            deadLetterId: "missing",
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              remoteBrokerId: "broker-remote",
+              deadLetterId: "missing",
+            }),
           }),
         }),
       );
@@ -1752,12 +1982,14 @@ Deno.test(
 
       const replayResponse = await handleHttp(
         new Request("http://localhost/federation/dead-letter/replay", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            remoteBrokerId: "broker-remote",
-            deadLetterId: "dead-1",
-            maxAttempts: 1,
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              remoteBrokerId: "broker-remote",
+              deadLetterId: "dead-1",
+              maxAttempts: 1,
+            }),
           }),
         }),
       );
@@ -1785,6 +2017,7 @@ Deno.test(
       const deadLettersAfterReplayResponse = await handleHttp(
         new Request(
           "http://localhost/federation/dead-letters?remoteBrokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       assertEquals(deadLettersAfterReplayResponse.status, 200);
@@ -1795,6 +2028,7 @@ Deno.test(
       const statsAfterReplayResponse = await handleHttp(
         new Request(
           "http://localhost/federation/stats?remoteBrokerId=broker-remote",
+          withBrokerAuth(),
         ),
       );
       assertEquals(statsAfterReplayResponse.status, 200);
@@ -1803,11 +2037,13 @@ Deno.test(
 
       const rotateIdentityResponse = await handleHttp(
         new Request("http://localhost/federation/identity/rotate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            brokerId: "broker-remote",
-            nextPublicKey: "pub-key-v2",
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              brokerId: "broker-remote",
+              nextPublicKey: "pub-key-v2",
+            }),
           }),
         }),
       );
@@ -1817,11 +2053,13 @@ Deno.test(
 
       const invalidSessionResponse = await handleHttp(
         new Request("http://localhost/federation/session/rotate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            linkId: "broker-local:broker-remote",
-            ttlSeconds: 0,
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              linkId: "broker-local:broker-remote",
+              ttlSeconds: 0,
+            }),
           }),
         }),
       );
@@ -1829,11 +2067,13 @@ Deno.test(
 
       const rotateSessionResponse = await handleHttp(
         new Request("http://localhost/federation/session/rotate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            linkId: "broker-local:broker-remote",
-            ttlSeconds: 60,
+          ...withBrokerAuth({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              linkId: "broker-local:broker-remote",
+              ttlSeconds: 60,
+            }),
           }),
         }),
       );

@@ -1,5 +1,9 @@
 import { BaseChannel, type OnMessage } from "./base.ts";
-import type { ChannelMessage, WebhookConfig } from "../types.ts";
+import type {
+  ChannelMessage,
+  OutboundChannelMessage,
+  WebhookConfig,
+} from "../types.ts";
 import { generateId } from "../../shared/helpers.ts";
 import { log } from "../../shared/log.ts";
 
@@ -55,6 +59,10 @@ export class WebhookChannel extends BaseChannel {
           content: body.content || "",
           channelType: "webhook",
           timestamp: new Date().toISOString(),
+          address: {
+            channelType: "webhook",
+            userId: body.userId || "webhook",
+          },
           metadata: { callbackUrl: body.callbackUrl },
         };
 
@@ -77,12 +85,8 @@ export class WebhookChannel extends BaseChannel {
     }
   }
 
-  async send(
-    _userId: string,
-    content: string,
-    metadata?: Record<string, unknown>,
-  ): Promise<void> {
-    const callbackUrl = metadata?.callbackUrl as string;
+  async send(message: OutboundChannelMessage): Promise<void> {
+    const callbackUrl = message.metadata?.callbackUrl as string;
     if (!callbackUrl) {
       log.warn("No callbackUrl provided for webhook send");
       return;
@@ -91,7 +95,7 @@ export class WebhookChannel extends BaseChannel {
     await fetch(callbackUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content: message.content }),
       signal: AbortSignal.timeout(10_000),
     });
   }

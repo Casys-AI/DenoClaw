@@ -1,4 +1,5 @@
 import type { Task } from "../../messaging/a2a/types.ts";
+import type { ChannelAddress } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import type { AgentEntry } from "../../shared/types.ts";
 
@@ -17,6 +18,14 @@ export interface BrokerTaskMetadata {
   targetAgent?: string;
   request?: Record<string, unknown>;
   pendingResumes?: PendingResumes;
+  channel?: BrokerTaskChannelMetadata;
+}
+
+export interface BrokerTaskChannelMetadata {
+  channelType: string;
+  sessionId: string;
+  userId: string;
+  address: ChannelAddress;
 }
 
 export interface BrokerTaskPersistenceDeps {

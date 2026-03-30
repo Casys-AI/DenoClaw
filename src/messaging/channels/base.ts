@@ -1,13 +1,24 @@
-import type { ChannelMessage } from "../types.ts";
+import type { ChannelMessage, OutboundChannelMessage } from "../types.ts";
 import { log } from "../../shared/log.ts";
 
-export type OnMessage = (message: ChannelMessage) => void;
+export type OnMessage = (message: ChannelMessage) => void | Promise<void>;
+
+export interface ChannelAdapter {
+  readonly channelType: string;
+  enabled: boolean;
+  initialize(): Promise<void>;
+  start(onMessage: OnMessage): Promise<void> | void;
+  stop(): Promise<void>;
+  send(message: OutboundChannelMessage): Promise<void>;
+  isConnected(): boolean;
+  getStatus(): { type: string; enabled: boolean; connected: boolean };
+}
 
 /**
  * Abstract channel — simplified vs nano-claw: no EventEmitter,
  * uses a callback pattern instead.
  */
-export abstract class BaseChannel {
+export abstract class BaseChannel implements ChannelAdapter {
   readonly channelType: string;
   enabled: boolean;
   protected onMessage?: OnMessage;
@@ -20,11 +31,7 @@ export abstract class BaseChannel {
   abstract initialize(): Promise<void>;
   abstract start(onMessage: OnMessage): Promise<void> | void;
   abstract stop(): Promise<void>;
-  abstract send(
-    userId: string,
-    content: string,
-    metadata?: Record<string, unknown>,
-  ): Promise<void>;
+  abstract send(message: OutboundChannelMessage): Promise<void>;
   abstract isConnected(): boolean;
 
   getStatus(): { type: string; enabled: boolean; connected: boolean } {

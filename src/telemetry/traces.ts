@@ -1,18 +1,6 @@
 /**
- * Trace telemetry public surface.
- * Keeps legacy imports stable while the implementation lives in smaller modules.
+ * Legacy trace telemetry entrypoint.
+ * Prefer `src/telemetry/traces/mod.ts` for the canonical grouped layout.
  */
 
-export type {
-  Span,
-  SpanData,
-  SpanType,
-  TraceCorrelationIds,
-  TraceRoot,
-} from "./trace_types.ts";
-export {
-  DEFAULT_TRACE_TTL_MS,
-  resolveTraceCorrelationIds,
-} from "./trace_types.ts";
-export { TraceWriter } from "./trace_writer.ts";
-export { getTrace, getTraceSpans, listAgentTraces } from "./trace_reader.ts";
+export * from "./traces/mod.ts";

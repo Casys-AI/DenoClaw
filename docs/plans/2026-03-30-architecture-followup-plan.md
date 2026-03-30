@@ -95,6 +95,38 @@ Reason:
 
 ## Progress snapshot
 
+### Track 1 started
+
+Current migration state:
+
+- local gateway traffic now enters through `channel_ingress` instead of calling
+  `WorkerPool.send(...)` directly
+- `/chat` and `/ws` now submit canonical channel messages through the same seam
+- local single-agent runtime now uses in-process `channel_ingress` both for
+  console/bus messages and for one-shot `denoclaw agent -m ...`
+- local ingress persists channel-backed tasks through `TaskStore` and exposes
+  the same submit/get/continue shape as broker ingress
+- the shared channel-to-A2A task message mapping now lives in
+  `src/orchestration/channel_ingress/task_message.ts`
+- local ingress keeps route-level request metadata, including local `model`
+  override, so the move to `channel_ingress` does not silently drop existing CLI
+  or `/chat` behavior
+- gateway channel handling now resolves to the only running agent when there is
+  exactly one, instead of requiring every built-in channel to inject
+  `metadata.agentId`
+
+Remaining work in Track 1:
+
+- introduce an explicit channel route resolver/config for the multi-agent case,
+  because built-in channels (`console`, `telegram`, `webhook`) still do not own
+  route selection themselves
+- replace the temporary `message.metadata.agentId` compatibility fallback with
+  explicit route resolution owned by channel adapters or a dedicated router
+- decide whether the broker HTTP ingress should also interpret route-level model
+  metadata, or whether model override remains a strictly local concern
+- add at least one higher-level smoke path that exercises channel submit then
+  task continuation end-to-end from the local side
+
 ### Track 2 started
 
 Current migration state:
@@ -169,7 +201,8 @@ Target outcome:
 Acceptance:
 
 - local ingress tests cover the same submit/get/continue model as broker ingress
-- no new human ingress path relies on implicit `message.metadata.agentId`
+- no new human ingress path relies on implicit `message.metadata.agentId` beyond
+  the temporary compatibility shim tracked above
 
 ### Track 2 — Canonical agent source of truth
 

@@ -2,10 +2,17 @@ import type { Config } from "../config/types.ts";
 import type { CliArgs } from "../cli/args.ts";
 import { getResolvedAgentRegistry } from "../agent/registry.ts";
 import { WorkerPool } from "../agent/worker_pool.ts";
+import { TaskStore } from "../messaging/a2a/tasks.ts";
 import { ConsoleChannel } from "../messaging/channels/console.ts";
 import { ChannelManager } from "../messaging/channels/manager.ts";
 import { MessageBus } from "../messaging/bus.ts";
 import { SessionManager } from "../messaging/session.ts";
+import {
+  createChannelIngressMessage,
+  getChannelTaskResponseText,
+  InProcessBrokerChannelIngressClient,
+  LocalChannelIngressRuntime,
+} from "../orchestration/channel_ingress/mod.ts";
 import { log } from "../shared/log.ts";
 
 export async function startAgentRuntime(
@@ -48,14 +55,34 @@ export async function startAgentRuntime(
   });
   pool.setSharedKv(agentKv);
   await pool.start(agentIds);
+  const channelIngress = new InProcessBrokerChannelIngressClient(
+    new LocalChannelIngressRuntime({
+      workerPool: pool,
+      taskStore: new TaskStore(agentKv),
+    }),
+  );
+  await channelIngress.start();
 
   if (args.message) {
     try {
-      const result = await pool.send(agentId, sessionId, args.message, {
-        model: args.model,
-      });
-      console.log(result.content);
+      const submission = await channelIngress.submit(
+        createChannelIngressMessage({
+          channelType: "console",
+          sessionId,
+          userId: "cli",
+          content: args.message,
+        }),
+        {
+          agentId,
+          ...(args.model ? { metadata: { model: args.model } } : {}),
+        },
+      );
+      console.log(
+        getChannelTaskResponseText(submission.task) ??
+          `Task state: ${submission.task.status.state}`,
+      );
     } finally {
+      channelIngress.close();
       pool.shutdown();
       agentKv.close();
     }
@@ -74,13 +101,12 @@ export async function startAgentRuntime(
   bus.subscribeAll(async (msg) => {
     await session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
     try {
-      const result = await pool.send(agentId, msg.sessionId, msg.content, {
-        model: args.model,
-      });
+      const submission = await channelIngress.submit(msg, { agentId });
       await channels.send(
         msg.channelType,
         msg.userId,
-        result.content,
+        getChannelTaskResponseText(submission.task) ??
+          `Task state: ${submission.task.status.state}`,
         msg.metadata,
       );
     } catch (e) {
@@ -101,6 +127,7 @@ export async function startAgentRuntime(
   await channels.startAll();
 
   ac.signal.addEventListener("abort", () => {
+    channelIngress.close();
     pool.shutdown();
   });
 }

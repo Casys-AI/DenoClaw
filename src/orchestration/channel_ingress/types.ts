@@ -4,6 +4,7 @@ import type { ChannelMessage } from "../../messaging/types.ts";
 export interface ChannelRouteHint {
   agentId?: string;
   contextId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChannelIngressSubmission {

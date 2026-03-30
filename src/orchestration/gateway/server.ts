@@ -3,6 +3,7 @@ import type { Config } from "../../config/types.ts";
 import type { MessageBus } from "../../messaging/bus.ts";
 import type { SessionManager } from "../../messaging/session.ts";
 import type { ChannelManager } from "../../messaging/channels/manager.ts";
+import type { BrokerChannelIngressClient } from "../channel_ingress/mod.ts";
 import type { AuthManager, AuthResult } from "../auth.ts";
 import type { WorkerPool } from "../../agent/worker_pool.ts";
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
@@ -12,6 +13,8 @@ import { RateLimiter } from "../rate_limit.ts";
 import { GitHubOAuth } from "../github_oauth.ts";
 import { AgentStore } from "../agent_store.ts";
 import { log } from "../../shared/log.ts";
+import { getChannelTaskResponseText } from "../channel_ingress/mod.ts";
+import { resolveGatewayChannelRoute } from "./channel_routing.ts";
 import {
   type DashboardAuthMode,
   getDashboardAllowedUsers,
@@ -38,6 +41,7 @@ export interface GatewayDeps {
   bus: MessageBus;
   session: SessionManager;
   channels: ChannelManager;
+  channelIngress: BrokerChannelIngressClient;
   workerPool: WorkerPool;
   auth?: AuthManager;
   metrics?: MetricsCollector;
@@ -56,6 +60,7 @@ export class Gateway {
   private bus: MessageBus;
   private session: SessionManager;
   private channels: ChannelManager;
+  private channelIngress: BrokerChannelIngressClient;
   private workerPool: WorkerPool;
   private auth: AuthManager | null;
   private metrics: MetricsCollector | null;
@@ -74,6 +79,7 @@ export class Gateway {
     this.bus = deps.bus;
     this.session = deps.session;
     this.channels = deps.channels;
+    this.channelIngress = deps.channelIngress;
     this.workerPool = deps.workerPool;
     this.auth = deps.auth ?? null;
     this.metrics = deps.metrics ?? null;
@@ -96,6 +102,7 @@ export class Gateway {
     log.info("Starting gateway...");
 
     await this.bus.init();
+    await this.channelIngress.start();
     this.wsClients = new Map();
 
     // Register configured channels
@@ -139,6 +146,7 @@ export class Gateway {
     }
     this.wsClients.clear();
     await this.channels.stopAll();
+    this.channelIngress.close();
     this.bus.close();
 
     this.running = false;
@@ -154,20 +162,16 @@ export class Gateway {
         msg.userId,
         msg.channelType,
       );
-
-      const agentId = msg.metadata?.agentId as string | undefined;
-      if (!agentId) {
-        log.error("Message without agentId — ignored");
-        return;
-      }
-      const result = await this.workerPool.send(
-        agentId,
-        msg.sessionId,
-        msg.content,
+      const route = resolveGatewayChannelRoute(
+        msg,
+        this.workerPool.getAgentIds(),
       );
+      const submission = await this.channelIngress.submit(msg, route);
+      const content = getChannelTaskResponseText(submission.task) ??
+        fallbackGatewayTaskText(submission.task.status.state);
       await this.channels.sendMessage(msg.channelType, {
         address: msg.address,
-        content: result.content,
+        content,
         metadata: msg.metadata,
       });
     } catch (e) {
@@ -222,6 +226,7 @@ export class Gateway {
       config: this.config,
       session: this.session,
       channels: this.channels,
+      channelIngress: this.channelIngress,
       workerPool: this.workerPool,
       metrics: this.metrics,
       kv: this.kv,
@@ -235,7 +240,7 @@ export class Gateway {
         handleGatewayWebSocketUpgrade(
           {
             session: this.session,
-            workerPool: this.workerPool,
+            channelIngress: this.channelIngress,
             wsClients: this.wsClients,
           },
           req,
@@ -249,5 +254,16 @@ export class Gateway {
 
   isRunning(): boolean {
     return this.running;
+  }
+}
+
+function fallbackGatewayTaskText(state: string): string {
+  switch (state) {
+    case "INPUT_REQUIRED":
+      return "More input is required to continue this task.";
+    case "FAILED":
+      return "Sorry, an error occurred. Please try again.";
+    default:
+      return `Task state: ${state}`;
   }
 }

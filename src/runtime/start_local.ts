@@ -1,10 +1,15 @@
 import type { Config } from "../config/types.ts";
 import { getResolvedAgentRegistry } from "../agent/registry.ts";
 import { WorkerPool } from "../agent/worker_pool.ts";
+import { TaskStore } from "../messaging/a2a/tasks.ts";
 import { Gateway } from "../orchestration/gateway/server.ts";
 import { MessageBus } from "../messaging/bus.ts";
 import { SessionManager } from "../messaging/session.ts";
 import { ChannelManager } from "../messaging/channels/manager.ts";
+import {
+  InProcessBrokerChannelIngressClient,
+  LocalChannelIngressRuntime,
+} from "../orchestration/channel_ingress/mod.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import {
   updateAgentsList,
@@ -52,6 +57,14 @@ export async function startLocalGateway(config: Config): Promise<void> {
   await workerPool.start(agentIds);
   await updateAgentsList(kv, workerPool.getAgentIds());
 
+  const taskStore = new TaskStore(kv);
+  const channelIngress = new InProcessBrokerChannelIngressClient(
+    new LocalChannelIngressRuntime({
+      workerPool,
+      taskStore,
+    }),
+  );
+
   const bus = new MessageBus(kv);
   const session = new SessionManager(kv);
   const channels = new ChannelManager(bus);
@@ -62,6 +75,7 @@ export async function startLocalGateway(config: Config): Promise<void> {
     bus,
     session,
     channels,
+    channelIngress,
     workerPool,
     metrics,
     kv: kv ?? undefined,

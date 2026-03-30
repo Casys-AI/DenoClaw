@@ -1,11 +1,16 @@
 import type { Config } from "../../config/types.ts";
 import type { SessionManager } from "../../messaging/session.ts";
 import type { ChannelManager } from "../../messaging/channels/manager.ts";
+import type { BrokerChannelIngressClient } from "../channel_ingress/mod.ts";
 import type { WorkerPool } from "../../agent/worker_pool.ts";
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
 import type { RateLimiter } from "../rate_limit.ts";
 import type { GitHubOAuth } from "../github_oauth.ts";
 import type { AgentStore } from "../agent_store.ts";
+import {
+  createChannelIngressMessage,
+  getChannelTaskResponseText,
+} from "../channel_ingress/mod.ts";
 import { getDashboardAuthMode } from "./dashboard_auth.ts";
 import { handleGatewayAgentRoute } from "./agent_routes.ts";
 import { handleGatewayMonitoringRoute } from "./monitoring_routes.ts";
@@ -14,6 +19,7 @@ export interface GatewayHttpContext {
   config: Config;
   session: SessionManager;
   channels: ChannelManager;
+  channelIngress: BrokerChannelIngressClient;
   workerPool: WorkerPool;
   metrics: MetricsCollector | null;
   kv: Deno.Kv | null;
@@ -99,7 +105,7 @@ export async function handleGatewayHttp(
 }
 
 async function handleGatewayChatRoute(
-  ctx: Pick<GatewayHttpContext, "session" | "workerPool">,
+  ctx: Pick<GatewayHttpContext, "session" | "channelIngress">,
   req: Request,
 ): Promise<Response> {
   try {
@@ -137,16 +143,27 @@ async function handleGatewayChatRoute(
 
     const sessionId = body.sessionId || crypto.randomUUID();
     await ctx.session.getOrCreate(sessionId, "api", "http");
-
-    const result = await ctx.workerPool.send(
-      body.agentId,
-      sessionId,
-      body.message,
+    const submission = await ctx.channelIngress.submit(
+      createChannelIngressMessage({
+        channelType: "http",
+        sessionId,
+        userId: "api",
+        content: body.message,
+      }),
       {
-        model: body.model,
+        agentId: body.agentId,
+        ...(typeof body.model === "string" && body.model.trim().length > 0
+          ? { metadata: { model: body.model } }
+          : {}),
       },
     );
-    return Response.json({ sessionId, response: result.content });
+    return Response.json({
+      sessionId,
+      taskId: submission.taskId,
+      task: submission.task,
+      response: getChannelTaskResponseText(submission.task) ??
+        `Task state: ${submission.task.status.state}`,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return Response.json(

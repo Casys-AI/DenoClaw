@@ -1,7 +1,11 @@
 import type { SessionManager } from "../../messaging/session.ts";
-import type { WorkerPool } from "../../agent/worker_pool.ts";
+import type { BrokerChannelIngressClient } from "../channel_ingress/mod.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
+import {
+  createChannelIngressMessage,
+  getChannelTaskResponseText,
+} from "../channel_ingress/mod.ts";
 
 export const GATEWAY_WS_IDLE_TIMEOUT_SECONDS = 30;
 const GATEWAY_WS_MAX_BUFFERED_AMOUNT = 1_000_000;
@@ -93,7 +97,7 @@ export function sendGatewayWsJson(socket: WebSocket, payload: unknown): void {
 
 export interface GatewayWebSocketContext {
   session: SessionManager;
-  workerPool: WorkerPool;
+  channelIngress: BrokerChannelIngressClient;
   wsClients: Map<string, WebSocket>;
 }
 
@@ -131,15 +135,22 @@ export function handleGatewayWebSocketUpgrade(
       const sessionId = data.sessionId || `ws-${token}`;
       await ctx.session.getOrCreate(sessionId, token, "websocket");
 
-      const result = await ctx.workerPool.send(
-        data.agentId,
-        sessionId,
-        data.message,
+      const submission = await ctx.channelIngress.submit(
+        createChannelIngressMessage({
+          channelType: "websocket",
+          sessionId,
+          userId: token,
+          content: data.message,
+          address: { roomId: token },
+        }),
+        { agentId: data.agentId },
       );
       sendGatewayWsJson(socket, {
         type: "response",
         sessionId,
-        content: result.content,
+        taskId: submission.taskId,
+        content: getChannelTaskResponseText(submission.task) ??
+          `Task state: ${submission.task.status.state}`,
       });
     } catch (err) {
       log.error("WebSocket message error", err);

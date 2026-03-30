@@ -22,6 +22,7 @@ import {
   extractBrokerContinuationMessage,
   extractBrokerSubmitTaskMessage,
 } from "../types.ts";
+import { createChannelTaskMessage } from "../channel_ingress/task_message.ts";
 import type { ApprovalGrant } from "./persistence.ts";
 import type {
   BrokerTaskMetadata,
@@ -451,22 +452,4 @@ export class BrokerTaskDispatcher {
       );
     }
   }
-}
-
-function createChannelTaskMessage(message: ChannelMessage): A2AMessage {
-  return {
-    messageId: message.id,
-    role: "user",
-    parts: [{ kind: "text", text: message.content }],
-    metadata: {
-      channel: {
-        channelType: message.channelType,
-        sessionId: message.sessionId,
-        userId: message.userId,
-        address: message.address,
-        timestamp: message.timestamp,
-      },
-      ...(message.metadata ? { channelMessage: message.metadata } : {}),
-    },
-  };
 }

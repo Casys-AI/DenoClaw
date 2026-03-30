@@ -49,6 +49,11 @@ export class TaskStore {
     return entry.value;
   }
 
+  async put(task: Task): Promise<void> {
+    const kv = await this.getKv();
+    await kv.set(["a2a_tasks", task.id], task);
+  }
+
   async updateStatus(
     taskId: string,
     state: TaskState,
@@ -95,7 +100,10 @@ export class TaskStore {
     return await this.updateStatus(taskId, "WORKING");
   }
 
-  async completeTask(taskId: string, message: A2AMessage): Promise<Task | null> {
+  async completeTask(
+    taskId: string,
+    message: A2AMessage,
+  ): Promise<Task | null> {
     return await this.updateStatus(taskId, "COMPLETED", message);
   }
 

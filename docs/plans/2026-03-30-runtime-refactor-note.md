@@ -248,8 +248,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/broker/agent_message_router.ts`
   - slimmer federation wiring in
     `src/orchestration/broker/federation_runtime.ts`
+  - HTTP/upgrade runtime bridging in `src/orchestration/broker/http_runtime.ts`
 - current broker/federation/agent runtime file sizes are now:
-  - `src/orchestration/broker/server.ts`: 544 lines
+  - `src/orchestration/broker/server.ts`: 517 lines
   - `src/orchestration/federation/service.ts`: 293 lines
   - `src/agent/worker_entrypoint.ts`: 473 lines
   - `src/agent/worker_pool.ts`: 393 lines

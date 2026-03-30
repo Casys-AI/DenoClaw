@@ -26,16 +26,14 @@ import {
   type TunnelConnection,
   TunnelRegistry,
 } from "./tunnel_registry.ts";
-import { handleBrokerAgentSocketUpgrade } from "./agent_socket_upgrade.ts";
 import { BrokerAgentRegistry } from "./agent_registry.ts";
 import { BrokerAgentMessageRouter } from "./agent_message_router.ts";
 import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
-import { type BrokerHttpContext, handleBrokerHttp } from "./http_routes.ts";
 import { BrokerLlmProxy } from "./llm_proxy.ts";
+import { BrokerHttpRuntime } from "./http_runtime.ts";
 import { BrokerTaskPersistence } from "./persistence.ts";
 import { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import { BrokerTaskDispatcher } from "./task_dispatch.ts";
-import { handleBrokerTunnelUpgrade } from "./tunnel_upgrade.ts";
 import { BrokerToolDispatcher } from "./tool_dispatch.ts";
 import type { ToolExecutionPort } from "../tool_execution_port.ts";
 import { LocalToolExecutionAdapter } from "../adapters/tool_execution_local.ts";
@@ -82,6 +80,7 @@ export class BrokerServer {
   private taskDispatcher: BrokerTaskDispatcher;
   private toolDispatcher: BrokerToolDispatcher;
   private federationRuntime: BrokerFederationRuntime;
+  private httpRuntime: BrokerHttpRuntime;
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
@@ -120,6 +119,19 @@ export class BrokerServer {
         this.findTunnelForRemoteBroker(remoteBrokerId),
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
       sendReply: (reply) => this.replyDispatcher.sendReply(reply),
+    });
+    this.httpRuntime = new BrokerHttpRuntime({
+      tunnelRegistry: this.tunnelRegistry,
+      connectedAgents: this.connectedAgents,
+      agentRegistry: this.agentRegistry,
+      metrics: this.metrics,
+      getKv: () => this.getKv(),
+      getAuth: () => this.getAuth(),
+      getFederationAdapter: () => this.getFederationAdapter(),
+      getFederationService: () => this.getFederationService(),
+      handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
+      handleTunnelMessage: (tunnelId, data) =>
+        this.handleTunnelMessage(tunnelId, data),
     });
     this.taskDispatcher = new BrokerTaskDispatcher({
       taskStore: this.taskStore,
@@ -440,58 +452,19 @@ export class BrokerServer {
   // ── HTTP + WebSocket (ADR-003: auth built in) ───────
 
   private async handleHttp(req: Request): Promise<Response> {
-    try {
-      return await this.handleHttpInner(req);
-    } catch (e) {
-      log.error("Unhandled HTTP error", e);
-      return Response.json(
-        { error: { code: "INTERNAL_ERROR", recovery: "Check broker logs" } },
-        { status: 500 },
-      );
-    }
+    return await this.httpRuntime.handleHttp(req);
   }
 
-  private async handleHttpInner(req: Request): Promise<Response> {
-    return await handleBrokerHttp(this.createHttpContext(), req);
+  async handleHttpInner(req: Request): Promise<Response> {
+    return await this.httpRuntime.handleHttp(req);
   }
 
-  private async handleAgentSocketUpgrade(req: Request): Promise<Response> {
-    return await handleBrokerAgentSocketUpgrade(
-      {
-        connectedAgents: this.connectedAgents,
-        agentRegistry: this.agentRegistry,
-        getAuth: () => this.getAuth(),
-        handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
-      },
-      req,
-    );
+  async handleAgentSocketUpgrade(req: Request): Promise<Response> {
+    return await this.httpRuntime.handleAgentSocketUpgrade(req);
   }
 
-  private async handleTunnelUpgrade(req: Request): Promise<Response> {
-    return await handleBrokerTunnelUpgrade(
-      {
-        tunnelRegistry: this.tunnelRegistry,
-        getAuth: () => this.getAuth(),
-        getFederationService: () => this.getFederationService(),
-        handleTunnelMessage: (tunnelId, data) =>
-          this.handleTunnelMessage(tunnelId, data),
-      },
-      req,
-    );
-  }
-
-  private createHttpContext(): BrokerHttpContext {
-    return {
-      tunnelRegistry: this.tunnelRegistry,
-      agentRegistry: this.agentRegistry,
-      metrics: this.metrics,
-      getKv: () => this.getKv(),
-      getAuth: () => this.getAuth(),
-      getFederationAdapter: () => this.getFederationAdapter(),
-      getFederationService: () => this.getFederationService(),
-      handleAgentSocketUpgrade: (req) => this.handleAgentSocketUpgrade(req),
-      handleTunnelUpgrade: (req) => this.handleTunnelUpgrade(req),
-    };
+  async handleTunnelUpgrade(req: Request): Promise<Response> {
+    return await this.httpRuntime.handleTunnelUpgrade(req);
   }
 
   // ── Helpers ─────────────────────────────────────────

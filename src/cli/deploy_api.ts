@@ -127,10 +127,7 @@ export function createDeployEnvVars(
     .map(([key, value]) => ({ key, value }));
 }
 
-export function getDeployAppEndpoint(
-  app: DeployAppRef,
-  org?: string,
-): string {
+export function getDeployAppEndpoint(app: DeployAppRef, org?: string): string {
   return deriveDeployHostname(app.slug, org);
 }
 

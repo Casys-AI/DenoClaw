@@ -1,186 +1,363 @@
 # Runtime Refactor Note
 
-**Date:** 2026-03-30 **Status:** Proposed
+**Date:** 2026-03-30 **Status:** Completed
 
 ## Why this note exists
 
-Several runtime files are now too large and mix multiple responsibilities:
+Several runtime files are now too large and mix transport, auth, routing,
+policy, and user-facing concerns:
 
-- `src/orchestration/broker.ts` — 2233 lines
-- `src/orchestration/gateway.ts` — 840 lines
-- `src/cli/setup.ts` — 607 lines
-- `main.ts` — 532 lines
+- `src/orchestration/broker.ts`
+- `src/orchestration/gateway.ts`
+- `src/cli/setup.ts`
+- `main.ts`
 
-This is already creating two concrete problems:
+The goal is not stylistic cleanup. The goal is to make the runtime legible,
+AX-safe, and easier to evolve without reintroducing ambiguous naming or hidden
+mode inference.
 
-1. `gateway` vs `broker` naming is inconsistent across code, docs, and CLI text.
-2. New deploy work is being added into god files, which makes transport, auth,
-   and runtime behavior harder to reason about.
+## AX constraints
 
-The goal is not to refactor for style. The goal is to make the runtime legible,
-deploy-safe, and easier to evolve.
+This refactor must preserve the repo's AX rules:
+
+- Explicit over implicit: local vs deployed runtime must be obvious in names,
+  module layout, and CLI text.
+- Deterministic outputs: `--json`, `--yes`, and non-interactive flows must keep
+  stable behavior while code moves.
+- Discoverable commands: refactors must not hide runtime mode selection behind
+  broad wrappers or "smart" inference.
+- Safe defaults: transport/auth boundaries stay fail-fast; no fallback path
+  should silently widen access or downgrade auth.
+- Composable primitives: registries, routers, and transport helpers should be
+  reusable modules, not buried inside god classes.
 
 ## Naming rules
 
-These names should become strict:
+These names should stay strict:
 
 - `gateway` = local development runtime
 - `broker` = deployed distributed control plane
-- `agent socket` = deployed agent <-> broker runtime channel
-- `tunnel` = external machine or external runtime connector
+- `tunnel` = external connector over the strict broker tunnel protocol
+- `agent socket` = reserved name for a future dedicated deployed agent-to-broker
+  channel; it is not a tunnel
 
 Corollaries:
 
-- A deployed agent is not a tunnel.
-- A deploy target must say `broker`, not `gateway`.
-- Local dashboard/UI language may still talk to the local gateway.
-- Shared code should say `runtime` or `orchestration` when it truly supports
-  both modes.
+- A deployed broker flow must not be labeled `gateway`.
+- A tunnel must not become a catch-all for deployed runtime channels.
+- Shared code should use `runtime` or `orchestration` only when it genuinely
+  supports both local and deployed modes.
 
-## Architectural direction
+## Refactor patterns
 
-We should keep an OOP-friendly shape, but avoid huge god classes. That means:
+The refactor should prefer a small set of repeatable patterns:
 
-- classes own lifecycle and invariants
-- routers, registries, and protocol helpers are extracted into focused modules
-- mode-specific behavior is explicit instead of hidden behind broad conditionals
-- transport and auth contracts are modeled as interfaces
+### 1. Constructor DI with explicit deps bags
 
-This also needs to stay AX-friendly:
+Use simple constructor injection for long-lived collaborators:
 
-- CLI commands remain explicit and discoverable
-- `--json` and non-interactive paths do not depend on hidden mode inference
-- user-facing messages must consistently distinguish local vs deployed runtime
+- registries
+- transport adapters
+- metrics
+- storage-backed services
+
+Avoid service locators and container-style magic. If a dependency matters to a
+runtime invariant, it should be visible in the constructor or a named factory.
+
+### 2. Stateful registries for mutable connection maps
+
+Mutable runtime maps should not live inline in `BrokerServer` or `Gateway`. Use
+focused registries with intent-revealing methods such as:
+
+- `findReplySocket()`
+- `findRemoteBrokerConnection()`
+- `collectAdvertisedAgentIds()`
+
+This keeps naming honest and makes tests inject or seed runtime state without
+reaching into anonymous `Map` internals.
+
+### 3. Pure route tables for protocol dispatch
+
+HTTP and control-plane dispatch should move toward route tables or handler maps
+instead of large inline `if`/`switch` chains spread across one file.
+
+Good targets:
+
+- federation HTTP handlers
+- broker HTTP routes
+- local gateway HTTP routes
+
+### 4. Thin runtime orchestrators
+
+`BrokerServer` and `Gateway` should own lifecycle and invariants, but delegate:
+
+- connection lookup to registries
+- message send rules to transport helpers
+- route parsing to routers
+- persistence concerns to storage helpers/services
+
+### 5. Behavior-preserving extraction first
+
+Before changing protocol or product behavior:
+
+- extract helpers
+- extract registries
+- split route handlers
+- add or move tests alongside the extracted seams
+
+No refactor step should mix naming cleanup, behavior changes, and new product
+scope in one patch.
 
 ## Target module split
 
 ### `main.ts`
 
-Current issue:
-
-- mixes CLI parsing, help text, local runtime boot, deployed runtime boot, and
-  compatibility aliases
-
 Target split:
 
-- `src/cli/entry.ts` — argument parsing and command dispatch
-- `src/cli/help.ts` — help text and examples
-- `src/runtime/start_local.ts` — local gateway boot
-- `src/runtime/start_broker.ts` — deployed broker boot
-- `src/runtime/start_repl.ts` — single-agent REPL path if kept
+- `src/cli/entry.ts`
+- `src/cli/help.ts`
+- `src/runtime/start_local.ts`
+- `src/runtime/start_broker.ts`
 
 Rule:
 
-- `main.ts` should become a thin entrypoint only
+- `main.ts` becomes a thin entrypoint only.
 
 ### `src/orchestration/broker.ts`
 
-Current issue:
-
-- owns HTTP routing, WebSocket upgrades, tunnel registry, agent routing, auth
-  checks, persistence helpers, federation endpoints, task flow, and reply
-  dispatch
-
 Target split:
 
-- `src/orchestration/broker/server.ts` — `BrokerServer` lifecycle only
-- `src/orchestration/broker/http_router.ts` — request dispatch
-- `src/orchestration/broker/agent_socket_registry.ts` — connected deployed
-  agents
-- `src/orchestration/broker/tunnel_registry.ts` — external tunnels only
-- `src/orchestration/broker/agent_routes.ts` — `/agent/socket`,
-  `/agents/register`
-- `src/orchestration/broker/federation_routes.ts` — federation HTTP endpoints
-- `src/orchestration/broker/task_dispatch.ts` — route task/message to agent
-- `src/orchestration/broker/reply_dispatch.ts` — send replies back to peers
-- `src/orchestration/broker/persistence.ts` — broker KV reads/writes
+- `src/orchestration/broker/server.ts`
+- `src/orchestration/broker/http_router.ts`
+- `src/orchestration/broker/tunnel_registry.ts`
+- `src/orchestration/broker/task_dispatch.ts`
+- `src/orchestration/broker/reply_dispatch.ts`
+- `src/orchestration/broker/persistence.ts`
 
 Rule:
 
-- `BrokerServer` should orchestrate collaborators, not implement every endpoint
-  inline
+- `BrokerServer` orchestrates collaborators; it does not own every route and
+  every mutable map inline.
+
+Current extraction in `codex/runtime-ax-broker-refactor`:
+
+- `src/orchestration/broker/server.ts`
+- `src/orchestration/broker/http_router.ts`
+- `src/orchestration/broker/agent_registry.ts`
+- `src/orchestration/broker/tunnel_registry.ts`
+- `src/orchestration/broker/tunnel_upgrade.ts`
+- `src/orchestration/broker/federation_runtime.ts`
+- `src/orchestration/broker/task_dispatch.ts`
+- `src/orchestration/broker/reply_dispatch.ts`
+- `src/orchestration/broker/persistence.ts`
+- `src/orchestration/broker/tool_dispatch.ts`
 
 ### `src/orchestration/gateway.ts`
 
-Current issue:
-
-- local-only concerns are bundled with HTTP routes, WS handling, dashboard
-  integration, and worker lifecycle
-
 Target split:
 
-- `src/orchestration/gateway/server.ts` — `Gateway` lifecycle
-- `src/orchestration/gateway/http_routes.ts` — local HTTP API
-- `src/orchestration/gateway/ws_routes.ts` — local UI WebSocket path
-- `src/orchestration/gateway/dashboard.ts` — dashboard composition
-- `src/orchestration/gateway/worker_runtime.ts` — local worker interactions
+- `src/orchestration/gateway/server.ts`
+- `src/orchestration/gateway/http_routes.ts`
+- `src/orchestration/gateway/ws_routes.ts`
+- `src/orchestration/gateway/dashboard.ts`
 
 Rule:
 
-- local gateway code must stay clearly separated from deployed broker code
+- local gateway code stays visually and semantically separate from deployed
+  broker code.
+
+Current extraction in `codex/runtime-ax-broker-refactor`:
+
+- `src/orchestration/gateway/server.ts`
+- `src/orchestration/gateway/dashboard.ts`
+- `src/orchestration/gateway/ws_routes.ts`
+- `src/orchestration/gateway/http_routes.ts`
 
 ### `src/cli/setup.ts`
-
-Current issue:
-
-- mixes provider setup, channel setup, broker deploy, agent publish preparation,
-  prompts, and user messaging
 
 Target split:
 
 - `src/cli/setup/providers.ts`
 - `src/cli/setup/channels.ts`
 - `src/cli/setup/broker_deploy.ts`
-- `src/cli/setup/agent_publish.ts`
+- `src/cli/setup/subhosting_publish.ts`
 - `src/cli/setup/prompts.ts`
 
 Rule:
 
-- setup flows should compose reusable units rather than growing one wizard file
+- setup remains explicit and AX-friendly in both TTY and `--json` paths.
 
-## Refactor constraints
+Current extraction in `codex/runtime-ax-broker-refactor`:
 
-These constraints matter more than cosmetic cleanup:
+- `src/cli/deploy_api.ts`
+- `src/cli/setup/providers.ts`
+- `src/cli/setup/channels.ts`
+- `src/cli/setup/agent.ts`
+- `src/cli/setup/broker_deploy.ts`
+- `src/cli/setup/subhosting_publish.ts`
+- `src/cli/setup/prompts.ts`
+- `src/cli/setup/status.ts`
 
-- Do not reintroduce ambiguous `gateway` wording for deployed flows.
-- Do not merge deployed agent sockets into the semantic `tunnel` model.
-- Prefer extracting pure helpers and registries before changing behavior.
-- Keep public protocol types stable while moving files.
-- Add or update tests whenever routing logic moves.
+## Main Worktree Delta Sync
+
+To reduce merge risk with the dirty local `main` worktree, the refactor branch
+now also absorbs the critical behavior changes that were only present there.
+
+Already synced into this worktree:
+
+- shared deploy credential resolution via `src/shared/deploy_credentials.ts`
+- deploy naming helpers via `src/shared/naming.ts`
+- deploy config fields in `src/config/types.ts`
+- broker sandbox token lookup through shared credential helpers
+- Deno Deploy CLI/API support via `src/cli/deploy_api.ts`
+- Deno Deploy broker deploy flow in `src/cli/setup/broker_deploy.ts`
+- Deno Deploy agent publish flow in `src/cli/setup/subhosting_publish.ts` and
+  `src/cli/publish.ts`
+- deployed agent runtime bootstrap via `src/agent/deploy_runtime.ts`
+- dedicated agent socket protocol and transport via:
+  - `src/orchestration/agent_socket_protocol.ts`
+  - `src/orchestration/transport.ts`
+- broker-side deployed agent routing support:
+  - `/agent/socket`
+  - `/agents/register`
+  - endpoint persistence
+  - HTTP wake-up before KV fallback
+- regression tests covering the deployed agent registration and wake-up paths
+
+Result:
+
+- the refactor branch is no longer missing the most important deploy/runtime
+  deltas from the dirty local worktree
+- merge review can focus more on intentional overlap and less on accidental
+  feature rollback
 
 ## Priority order
 
-### Phase 1: naming and boundaries
+### Phase 1
 
-- fix the most misleading docs and CLI messages
-- make deploy boot path always say `broker`
-- introduce dedicated folders for `broker/` and `gateway/` internals without
-  changing behavior
+- codify naming rules
+- extract the first broker registries/helpers
+- keep tests green
 
-### Phase 2: broker decomposition
+### Phase 2
 
-- extract HTTP router
-- extract agent socket registry
-- extract tunnel registry
-- extract task/reply dispatch
+- split broker HTTP routing and reply/task dispatch
 
-### Phase 3: gateway decomposition
+### Phase 3
 
-- separate local UI routes from worker runtime
-- move dashboard composition out of the gateway core
+- decompose gateway
 
-### Phase 4: CLI decomposition
+### Phase 4
 
-- split `main.ts`
-- split `setup.ts`
-- align help text and deprecation aliases with the new naming rules
+- split CLI entry/setup
 
 ## Definition of done
 
 This refactor is successful when:
 
-- deploy-related code never uses `gateway` for the distributed runtime
-- `broker.ts` is no longer a monolith
-- local and deployed runtime paths are obvious from file layout alone
-- CLI text is consistent for humans and for machine-readable AX flows
-- agent sockets and tunnels are represented as different concepts in code
+- deployed flows never say `gateway`
+- mutable runtime maps live behind named collaborators
+- broker vs local runtime paths are obvious from file layout
+- AX behavior stays stable for `--json`, `--yes`, and non-interactive usage
+- tunnels and future agent sockets are represented as different concepts
+
+## Landing Strategy
+
+The refactor now touches enough shared runtime files that it should be landed in
+intentional slices instead of one unstructured merge.
+
+Recommended landing sequence:
+
+### Commit 1 — Runtime decomposition
+
+- thin `main.ts`
+- extract `src/runtime/*`
+- extract `src/orchestration/broker/*`
+- extract `src/orchestration/gateway/*`
+- keep `src/orchestration/broker.ts` and `src/orchestration/gateway.ts` as
+  compatibility re-exports
+
+Goal:
+
+- land the structural split and naming cleanup first
+- make review focus on module boundaries and runtime invariants
+
+### Commit 2 — CLI decomposition
+
+- extract `src/cli/entry.ts`
+- extract `src/cli/help.ts`
+- extract `src/cli/init.ts`
+- extract `src/cli/setup/*`
+- keep `src/cli/setup.ts` and `src/cli/setup_steps/*` as compatibility shims
+
+Goal:
+
+- separate command routing from setup implementation
+- preserve backward-compatible import paths while shrinking large files
+
+### Commit 3 — AX guardrails and tests
+
+- structured CLI errors for non-interactive setup flows
+- suppress human-only deprecation output in `--json`
+- CLI-focused tests for `--json`, `--yes`, and non-interactive behavior
+- note/documentation updates
+
+Goal:
+
+- lock down deterministic AX behavior after the file split
+
+### Local integration rule
+
+Do not merge this work directly into a dirty local `main` worktree.
+
+Before integration:
+
+- checkpoint the current local development work on its own branch or stash
+- integrate the refactor branch into a clean branch/worktree
+- resolve overlap on:
+  - `main.ts`
+  - `src/cli/setup.ts`
+  - `src/orchestration/bootstrap.ts`
+  - `src/orchestration/broker.ts`
+  - `src/orchestration/broker_test.ts`
+
+Reason:
+
+- these files overlap with ongoing local work and will create noisy conflicts if
+  the runtime refactor is merged into a dirty tree
+
+## Polish Backlog
+
+The runtime refactor itself is complete. The items below are optional follow-up
+polish and should be treated as a separate track.
+
+### Priority A — post-merge cleanup
+
+- migrate internal imports to canonical paths only
+- align legacy filenames with their real semantics:
+  - `src/cli/setup/subhosting_publish.ts`
+  - any remaining `gateway` wording in deprecated compatibility shims
+- remove compatibility wrappers once downstream imports stop relying on them:
+  - `src/orchestration/broker.ts`
+  - `src/orchestration/gateway.ts`
+  - `src/cli/setup.ts`
+  - `src/cli/setup_steps/*`
+  - `src/orchestration/gateway/dashboard.ts`
+  - `src/orchestration/gateway/http_routes.ts`
+  - `src/orchestration/gateway/ws_routes.ts`
+- decide whether `broker/http_router.ts` should also be renamed to
+  `http_routes.ts` for symmetry with gateway
+
+### Priority B — reduce remaining large files
+
+- continue shrinking `src/orchestration/broker/server.ts`
+- split `src/orchestration/federation/service.ts`
+- split `src/agent/worker_entrypoint.ts`
+- split `src/agent/worker_pool.ts`
+
+### Priority C — stronger verification
+
+- add broader CLI e2e coverage beyond current AX unit tests
+- add transport/integration coverage for the deployed agent WebSocket path
+- add integration coverage for dashboard HTTP routes that require KV
+- add import-boundary checks for canonical runtime paths after wrapper removal

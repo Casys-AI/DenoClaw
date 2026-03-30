@@ -57,6 +57,8 @@ Deno.test("createSandboxBackend accepts DENO_DEPLOY_ORG_TOKEN", () => {
     if (originalLegacy) Deno.env.set("DENO_DEPLOY_TOKEN", originalLegacy);
     if (originalSandbox) {
       Deno.env.set("DENO_SANDBOX_API_TOKEN", originalSandbox);
+    } else {
+      Deno.env.delete("DENO_SANDBOX_API_TOKEN");
     }
   }
 });

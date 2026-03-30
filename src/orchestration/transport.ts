@@ -198,8 +198,6 @@ export class KvQueueTransport implements BrokerTransport {
   }
 }
 
-// ── WebSocket transport (deploy mode) ──────────────────
-
 export interface WebSocketBrokerTransportDeps {
   brokerUrl: string;
   authToken?: string;
@@ -215,10 +213,7 @@ export function resolveAgentSocketUrl(brokerUrl: string): string {
   return url.toString();
 }
 
-function createAgentSocket(
-  url: string,
-  authToken: string,
-): WebSocket {
+function createAgentSocket(url: string, authToken: string): WebSocket {
   const DenoWebSocket = WebSocket as unknown as DenoWebSocketWithHeaders;
   return new DenoWebSocket(url, {
     headers: {

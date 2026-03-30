@@ -59,13 +59,10 @@ export async function publishAgents(agentName?: string): Promise<void> {
     );
     return;
   }
-  const deployOrgName = deployOrg;
+  const resolvedDeployOrg = deployOrg;
 
-  print(
-    `Publishing Deno Deploy agent apps against broker ${brokerUrl}`,
-  );
+  print(`Publishing Deno Deploy agent apps against broker ${brokerUrl}`);
 
-  // Resolve Deploy API credentials
   const token = getDeployOrgToken() ||
     (interactive
       ? await ask("Deno Deploy organization access token")
@@ -79,7 +76,6 @@ export async function publishAgents(agentName?: string): Promise<void> {
     return;
   }
 
-  // Build list of agents to publish
   const wsRegistry: Record<string, AgentEntry> = await WorkspaceLoader
     .buildRegistry();
   let agentsToPublish: [string, AgentEntry][];
@@ -148,7 +144,7 @@ export async function publishAgents(agentName?: string): Promise<void> {
       "--kind",
       "denokv",
       "--org",
-      deployOrgName,
+      resolvedDeployOrg,
     ]);
 
     const provisionOutput =
@@ -170,7 +166,7 @@ export async function publishAgents(agentName?: string): Promise<void> {
         "detach",
         brokerKvDatabase,
         "--org",
-        deployOrgName,
+        resolvedDeployOrg,
         "--app",
         appSlug,
       ]);
@@ -193,7 +189,7 @@ export async function publishAgents(agentName?: string): Promise<void> {
       "assign",
       kvDatabase,
       "--org",
-      deployOrgName,
+      resolvedDeployOrg,
       "--app",
       appSlug,
     ]);
@@ -250,7 +246,6 @@ export async function publishAgents(agentName?: string): Promise<void> {
       continue;
     }
 
-    // 2. Generate entrypoint and deploy
     const entrypoint = generateAgentEntrypoint(id, resolvedEntry);
     const assets = await buildDeployAssets(entrypoint);
     const envVars = createDeployEnvVars({
@@ -280,7 +275,7 @@ export async function publishAgents(agentName?: string): Promise<void> {
       continue;
     }
 
-    const endpoint = getDeployAppEndpoint(app, deployOrgName);
+    const endpoint = getDeployAppEndpoint(app, resolvedDeployOrg);
     const domain = new URL(endpoint).host;
 
     success(`${id} deployed (${revision.id})`);
@@ -312,7 +307,6 @@ export async function publishAgents(agentName?: string): Promise<void> {
     results.push({ id, ok: true, domain });
   }
 
-  // Save org for future use
   if (!config.deploy) config.deploy = {};
   config.deploy.url = brokerUrl;
   if (brokerOidcAudience) {

@@ -71,11 +71,13 @@ Deno.test("ensureDeployApp reuses an existing app", async () => {
   globalThis.fetch = ((input: string | URL | Request) => {
     requestedUrl = String(input);
     return Promise.resolve(
-      new Response(JSON.stringify({
-        id: "app_123",
-        slug: "agent-alice",
-        labels: { "custom.denoclaw.agent_id": "alice" },
-      })),
+      new Response(
+        JSON.stringify({
+          id: "app_123",
+          slug: "agent-alice",
+          labels: { "custom.denoclaw.agent_id": "alice" },
+        }),
+      ),
     );
   }) as typeof fetch;
 
@@ -133,85 +135,98 @@ Deno.test("ensureDeployApp creates a new app after a 404 lookup", async () => {
   }
 });
 
-Deno.test("ensureDeployApp rejects an existing slug bound to another agent", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (() =>
-    Promise.resolve(
-      new Response(JSON.stringify({
-        id: "app_789",
-        slug: "alice",
-        labels: { "custom.denoclaw.agent_id": "bob" },
-      })),
-    )) as typeof fetch;
+Deno.test(
+  "ensureDeployApp rejects an existing slug bound to another agent",
+  async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "app_789",
+            slug: "alice",
+            labels: { "custom.denoclaw.agent_id": "bob" },
+          }),
+        ),
+      )) as typeof fetch;
 
-  try {
-    await assertRejects(
-      () => ensureDeployApp("alice", createDeployApiHeaders("ddo")),
-      Error,
-      "already assigned to agent",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+    try {
+      await assertRejects(
+        () => ensureDeployApp("alice", createDeployApiHeaders("ddo")),
+        Error,
+        "already assigned to agent",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
 
-Deno.test("deployAppRevision posts assets and env vars to the deploy endpoint", async () => {
-  const originalFetch = globalThis.fetch;
-  let capturedUrl = "";
-  let capturedBody = "";
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-    capturedUrl = String(input);
-    capturedBody = typeof init?.body === "string" ? init.body : "";
-    return Promise.resolve(
-      new Response(JSON.stringify({ id: "rev_123" }), { status: 201 }),
-    );
-  }) as typeof fetch;
+Deno.test(
+  "deployAppRevision posts assets and env vars to the deploy endpoint",
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedUrl = "";
+    let capturedBody = "";
+    globalThis.fetch = (
+      (input: string | URL | Request, init?: RequestInit) => {
+        capturedUrl = String(input);
+        capturedBody = typeof init?.body === "string" ? init.body : "";
+        return Promise.resolve(
+          new Response(JSON.stringify({ id: "rev_123" }), { status: 201 }),
+        );
+      }
+    ) as typeof fetch;
 
-  try {
-    const revision = await deployAppRevision({
-      app: { id: "app_123", slug: "alice" },
-      assets: {
-        "main.ts": {
-          kind: "file",
-          encoding: "utf-8",
-          content: "Deno.serve(() => new Response('ok'));",
+    try {
+      const revision = await deployAppRevision({
+        app: { id: "app_123", slug: "alice" },
+        assets: {
+          "main.ts": {
+            kind: "file",
+            encoding: "utf-8",
+            content: "Deno.serve(() => new Response('ok'));",
+          },
         },
-      },
-      envVars: [{ key: "DENOCLAW_AGENT_ID", value: "alice" }],
-      headers: createDeployApiHeaders("ddo"),
-    });
+        envVars: [{ key: "DENOCLAW_AGENT_ID", value: "alice" }],
+        headers: createDeployApiHeaders("ddo"),
+      });
 
-    assertEquals(revision, { id: "rev_123" });
-    assertEquals(capturedUrl, "https://api.deno.com/v2/apps/alice/deploy");
-    assertStringIncludes(capturedBody, '"production":true');
-    assertStringIncludes(capturedBody, '"DENOCLAW_AGENT_ID"');
-    assertStringIncludes(capturedBody, '"main.ts"');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+      assertEquals(revision, { id: "rev_123" });
+      assertEquals(capturedUrl, "https://api.deno.com/v2/apps/alice/deploy");
+      assertStringIncludes(capturedBody, '"production":true');
+      assertStringIncludes(capturedBody, '"DENOCLAW_AGENT_ID"');
+      assertStringIncludes(capturedBody, '"main.ts"');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
 
-Deno.test("registerAgentEndpointWithBroker rejects broker registration failures", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (() =>
-    Promise.resolve(
-      new Response("forbidden", { status: 403 }),
-    )) as typeof fetch;
+Deno.test(
+  "registerAgentEndpointWithBroker rejects broker registration failures",
+  async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response("forbidden", { status: 403 }),
+      )) as typeof fetch;
 
-  try {
-    await assertRejects(
-      () =>
-        registerAgentEndpointWithBroker({
-          brokerUrl: "https://broker.example",
-          authToken: "token",
-          agentId: "alice",
-          endpoint: "https://alice.deno.dev",
-          config: { model: "gpt-5" },
-        }),
-      Error,
-      "Broker registration failed (403)",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+    try {
+      await assertRejects(
+        () =>
+          registerAgentEndpointWithBroker({
+            brokerUrl: "https://broker.example",
+            authToken: "token",
+            agentId: "alice",
+            endpoint: "https://alice.deno.dev",
+            config: { model: "gpt-5" },
+          }),
+        Error,
+        "Broker registration failed (403)",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);

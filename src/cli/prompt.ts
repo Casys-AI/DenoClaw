@@ -4,6 +4,7 @@
  */
 
 import { cliFlags } from "./output.ts";
+import { CliError } from "./output.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -14,7 +15,10 @@ export async function ask(
 ): Promise<string> {
   if (!cliFlags().interactive) {
     if (defaultValue === undefined) {
-      throw new Error(`Cannot prompt for "${question}" in non-interactive mode`);
+      throw new CliError(
+        "NON_INTERACTIVE_INPUT_REQUIRED",
+        `Cannot prompt for "${question}" in non-interactive mode`,
+      );
     }
     return defaultValue;
   }

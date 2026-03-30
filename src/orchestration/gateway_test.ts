@@ -4,7 +4,7 @@ import {
   getDashboardAllowedUsers,
   getDashboardAuthMode,
   parseGatewayWsChatPayload,
-} from "./gateway.ts";
+} from "./gateway/server.ts";
 
 // ── getDashboardAuthMode ───────────────────────────────────
 

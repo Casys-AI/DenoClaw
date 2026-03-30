@@ -4,9 +4,10 @@ import {
   assertRejects,
   assertThrows,
 } from "@std/assert";
-import { BrokerServer } from "./broker.ts";
-import { AuthManager } from "./auth.ts";
 import { DENOCLAW_AGENT_PROTOCOL } from "./agent_socket_protocol.ts";
+import { BrokerServer } from "./broker/server.ts";
+import { AuthManager } from "./auth.ts";
+import { TunnelRegistry } from "./broker/tunnel_registry.ts";
 import {
   DENOCLAW_TUNNEL_PROTOCOL,
   getAcceptedTunnelProtocol,
@@ -1256,13 +1257,10 @@ Deno.test(
       assertEquals(task.id, "task-http");
       assertEquals(fetchCalls.length, 1);
       assertEquals(fetchCalls[0].url, "https://agent-beta.example/tasks");
-      assertEquals(
-        fetchCalls[0].init?.headers,
-        {
-          "content-type": "application/json",
-          authorization: "Bearer wake-secret",
-        },
-      );
+      assertEquals(fetchCalls[0].init?.headers, {
+        "content-type": "application/json",
+        authorization: "Bearer wake-secret",
+      });
 
       const body = JSON.parse(
         String(fetchCalls[0].init?.body),
@@ -1532,8 +1530,10 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      const tunnelRegistry = new TunnelRegistry();
       const broker = new BrokerServer(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
@@ -1736,54 +1736,18 @@ Deno.test(
         },
         close() {},
       } as unknown as WebSocket;
-      (
-        broker as unknown as {
-          tunnels: Map<string, {
-            ws: WebSocket;
-            capabilities: {
-              tunnelId: string;
-              type: "instance" | "local";
-              tools: string[];
-              agents?: string[];
-              allowedAgents: string[];
-            };
-            registered: boolean;
-          }>;
-        }
-      ).tunnels.set("broker-remote", {
-        ws: fakeRemoteTunnel,
-        registered: true,
-        capabilities: {
-          tunnelId: "broker-remote",
-          type: "instance",
-          tools: [],
-          agents: ["agent-remote"],
-          allowedAgents: [],
-        },
+      tunnelRegistry.register("broker-remote", fakeRemoteTunnel, {
+        tunnelId: "broker-remote",
+        type: "instance",
+        tools: [],
+        agents: ["agent-remote"],
+        allowedAgents: [],
       });
-      (
-        broker as unknown as {
-          tunnels: Map<string, {
-            ws: WebSocket;
-            capabilities: {
-              tunnelId: string;
-              type: "instance" | "local";
-              tools: string[];
-              agents?: string[];
-              allowedAgents: string[];
-            };
-            registered: boolean;
-          }>;
-        }
-      ).tunnels.set("shadow-local", {
-        ws: fakeLocalTunnel,
-        registered: true,
-        capabilities: {
-          tunnelId: "shadow-local",
-          type: "local",
-          tools: [],
-          allowedAgents: ["agent-remote"],
-        },
+      tunnelRegistry.register("shadow-local", fakeLocalTunnel, {
+        tunnelId: "shadow-local",
+        type: "local",
+        tools: [],
+        allowedAgents: ["agent-remote"],
       });
 
       const replayResponse = await handleHttp(

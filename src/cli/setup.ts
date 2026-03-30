@@ -371,99 +371,138 @@ ac.signal.addEventListener("abort", async () => {
 `;
 }
 
-// ── publish gateway (Deploy) ────────────────────────────
+// ── deploy broker (Deploy) ──────────────────────────────
 
-export async function publishGateway(): Promise<void> {
-  print("\n=== Deploy the Gateway to Deno Deploy ===\n");
+export async function deployBroker(opts?: {
+  org?: string;
+  app?: string;
+  prod?: boolean;
+}): Promise<void> {
+  const config = await getConfigOrDefault();
 
-  const cmd = new Deno.Command("deployctl", {
-    args: ["--version"],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { success: deployctlOk } = await cmd.output();
-  if (!deployctlOk) {
-    error("deployctl is not installed.");
-    print("  deno install -Arf jsr:@deno/deployctl");
+  // 1. Determine org and app
+  const org = opts?.org || config.deploy?.org ||
+    await ask("Deploy org", config.deploy?.org || "casys");
+  const app = opts?.app || config.deploy?.app ||
+    await ask("Deploy app name", config.deploy?.app || "denoclaw");
+
+  if (!org || !app) {
+    error("Organization and app name are required. Use --org and --app.");
     return;
   }
 
-  const projectName = await ask("Deploy project name", "denoclaw-gateway");
+  // 2. Check if app exists, create if needed
+  print(`\nChecking app ${app} on org ${org}...`);
+  const checkCmd = new Deno.Command("deno", {
+    args: ["deploy", "logs", "--org", org, "--app", app, "--limit", "1"],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const checkResult = await checkCmd.output();
 
-  // Read local config to reuse existing keys
-  const config = await getConfigOrDefault();
-  const localKeys: Record<string, string> = {};
-  for (const [name, cfg] of Object.entries(config.providers)) {
-    if (cfg?.apiKey) localKeys[name] = cfg.apiKey;
-  }
-
-  // Generate an API token for the gateway
-  const apiToken = crypto.randomUUID();
-  const envArgs = [`--env=DENOCLAW_API_TOKEN=${apiToken}`];
-
-  if (Object.keys(localKeys).length > 0) {
-    print(
-      `\nAPI keys found in local config: ${
-        Object.keys(localKeys).join(", ")
-      }`,
-    );
-    if (await confirm("Use these keys for deployment?")) {
-      const envMap: Record<string, string> = {
-        anthropic: "ANTHROPIC_API_KEY",
-        openai: "OPENAI_API_KEY",
-        ollama: "OLLAMA_API_KEY",
-        openrouter: "OPENROUTER_API_KEY",
-        deepseek: "DEEPSEEK_API_KEY",
-        groq: "GROQ_API_KEY",
-        gemini: "GEMINI_API_KEY",
-      };
-      for (const [name, key] of Object.entries(localKeys)) {
-        const envName = envMap[name];
-        if (envName) envArgs.push(`--env=${envName}=${key}`);
-      }
-      success("Local keys loaded");
-    }
-  } else {
-    print("\nNo keys in local config. Enter them manually:");
-    const anthropicKey = await ask("ANTHROPIC_API_KEY (empty = skip)");
-    const openaiKey = await ask("OPENAI_API_KEY (empty = skip)");
-    if (anthropicKey) envArgs.push(`--env=ANTHROPIC_API_KEY=${anthropicKey}`);
-    if (openaiKey) envArgs.push(`--env=OPENAI_API_KEY=${openaiKey}`);
-  }
-
-  // Default model
-  envArgs.push(`--env=DENOCLAW_DEFAULT_MODEL=${config.agents.defaults.model}`);
-
-  if (await confirm("\nDeploy?")) {
-    print("\nDeploying...");
-    const cmd = new Deno.Command("deployctl", {
-      args: [
-        "deploy",
-        `--project=${projectName}`,
-        "--prod",
-        ...envArgs,
-        "main.ts",
-      ],
+  if (!checkResult.success) {
+    print("App not found. Creating...");
+    const createCmd = new Deno.Command("deno", {
+      args: ["deploy", "create", "--org", org, "--app", app],
       stdout: "inherit",
       stderr: "inherit",
     });
+    const createResult = await createCmd.output();
+    if (!createResult.success) {
+      error("Failed to create app on Deno Deploy.");
+      return;
+    }
+    success(`App ${app} created on org ${org}`);
+  } else {
+    print(`App ${app} exists.`);
+  }
 
-    const { success: ok } = await cmd.output();
-    if (ok) {
-      success(`Gateway deployed to https://${projectName}.deno.dev`);
-      print(`\n  API token: ${apiToken}`);
-      print(`  Keep it — it is the gateway access token.\n`);
-      print("  Test:");
-      print(
-        `    curl -H "Authorization: Bearer ${apiToken}" https://${projectName}.deno.dev/health`,
-      );
-      print("\n  For stronger security (zero static secrets):");
-      print("  → Configure GCP OIDC + Secret Manager (see ADR-004)");
-      print(`  → deno deploy setup-gcp --org=<org> --app=${projectName}`);
-    } else {
-      error("Deployment failed.");
+  // 3. Sync env vars (LLM keys from local config)
+  const envMap: Record<string, string> = {
+    anthropic: "ANTHROPIC_API_KEY",
+    openai: "OPENAI_API_KEY",
+    ollama: "OLLAMA_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    groq: "GROQ_API_KEY",
+    gemini: "GEMINI_API_KEY",
+  };
+
+  for (const [name, cfg] of Object.entries(config.providers)) {
+    if (cfg?.apiKey && envMap[name]) {
+      print(`Setting ${envMap[name]}...`);
+      const envCmd = new Deno.Command("deno", {
+        args: [
+          "deploy",
+          "env",
+          "add",
+          "--org",
+          org,
+          "--app",
+          app,
+          `${envMap[name]}=${cfg.apiKey}`,
+        ],
+        stdout: "piped",
+        stderr: "piped",
+      });
+      await envCmd.output();
     }
   }
+
+  // Ensure DENOCLAW_API_TOKEN is set
+  let apiToken = Deno.env.get("DENOCLAW_API_TOKEN");
+  if (!apiToken) {
+    apiToken = crypto.randomUUID();
+    print("Setting DENOCLAW_API_TOKEN...");
+    const tokenCmd = new Deno.Command("deno", {
+      args: [
+        "deploy",
+        "env",
+        "add",
+        "--org",
+        org,
+        "--app",
+        app,
+        `DENOCLAW_API_TOKEN=${apiToken}`,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    await tokenCmd.output();
+  }
+
+  // 4. Deploy
+  print("\nDeploying...");
+  const deployArgs = ["deploy", "--org", org, "--app", app];
+  if (opts?.prod !== false) deployArgs.push("--prod");
+
+  const deployCmd = new Deno.Command("deno", {
+    args: deployArgs,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const deployResult = await deployCmd.output();
+
+  if (!deployResult.success) {
+    error("Deployment failed.");
+    return;
+  }
+
+  // 5. Save deploy config locally for future use
+  config.deploy = { org, app };
+  await saveConfig(config);
+
+  const url = `https://${app}.deno.dev`;
+  success(`Broker deployed to ${url}`);
+  print(`\n  API token: ${apiToken}`);
+  print(
+    `  Test: curl -H "Authorization: Bearer ${apiToken}" ${url}/health`,
+  );
+}
+
+/** @deprecated Use deployBroker instead */
+export async function publishGateway(): Promise<void> {
+  await deployBroker();
 }
 
 // ── enhanced status ─────────────────────────────────────

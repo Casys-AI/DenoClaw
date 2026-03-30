@@ -10,6 +10,7 @@ import { ChannelManager } from "./src/messaging/channels/manager.ts";
 import { MessageBus } from "./src/messaging/bus.ts";
 import { SessionManager } from "./src/messaging/session.ts";
 import {
+  deployBroker,
   publishAgent,
   setupAgent,
   setupChannel,
@@ -47,9 +48,9 @@ const args = parseArgs(Deno.args, {
     "org",
     "app",
   ],
-  boolean: ["force", "json", "yes"],
+  boolean: ["force", "json", "yes", "prod"],
   alias: { m: "message", s: "session", a: "agent", y: "yes" },
-  default: { session: "default" },
+  default: { session: "default", prod: true },
 });
 
 initCliFlags({ json: !!args.json, yes: !!args.yes });
@@ -390,12 +391,29 @@ try {
       }
       break;
 
-    case "deploy":
+    case "deploy": {
+      const subCmd = args._[1] as string | undefined;
+      if (subCmd === "agent") {
+        // backward compat
+        console.log(
+          "⚠ 'denoclaw deploy agent' is deprecated. Use 'denoclaw publish <agent>' instead.\n",
+        );
+        await publishAgent();
+      } else {
+        await deployBroker({
+          org: args.org as string | undefined,
+          app: args.app as string | undefined,
+          prod: args.prod as boolean,
+        });
+      }
+      break;
+    }
+
     case "publish":
       if (subcommand === "agent") {
         await publishAgent();
       } else {
-        console.log("Usage: denoclaw deploy agent <name> --broker <url>");
+        console.log("Usage: denoclaw publish agent");
       }
       break;
 

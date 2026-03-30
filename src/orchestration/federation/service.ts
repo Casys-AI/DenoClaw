@@ -18,16 +18,14 @@ import type {
   RemoteAgentCatalogEntry,
   SignedCatalogEnvelope,
 } from "./types.ts";
-import { verifyCatalogEnvelopeSignature } from "./crypto.ts";
 import {
   buildBrokerCorrelationContext,
   buildLinkCorrelationContext,
 } from "./correlation.ts";
+import { FederationIdentityManager } from "./identity_manager.ts";
 import { FederationObservabilityRecorder } from "./observability_recorder.ts";
 import { FederationRouteAuthorizer } from "./route_authorizer.ts";
-import {
-  FederationTaskForwarder,
-} from "./task_forwarder.ts";
+import { FederationTaskForwarder } from "./task_forwarder.ts";
 
 export { FederationDeadLetterNotFoundError } from "./task_forwarder.ts";
 
@@ -93,6 +91,7 @@ export interface ReplayFederatedDeadLetterInput {
 }
 
 export class FederationService {
+  private readonly identityManager: FederationIdentityManager;
   private readonly observabilityRecorder: FederationObservabilityRecorder;
   private readonly routeAuthorizer: FederationRouteAuthorizer;
   private readonly taskForwarder: FederationTaskForwarder | null;
@@ -109,6 +108,10 @@ export class FederationService {
     this.observabilityRecorder = new FederationObservabilityRecorder(
       this.observability ?? null,
     );
+    this.identityManager = new FederationIdentityManager({
+      discovery: this.discovery,
+      identity: this.identity,
+    });
     this.routeAuthorizer = new FederationRouteAuthorizer({
       discovery: this.discovery,
       policy: this.policy,
@@ -178,38 +181,12 @@ export class FederationService {
   }
 
   async syncSignedCatalog(envelope: SignedCatalogEnvelope): Promise<void> {
-    const correlation = this.buildBrokerCorrelationContext({
-      remoteBrokerId: envelope.remoteBrokerId,
-      traceId: crypto.randomUUID(),
-    });
-    const identity = await this.identity.getIdentity(
-      envelope.remoteBrokerId,
-      { traceId: correlation.traceId },
-    );
-    if (!identity || identity.status !== "trusted") {
-      throw new Error(
-        `Federation identity is not trusted for broker ${envelope.remoteBrokerId}`,
-      );
-    }
-
-    const signatureValid = await verifyCatalogEnvelopeSignature(
-      envelope,
-      identity.publicKeys,
-    );
-    if (!signatureValid) {
-      throw new Error(
-        `Invalid catalog signature for broker ${envelope.remoteBrokerId}`,
-      );
-    }
-
-    await this.discovery.setRemoteCatalog(
-      envelope.remoteBrokerId,
-      envelope.entries,
-      correlation,
-    );
+    await this.identityManager.syncSignedCatalog(envelope);
   }
 
-  async closeLink(correlation: FederationLinkCorrelationContext): Promise<void> {
+  async closeLink(
+    correlation: FederationLinkCorrelationContext,
+  ): Promise<void> {
     await this.control.terminateLink(
       correlation.linkId,
       this.buildLinkCorrelationContext(correlation),
@@ -217,43 +194,37 @@ export class FederationService {
   }
 
   async upsertIdentity(identity: BrokerIdentity): Promise<void> {
-    await this.identity.upsertIdentity(identity, { traceId: crypto.randomUUID() });
+    await this.identityManager.upsertIdentity(identity);
   }
 
   async revokeIdentity(brokerId: string): Promise<void> {
-    await this.identity.revokeIdentity(brokerId, { traceId: crypto.randomUUID() });
+    await this.identityManager.revokeIdentity(brokerId);
   }
 
   async rotateIdentityKey(
     brokerId: string,
     nextPublicKey: string,
   ): Promise<BrokerIdentity> {
-    return await this.identity.rotateIdentityKey(
+    return await this.identityManager.rotateIdentityKey(
       brokerId,
       nextPublicKey,
-      { traceId: crypto.randomUUID() },
     );
   }
 
   async getIdentity(brokerId: string): Promise<BrokerIdentity | null> {
-    return await this.identity.getIdentity(brokerId, {
-      traceId: crypto.randomUUID(),
-    });
+    return await this.identityManager.getIdentity(brokerId);
   }
 
   async listIdentities(): Promise<BrokerIdentity[]> {
-    return await this.identity.listIdentities({ traceId: crypto.randomUUID() });
+    return await this.identityManager.listIdentities();
   }
 
   async replayDeadLetter(
     input: ReplayFederatedDeadLetterInput,
   ): Promise<ForwardFederatedTaskResult> {
-    if (!this.taskForwarder) {
-      throw new Error(
-        "FederationService requires routing and delivery ports for dead-letter replay",
-      );
-    }
-    return await this.taskForwarder.replayDeadLetter(input);
+    return await this.requireTaskForwarder(
+      "FederationService requires routing and delivery ports for dead-letter replay",
+    ).replayDeadLetter(input);
   }
 
   async probeRoute(
@@ -271,12 +242,16 @@ export class FederationService {
   async forwardTaskIdempotent(
     input: ForwardFederatedTaskInput,
   ): Promise<ForwardFederatedTaskResult> {
+    return await this.requireTaskForwarder(
+      "FederationService requires routing and delivery ports for idempotent forwarding",
+    ).forwardTaskIdempotent(input);
+  }
+
+  private requireTaskForwarder(message: string): FederationTaskForwarder {
     if (!this.taskForwarder) {
-      throw new Error(
-        "FederationService requires routing and delivery ports for idempotent forwarding",
-      );
+      throw new Error(message);
     }
-    return await this.taskForwarder.forwardTaskIdempotent(input);
+    return this.taskForwarder;
   }
 
   private buildBrokerCorrelationContext(

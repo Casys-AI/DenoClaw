@@ -217,6 +217,8 @@ Already synced into this worktree:
 - dedicated agent socket protocol and transport via:
   - `src/orchestration/agent_socket_protocol.ts`
   - `src/orchestration/transport.ts`
+  - `src/orchestration/transport_request_tracker.ts`
+  - `src/orchestration/transport_websocket_runtime.ts`
 - broker-side deployed agent routing support:
   - `/agent/socket`
   - `/agents/register`
@@ -272,6 +274,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/worker_pool_lifecycle.ts`: 198 lines
   - `src/agent/worker_pool_approval.ts`: 54 lines
   - `src/agent/worker_pool_types.ts`: 39 lines
+  - `src/orchestration/transport.ts`: 364 lines
+  - `src/orchestration/transport_request_tracker.ts`: 49 lines
+  - `src/orchestration/transport_websocket_runtime.ts`: 182 lines
 
 ## Priority order
 

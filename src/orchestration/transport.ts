@@ -4,15 +4,16 @@ import type {
   BrokerResponseMessage,
 } from "./types.ts";
 import { isBrokerResponseMessage } from "./types.ts";
-import {
-  createAgentSocketRegisterMessage,
-  DENOCLAW_AGENT_PROTOCOL,
-  isAgentSocketRegisteredMessage,
-} from "./agent_socket_protocol.ts";
+import { isAgentSocketRegisteredMessage } from "./agent_socket_protocol.ts";
 import type { AgentEntry } from "../shared/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
+import { BrokerTransportRequestTracker } from "./transport_request_tracker.ts";
+import {
+  type BrokerSocket,
+  WebSocketBrokerConnectionRuntime,
+} from "./transport_websocket_runtime.ts";
 
 /**
  * Transport-agnostic send/receive interface for broker communication.
@@ -43,16 +44,6 @@ export interface KvQueueTransportDeps {
   kv?: Deno.Kv;
 }
 
-type DenoWebSocketWithHeaders = {
-  new (
-    url: string,
-    options: {
-      headers: Record<string, string>;
-      protocols: string[];
-    },
-  ): WebSocket;
-};
-
 /**
  * BrokerTransport backed by Deno KV Queues.
  *
@@ -64,10 +55,9 @@ export class KvQueueTransport implements BrokerTransport {
   private agentId: string;
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
-  private pendingRequests = new Map<string, {
-    resolve: (value: BrokerResponseMessage) => void;
-    reject: (reason: unknown) => void;
-  }>();
+  private requestTracker = new BrokerTransportRequestTracker<
+    BrokerResponseMessage
+  >();
   private listening = false;
 
   constructor(agentId: string, deps: KvQueueTransportDeps = {}) {
@@ -98,11 +88,7 @@ export class KvQueueTransport implements BrokerTransport {
         }
         const response: BrokerResponseMessage = msg;
 
-        const pending = this.pendingRequests.get(response.id);
-        if (pending) {
-          this.pendingRequests.delete(response.id);
-          pending.resolve(response);
-        } else {
+        if (!this.requestTracker.resolve(response)) {
           log.debug(`Unexpected message: ${response.type} (${response.id})`);
         }
       } catch (err) {
@@ -137,41 +123,26 @@ export class KvQueueTransport implements BrokerTransport {
       timestamp: new Date().toISOString(),
     } as BrokerRequestMessage;
 
-    const promise = new Promise<BrokerResponseMessage>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(
-            new DenoClawError(
-              "BROKER_TIMEOUT",
-              { type: msg.type, to: msg.to, timeoutMs },
-              "Broker did not respond in time. Check broker is running.",
-            ),
-          );
-        }
-      }, timeoutMs);
-
-      this.pendingRequests.set(id, {
-        resolve: (value) => {
-          clearTimeout(timeoutId);
-          resolve(value);
-        },
-        reject: (reason) => {
-          clearTimeout(timeoutId);
-          reject(reason);
-        },
-      });
-    });
+    const promise = this.requestTracker.create(
+      id,
+      timeoutMs,
+      () =>
+        new DenoClawError(
+          "BROKER_TIMEOUT",
+          { type: msg.type, to: msg.to, timeoutMs },
+          "Broker did not respond in time. Check broker is running.",
+        ),
+    );
 
     try {
       await kv.enqueue(msg);
     } catch (err) {
-      this.pendingRequests.delete(id);
       const error = new DenoClawError(
         "BROKER_ENQUEUE_FAILED",
         { type: msg.type, to: msg.to, cause: String(err) },
         "KV enqueue failed. Check KV availability.",
       );
+      this.requestTracker.reject(id, error);
       throw error;
     }
     log.debug(`Request sent to broker: ${msg.type} (${id})`);
@@ -180,16 +151,13 @@ export class KvQueueTransport implements BrokerTransport {
   }
 
   close(): void {
-    for (const [id, pending] of this.pendingRequests) {
-      pending.reject(
-        new DenoClawError(
-          "BROKER_CLOSED",
-          { requestId: id },
-          "BrokerClient was closed",
-        ),
-      );
-    }
-    this.pendingRequests.clear();
+    this.requestTracker.rejectAll((requestId) =>
+      new DenoClawError(
+        "BROKER_CLOSED",
+        { requestId },
+        "BrokerClient was closed",
+      )
+    );
     if (this.kv && this.ownsKv) {
       this.kv.close();
       this.kv = null;
@@ -206,22 +174,10 @@ export interface WebSocketBrokerTransportDeps {
   config?: AgentEntry;
   onBrokerMessage?: (message: BrokerMessage) => void | Promise<void>;
 }
-
-export function resolveAgentSocketUrl(brokerUrl: string): string {
-  const url = new URL("/agent/socket", brokerUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
-}
-
-function createAgentSocket(url: string, authToken: string): WebSocket {
-  const DenoWebSocket = WebSocket as unknown as DenoWebSocketWithHeaders;
-  return new DenoWebSocket(url, {
-    headers: {
-      authorization: `Bearer ${authToken}`,
-    },
-    protocols: [DENOCLAW_AGENT_PROTOCOL],
-  });
-}
+export {
+  resolveAgentSocketUrl,
+  resolveAuthenticatedAgentSocketUrl,
+} from "./transport_websocket_runtime.ts";
 
 export class WebSocketBrokerTransport implements BrokerTransport {
   private agentId: string;
@@ -231,12 +187,12 @@ export class WebSocketBrokerTransport implements BrokerTransport {
   private endpoint?: string;
   private config?: AgentEntry;
   private onBrokerMessage?: (message: BrokerMessage) => void | Promise<void>;
-  private ws: WebSocket | null = null;
+  private ws: BrokerSocket | null = null;
   private connectPromise: Promise<void> | null = null;
-  private pendingRequests = new Map<string, {
-    resolve: (value: BrokerResponseMessage) => void;
-    reject: (reason: unknown) => void;
-  }>();
+  private requestTracker = new BrokerTransportRequestTracker<
+    BrokerResponseMessage
+  >();
+  private connectionRuntime: WebSocketBrokerConnectionRuntime;
 
   constructor(agentId: string, deps: WebSocketBrokerTransportDeps) {
     this.agentId = agentId;
@@ -254,6 +210,26 @@ export class WebSocketBrokerTransport implements BrokerTransport {
         "Provide authToken or getAuthToken for WebSocket broker transport",
       );
     }
+    this.connectionRuntime = new WebSocketBrokerConnectionRuntime({
+      agentId: this.agentId,
+      brokerUrl: this.brokerUrl,
+      endpoint: this.endpoint,
+      config: this.config,
+      resolveAuthToken: () => this.resolveAuthToken(),
+      onSocketMessage: (event) => {
+        void this.handleSocketMessage(event);
+      },
+      onSocketClose: () => {
+        this.ws = null;
+        this.requestTracker.rejectAll((requestId) =>
+          new DenoClawError(
+            "BROKER_CLOSED",
+            { requestId, agentId: this.agentId },
+            "Broker WebSocket disconnected",
+          )
+        );
+      },
+    });
   }
 
   async start(): Promise<void> {
@@ -283,66 +259,43 @@ export class WebSocketBrokerTransport implements BrokerTransport {
       timestamp: new Date().toISOString(),
     } as BrokerRequestMessage;
 
-    const promise = new Promise<BrokerResponseMessage>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(
-            new DenoClawError(
-              "BROKER_TIMEOUT",
-              { type: msg.type, to: msg.to, timeoutMs },
-              "Broker did not respond in time. Check broker connectivity.",
-            ),
-          );
-        }
-      }, timeoutMs);
-
-      this.pendingRequests.set(id, {
-        resolve: (value) => {
-          clearTimeout(timeoutId);
-          resolve(value);
-        },
-        reject: (reason) => {
-          clearTimeout(timeoutId);
-          reject(reason);
-        },
-      });
-    });
+    const promise = this.requestTracker.create(
+      id,
+      timeoutMs,
+      () =>
+        new DenoClawError(
+          "BROKER_TIMEOUT",
+          { type: msg.type, to: msg.to, timeoutMs },
+          "Broker did not respond in time. Check broker connectivity.",
+        ),
+    );
 
     try {
       ws.send(JSON.stringify(msg));
     } catch (err) {
-      this.pendingRequests.delete(id);
-      throw new DenoClawError(
+      const error = new DenoClawError(
         "BROKER_SEND_FAILED",
         { type: msg.type, to: msg.to, cause: String(err) },
         "Check agent WebSocket connectivity to the broker",
       );
+      this.requestTracker.reject(id, error);
+      throw error;
     }
 
     return promise;
   }
 
   close(): void {
-    for (const [id, pending] of this.pendingRequests) {
-      pending.reject(
-        new DenoClawError(
-          "BROKER_CLOSED",
-          { requestId: id },
-          "Broker transport was closed",
-        ),
-      );
-    }
-    this.pendingRequests.clear();
+    this.requestTracker.rejectAll((requestId) =>
+      new DenoClawError(
+        "BROKER_CLOSED",
+        { requestId },
+        "Broker transport was closed",
+      )
+    );
     this.connectPromise = null;
-    if (this.ws) {
-      try {
-        this.ws.close(1000, "Transport closed");
-      } catch {
-        // ignore close errors
-      }
-      this.ws = null;
-    }
+    this.connectionRuntime.close(this.ws);
+    this.ws = null;
   }
 
   private async ensureConnected(): Promise<void> {
@@ -361,61 +314,7 @@ export class WebSocketBrokerTransport implements BrokerTransport {
   }
 
   private async connect(): Promise<void> {
-    const socketUrl = resolveAgentSocketUrl(this.brokerUrl);
-    log.info(
-      `WebSocketBrokerTransport: connecting ${this.agentId} -> ${socketUrl}`,
-    );
-
-    const ws = createAgentSocket(socketUrl, await this.resolveAuthToken());
-    this.ws = ws;
-
-    ws.onmessage = (event) => {
-      void this.handleSocketMessage(event);
-    };
-
-    ws.onclose = () => {
-      this.ws = null;
-      for (const [id, pending] of this.pendingRequests) {
-        pending.reject(
-          new DenoClawError(
-            "BROKER_CLOSED",
-            { requestId: id, agentId: this.agentId },
-            "Broker WebSocket disconnected",
-          ),
-        );
-      }
-      this.pendingRequests.clear();
-    };
-
-    ws.onerror = (event) => {
-      log.error("WebSocketBrokerTransport: socket error", event);
-    };
-
-    await new Promise<void>((resolve, reject) => {
-      const onOpen = () => {
-        cleanup();
-        ws.send(
-          JSON.stringify(
-            createAgentSocketRegisterMessage({
-              agentId: this.agentId,
-              endpoint: this.endpoint,
-              config: this.config,
-            }),
-          ),
-        );
-        resolve();
-      };
-      const onError = (event: Event) => {
-        cleanup();
-        reject(event);
-      };
-      const cleanup = () => {
-        ws.removeEventListener("open", onOpen);
-        ws.removeEventListener("error", onError);
-      };
-      ws.addEventListener("open", onOpen);
-      ws.addEventListener("error", onError);
-    });
+    this.ws = await this.connectionRuntime.connect();
   }
 
   private async handleSocketMessage(event: MessageEvent): Promise<void> {
@@ -439,10 +338,7 @@ export class WebSocketBrokerTransport implements BrokerTransport {
 
     const msg = raw as BrokerMessage;
     if (isBrokerResponseMessage(msg)) {
-      const pending = this.pendingRequests.get(msg.id);
-      if (pending) {
-        this.pendingRequests.delete(msg.id);
-        pending.resolve(msg);
+      if (this.requestTracker.resolve(msg)) {
         return;
       }
     }

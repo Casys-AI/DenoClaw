@@ -271,6 +271,15 @@ After landing the refactor into the local checkpoint branch:
   - `src/telemetry/metrics.ts`
   - `src/telemetry/metrics_queries.ts`
   - `src/telemetry/metrics_types.ts`
+- sandbox backend permission/runtime concerns are now split between:
+  - `src/agent/tools/backends/local.ts`
+  - `src/agent/tools/backends/local_exec_policy.ts`
+  - `src/agent/tools/backends/local_process_runner.ts`
+  - `src/agent/tools/backends/sandbox_permissions.ts`
+  - `src/agent/tools/backends/permission_flags.ts`
+- local and cloud sandbox backends now share the same permission-intersection
+  rule before execution; VM isolation remains cloud-specific, but grant
+  semantics are no longer divergent
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -325,6 +334,12 @@ After landing the refactor into the local checkpoint branch:
   - `src/telemetry/metrics.ts`: 269 lines
   - `src/telemetry/metrics_queries.ts`: 335 lines
   - `src/telemetry/metrics_types.ts`: 58 lines
+  - `src/agent/tools/backends/local.ts`: 60 lines
+  - `src/agent/tools/backends/local_exec_policy.ts`: 149 lines
+  - `src/agent/tools/backends/local_process_runner.ts`: 128 lines
+  - `src/agent/tools/backends/sandbox_permissions.ts`: 53 lines
+  - `src/agent/tools/backends/permission_flags.ts`: 24 lines
+  - `src/agent/tools/backends/cloud.ts`: 198 lines
   - `src/orchestration/transport.ts`: 364 lines
   - `src/orchestration/transport_request_tracker.ts`: 49 lines
   - `src/orchestration/transport_websocket_runtime.ts`: 182 lines

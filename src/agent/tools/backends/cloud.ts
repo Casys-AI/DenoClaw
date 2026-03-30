@@ -17,38 +17,18 @@ import type {
   SandboxBackend,
   SandboxConfig,
   SandboxExecRequest,
-  SandboxPermission,
   ToolResult,
 } from "../../../shared/types.ts";
 import { log } from "../../../shared/log.ts";
+import { permissionToFlag } from "./permission_flags.ts";
+import {
+  computePermissionIntersection,
+  createPermissionDeniedResult,
+} from "./sandbox_permissions.ts";
 
 const TOOLS_LOCAL_PATH = new URL("../", import.meta.url).pathname;
 const TOOLS_SANDBOX_PATH = "/app/tools/";
 const EXECUTOR_SANDBOX_PATH = `${TOOLS_SANDBOX_PATH}tool_executor.ts`;
-
-/** Map SandboxPermission → Deno CLI flag (same logic as LocalProcessBackend). */
-function permissionToFlag(
-  perm: SandboxPermission,
-  networkAllow?: string[],
-): string {
-  switch (perm) {
-    case "read":
-      return "--allow-read";
-    case "write":
-      return "--allow-write";
-    case "run":
-      return "--allow-run";
-    case "net": {
-      return networkAllow?.length
-        ? `--allow-net=${networkAllow.join(",")}`
-        : "--allow-net";
-    }
-    case "env":
-      return "--allow-env";
-    case "ffi":
-      return "--allow-ffi";
-  }
-}
 
 export class DenoSandboxBackend implements SandboxBackend {
   readonly kind = "cloud" as const;
@@ -66,6 +46,15 @@ export class DenoSandboxBackend implements SandboxBackend {
   }
 
   async execute(req: SandboxExecRequest): Promise<ToolResult> {
+    const { granted, denied } = computePermissionIntersection(
+      req.permissions,
+      this.sandboxConfig.allowedPermissions,
+    );
+
+    if (denied.length > 0) {
+      return createPermissionDeniedResult(req, this.sandboxConfig, denied);
+    }
+
     // Design 4: honor security: "deny" even in cloud — it's a business decision, not isolation
     if (req.execPolicy.security === "deny" && req.tool === "shell") {
       return {
@@ -92,7 +81,7 @@ export class DenoSandboxBackend implements SandboxBackend {
 
     // Design 5: apply permission flags for parity with local backend
     const flags = [
-      ...req.permissions.map((p) => permissionToFlag(p, req.networkAllow)),
+      ...granted.map((perm) => permissionToFlag(perm, req.networkAllow)),
       "--allow-env=LOG_LEVEL,DENOCLAW_EXEC",
     ];
 

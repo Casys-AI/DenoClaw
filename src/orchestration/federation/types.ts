@@ -1,3 +1,5 @@
+import type { BrokerTaskSubmitPayload } from "../types.ts";
+
 export type FederationLinkState =
   | "opening"
   | "active"
@@ -83,7 +85,9 @@ export interface FederationDeadLetter {
   contextId: string;
   linkId: string;
   traceId: string;
+  task: BrokerTaskSubmitPayload & { contextId: string };
   payloadHash: string;
+  attempts: number;
   reason: string;
   movedAt: string;
 }

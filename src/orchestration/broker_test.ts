@@ -1316,6 +1316,7 @@ Deno.test(
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      const queuedMessages = createQueueCollector(kv);
       const handleHttp = (
         broker as unknown as {
           handleHttp(req: Request): Promise<Response>;
@@ -1368,7 +1369,14 @@ Deno.test(
               contextId: string;
               linkId: string;
               traceId: string;
+              task: {
+                targetAgent: string;
+                taskId: string;
+                contextId: string;
+                taskMessage: A2AMessage;
+              };
               payloadHash: string;
+              attempts: number;
               reason: string;
               movedAt: string;
             }): Promise<void>;
@@ -1426,7 +1434,14 @@ Deno.test(
         contextId: "ctx-stats",
         linkId: "broker-local:broker-remote",
         traceId: "trace-stats",
+        task: {
+          targetAgent: "agent-remote",
+          taskId: "task-stats",
+          contextId: "ctx-stats",
+          taskMessage: createMessage("Replay this task"),
+        },
         payloadHash: "hash",
+        attempts: 1,
         reason: "timeout",
         movedAt: new Date().toISOString(),
       });
@@ -1445,6 +1460,85 @@ Deno.test(
       assertEquals(stats.links[0].denials.policy, 1);
       assertEquals(stats.links[0].denials.auth, 1);
       assertEquals(stats.links[0].lastTaskId, "task-auth");
+
+      const deadLettersResponse = await handleHttp(
+        new Request(
+          "http://localhost/federation/dead-letters?remoteBrokerId=broker-remote",
+        ),
+      );
+      assertEquals(deadLettersResponse.status, 200);
+      const deadLetters = await deadLettersResponse.json();
+      assertEquals(deadLetters.length, 1);
+      assertEquals(deadLetters[0].deadLetterId, "dead-1");
+      assertEquals(deadLetters[0].task.targetAgent, "agent-remote");
+      assertEquals(deadLetters[0].attempts, 1);
+
+      const invalidReplayResponse = await handleHttp(
+        new Request("http://localhost/federation/dead-letter/replay", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            remoteBrokerId: "broker-remote",
+            deadLetterId: "",
+          }),
+        }),
+      );
+      assertEquals(invalidReplayResponse.status, 400);
+
+      const missingReplayResponse = await handleHttp(
+        new Request("http://localhost/federation/dead-letter/replay", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            remoteBrokerId: "broker-remote",
+            deadLetterId: "missing",
+          }),
+        }),
+      );
+      assertEquals(missingReplayResponse.status, 404);
+
+      const replayResponse = await handleHttp(
+        new Request("http://localhost/federation/dead-letter/replay", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            remoteBrokerId: "broker-remote",
+            deadLetterId: "dead-1",
+            maxAttempts: 1,
+          }),
+        }),
+      );
+      assertEquals(replayResponse.status, 200);
+      const replayBody = await replayResponse.json();
+      assertEquals(replayBody.ok, true);
+      assertEquals(replayBody.result.status, "forwarded");
+      const replayedTask = await waitForCollectedMessage(
+        queuedMessages,
+        (message) =>
+          message.type === "task_submit" && message.to === "agent-remote",
+      ) as Extract<BrokerMessage, { type: "task_submit" }>;
+      assertEquals(replayedTask.from, "broker-local");
+      assertEquals(replayedTask.payload.taskId, "task-stats");
+      assertEquals(replayedTask.payload.contextId, "ctx-stats");
+      assertEquals(replayedTask.payload.targetAgent, "agent-remote");
+
+      const deadLettersAfterReplayResponse = await handleHttp(
+        new Request(
+          "http://localhost/federation/dead-letters?remoteBrokerId=broker-remote",
+        ),
+      );
+      assertEquals(deadLettersAfterReplayResponse.status, 200);
+      const deadLettersAfterReplay = await deadLettersAfterReplayResponse.json();
+      assertEquals(deadLettersAfterReplay, []);
+
+      const statsAfterReplayResponse = await handleHttp(
+        new Request(
+          "http://localhost/federation/stats?remoteBrokerId=broker-remote",
+        ),
+      );
+      assertEquals(statsAfterReplayResponse.status, 200);
+      const statsAfterReplay = await statsAfterReplayResponse.json();
+      assertEquals(statsAfterReplay.deadLetterBacklog, 0);
 
       const rotateIdentityResponse = await handleHttp(
         new Request("http://localhost/federation/identity/rotate", {

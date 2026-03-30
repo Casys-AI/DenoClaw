@@ -82,6 +82,27 @@ export interface ForwardFederatedTaskResult {
   attempts: number;
 }
 
+export interface ReplayFederatedDeadLetterInput {
+  remoteBrokerId: string;
+  deadLetterId: string;
+  traceId: string;
+  maxAttempts?: number;
+  baseBackoffMs?: number;
+  maxBackoffMs?: number;
+}
+
+export class FederationDeadLetterNotFoundError extends Error {
+  constructor(
+    readonly remoteBrokerId: string,
+    readonly deadLetterId: string,
+  ) {
+    super(
+      `Federation dead-letter not found: ${remoteBrokerId}/${deadLetterId}`,
+    );
+    this.name = "FederationDeadLetterNotFoundError";
+  }
+}
+
 const DEFAULT_POLICY: FederatedRoutePolicy = {
   policyId: "default",
   preferLocal: false,
@@ -222,6 +243,54 @@ export class FederationService {
 
   async listIdentities(): Promise<BrokerIdentity[]> {
     return await this.identity.listIdentities({ traceId: crypto.randomUUID() });
+  }
+
+  async replayDeadLetter(
+    input: ReplayFederatedDeadLetterInput,
+  ): Promise<ForwardFederatedTaskResult> {
+    if (!this.routing || !this.delivery) {
+      throw new Error(
+        "FederationService requires routing and delivery ports for dead-letter replay",
+      );
+    }
+
+    const deadLetter = await this.delivery.getDeadLetter(
+      input.remoteBrokerId,
+      input.deadLetterId,
+    );
+    if (!deadLetter) {
+      throw new FederationDeadLetterNotFoundError(
+        input.remoteBrokerId,
+        input.deadLetterId,
+      );
+    }
+
+    const correlation = this.buildCorrelationContext({
+      remoteBrokerId: deadLetter.remoteBrokerId,
+      taskId: deadLetter.task.taskId,
+      contextId: deadLetter.task.contextId,
+      linkId: deadLetter.linkId,
+      traceId: input.traceId,
+    });
+
+    await this.delivery.deleteDeadLetter(
+      deadLetter.remoteBrokerId,
+      deadLetter.deadLetterId,
+    );
+    await this.delivery.deleteSubmissionRecord(
+      deadLetter.idempotencyKey,
+      correlation,
+    );
+
+    return await this.forwardTaskIdempotent({
+      remoteBrokerId: deadLetter.remoteBrokerId,
+      task: deadLetter.task,
+      maxAttempts: input.maxAttempts,
+      baseBackoffMs: input.baseBackoffMs,
+      maxBackoffMs: input.maxBackoffMs,
+      linkId: deadLetter.linkId,
+      traceId: input.traceId,
+    });
   }
 
   async probeRoute(
@@ -434,7 +503,9 @@ export class FederationService {
       contextId: correlation.contextId,
       linkId: correlation.linkId,
       traceId: correlation.traceId,
+      task: input.task,
       payloadHash,
+      attempts: record.attempts,
       reason: `forward_failed_after_${maxAttempts}_attempts:${lastError}`,
       movedAt: new Date().toISOString(),
     };

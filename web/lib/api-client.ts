@@ -8,6 +8,8 @@ import type {
   AgentMetrics,
   AgentStatusEntry,
   CronJob,
+  FederationDeadLetterEntry,
+  FederationReplayDeadLetterResponse,
   FederationStatsSnapshot,
   HealthResponse,
   MetricsSummary,
@@ -132,6 +134,58 @@ export function getFederationStats(
   return fetchJSON<FederationStatsSnapshot>("/federation/stats", options, {
     timeoutMs: 1_000,
   });
+}
+
+export function getFederationDeadLetters(
+  options?: string | BrokerRequestOptions,
+  remoteBrokerId?: string,
+): Promise<FederationDeadLetterEntry[] | null> {
+  const suffix = remoteBrokerId
+    ? `?remoteBrokerId=${encodeURIComponent(remoteBrokerId)}`
+    : "";
+  return fetchJSON<FederationDeadLetterEntry[]>(
+    `/federation/dead-letters${suffix}`,
+    options,
+    {
+      timeoutMs: 1_000,
+    },
+  );
+}
+
+export async function replayFederationDeadLetter(
+  input: {
+    remoteBrokerId: string;
+    deadLetterId: string;
+    maxAttempts?: number;
+    baseBackoffMs?: number;
+    maxBackoffMs?: number;
+  },
+  options?: string | BrokerRequestOptions,
+): Promise<
+  FederationReplayDeadLetterResponse | { ok: false; errorCode?: string } | null
+> {
+  const { brokerUrl, token } = resolveRequestOptions(options);
+  try {
+    const res = await fetch(`${brokerUrl}/federation/dead-letter/replay`, {
+      method: "POST",
+      headers: {
+        ...headers(token),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => null) as
+      | FederationReplayDeadLetterResponse
+      | { error?: { code?: string } }
+      | null;
+    if (res.ok) {
+      return body as FederationReplayDeadLetterResponse;
+    }
+    const errorCode = body && "error" in body ? body.error?.code : undefined;
+    return { ok: false, errorCode };
+  } catch {
+    return null;
+  }
 }
 
 export function getBrokerUrl(options?: string | BrokerRequestOptions): string {

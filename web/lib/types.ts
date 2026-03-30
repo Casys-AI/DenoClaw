@@ -109,3 +109,38 @@ export interface FederationStatsSnapshot {
   };
   deadLetterBacklog: number;
 }
+
+export interface FederationDeadLetterTask {
+  targetAgent: string;
+  taskId: string;
+  contextId: string;
+  taskMessage?: Record<string, unknown>;
+  message?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface FederationDeadLetterEntry {
+  deadLetterId: string;
+  idempotencyKey: string;
+  remoteBrokerId: string;
+  taskId: string;
+  contextId: string;
+  linkId: string;
+  traceId: string;
+  task: FederationDeadLetterTask;
+  payloadHash: string;
+  attempts: number;
+  reason: string;
+  movedAt: string;
+}
+
+export interface FederationReplayDeadLetterResult {
+  status: "forwarded" | "deduplicated" | "dead_letter";
+  idempotencyKey: string;
+  attempts: number;
+}
+
+export interface FederationReplayDeadLetterResponse {
+  ok: true;
+  result: FederationReplayDeadLetterResult;
+}

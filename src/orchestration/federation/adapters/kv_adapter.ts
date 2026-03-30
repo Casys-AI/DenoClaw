@@ -367,6 +367,40 @@ export class KvFederationAdapter
     await this.persistDeadLetterEntry(key, entry);
   }
 
+  async deleteSubmissionRecord(
+    idempotencyKey: string,
+    _correlation: FederationCorrelationContext,
+  ): Promise<void> {
+    await this.kv.delete([
+      "federation",
+      "submissions",
+      idempotencyKey,
+    ]);
+  }
+
+  async getDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<FederationDeadLetter | null> {
+    const entry = await this.kv.get<FederationDeadLetter>([
+      "federation",
+      "dead-letter",
+      remoteBrokerId,
+      deadLetterId,
+    ]);
+    return entry.value ?? null;
+  }
+
+  async deleteDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<void> {
+    await this.removeDeadLetterEntry(
+      ["federation", "dead-letter", remoteBrokerId, deadLetterId],
+      remoteBrokerId,
+    );
+  }
+
   async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
     const prefix: Deno.KvKey = remoteBrokerId
       ? ["federation", "dead-letter", remoteBrokerId]
@@ -438,6 +472,16 @@ export class KvFederationAdapter
     return {
       ...current,
       deadLetterBacklog: current.deadLetterBacklog + 1,
+    };
+  }
+
+  private decrementDeadLetterBacklog(
+    summary: FederationStatsSummaryAggregate | null | undefined,
+  ): FederationStatsSummaryAggregate {
+    const current = summary ?? this.emptySummaryAggregate();
+    return {
+      ...current,
+      deadLetterBacklog: Math.max(0, current.deadLetterBacklog - 1),
     };
   }
 
@@ -695,6 +739,46 @@ export class KvFederationAdapter
       if (committed.ok) return;
     }
     throw new Error("Failed to persist federation dead-letter aggregate");
+  }
+
+  private async removeDeadLetterEntry(
+    key: Deno.KvKey,
+    remoteBrokerId: string,
+  ): Promise<void> {
+    const globalSummaryKey = this.summaryKey();
+    const remoteSummaryKey = this.summaryKey(remoteBrokerId);
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
+        await Promise.all([
+          this.kv.get<FederationDeadLetter>(key),
+          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
+          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
+        ]);
+      if (!deadLetterEntry.value) return;
+      const nextGlobal = this.decrementDeadLetterBacklog(
+        globalSummaryEntry.value,
+      );
+      const nextRemote = this.decrementDeadLetterBacklog(
+        remoteSummaryEntry.value,
+      );
+      const committed = await this.kv
+        .atomic()
+        .check({ key, versionstamp: deadLetterEntry.versionstamp })
+        .check({
+          key: globalSummaryKey,
+          versionstamp: globalSummaryEntry.versionstamp,
+        })
+        .check({
+          key: remoteSummaryKey,
+          versionstamp: remoteSummaryEntry.versionstamp,
+        })
+        .delete(key)
+        .set(globalSummaryKey, nextGlobal)
+        .set(remoteSummaryKey, nextRemote)
+        .commit();
+      if (committed.ok) return;
+    }
+    throw new Error("Failed to delete federation dead-letter aggregate");
   }
 
   private async readAggregatedFederationStats(

@@ -649,6 +649,8 @@ Deno.test(
 
       const deadLetters = await adapter.listDeadLetters("broker-b");
       assertEquals(deadLetters.length, 1);
+      assertEquals(deadLetters[0].task.targetAgent, "agent-1");
+      assertEquals(deadLetters[0].attempts, 2);
       assertEquals(observability.events.length, 2);
       assertEquals(
         observability.events.every((event) => !event.success),
@@ -664,6 +666,130 @@ Deno.test(
       });
       assertEquals(replay.status, "dead_letter");
       assertEquals((await adapter.listDeadLetters("broker-b")).length, 1);
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "FederationService.replayDeadLetter replays a stored failed submission",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const routing = new FlakyRoutingPort(1);
+      const service = new FederationService(
+        adapter,
+        adapter,
+        adapter,
+        adapter,
+        routing,
+        adapter,
+      );
+
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
+        targetAgent: "agent-replay",
+        taskId: "task-replay",
+        contextId: "ctx-replay",
+        taskMessage: {
+          messageId: "msg-replay",
+          role: "user",
+          parts: [{ kind: "text", text: "retry me" }],
+        },
+      };
+
+      const initial = await service.forwardTaskIdempotent({
+        remoteBrokerId: "broker-b",
+        task,
+        maxAttempts: 1,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-replay-1",
+      });
+      assertEquals(initial.status, "dead_letter");
+
+      const deadLetters = await adapter.listDeadLetters("broker-b");
+      assertEquals(deadLetters.length, 1);
+
+      const replayed = await service.replayDeadLetter({
+        remoteBrokerId: "broker-b",
+        deadLetterId: deadLetters[0].deadLetterId,
+        traceId: "trace-replay-2",
+        maxAttempts: 1,
+      });
+      assertEquals(replayed.status, "forwarded");
+      assertEquals((await adapter.listDeadLetters("broker-b")).length, 0);
+
+      const replayedRecord = await adapter.getSubmissionRecord(
+        replayed.idempotencyKey,
+        {
+          remoteBrokerId: "broker-b",
+          taskId: "task-replay",
+          contextId: "ctx-replay",
+          linkId: "broker-a:broker-b",
+          traceId: "trace-replay-2",
+        },
+      );
+      assertEquals(replayedRecord?.status, "completed");
+      assertEquals(routing.calls, 2);
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "FederationService.replayDeadLetter keeps backlog stable when replay fails again",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const routing = new FlakyRoutingPort(2);
+      const service = new FederationService(
+        adapter,
+        adapter,
+        adapter,
+        adapter,
+        routing,
+        adapter,
+      );
+
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
+        targetAgent: "agent-replay",
+        taskId: "task-replay-fail",
+        contextId: "ctx-replay-fail",
+        taskMessage: {
+          messageId: "msg-replay-fail",
+          role: "user",
+          parts: [{ kind: "text", text: "retry me twice" }],
+        },
+      };
+
+      const initial = await service.forwardTaskIdempotent({
+        remoteBrokerId: "broker-b",
+        task,
+        maxAttempts: 1,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-replay-fail-1",
+      });
+      assertEquals(initial.status, "dead_letter");
+      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 1);
+
+      const [deadLetter] = await adapter.listDeadLetters("broker-b");
+      const replayed = await service.replayDeadLetter({
+        remoteBrokerId: "broker-b",
+        deadLetterId: deadLetter.deadLetterId,
+        traceId: "trace-replay-fail-2",
+        maxAttempts: 1,
+      });
+      assertEquals(replayed.status, "dead_letter");
+      assertEquals((await adapter.listDeadLetters("broker-b")).length, 1);
+      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 1);
+      assertEquals(routing.calls, 2);
     } finally {
       kv.close();
       await Deno.remove(kvPath);

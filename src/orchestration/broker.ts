@@ -41,8 +41,10 @@ import {
   type BrokerIdentity,
   createFederationControlRouter,
   type FederatedRoutePolicy,
+  FederationDeadLetterNotFoundError,
   type FederationControlEnvelope,
   type FederationControlHandlerMap,
+  type FederationRoutingPort,
   FederationService,
   isFederationControlMethod,
   KvFederationAdapter,
@@ -126,6 +128,7 @@ export class BrokerServer {
   private taskStore: TaskStore;
   private tunnels = new Map<string, TunnelConnection>();
   private federationAdapter: KvFederationAdapter | null = null;
+  private federationRoutingPort: FederationRoutingPort | null = null;
   private federationService: FederationService | null = null;
   private federationControlRouter = createFederationControlRouter(
     this.getFederationControlHandlers(),
@@ -924,11 +927,48 @@ export class BrokerServer {
       adapter,
       adapter,
       adapter,
-      undefined,
+      this.createFederationRoutingPort(),
       adapter,
       adapter,
     );
     return this.federationService;
+  }
+
+  private createFederationRoutingPort(): FederationRoutingPort {
+    if (this.federationRoutingPort) return this.federationRoutingPort;
+    this.federationRoutingPort = {
+      resolveTarget: async (_task, _policy, correlation) => ({
+        kind: "remote",
+        remoteBrokerId: correlation.remoteBrokerId,
+        reason: "federation_task_submit",
+      }),
+      forwardTask: async (task, remoteBrokerId, correlation) => {
+        const taskMessage = extractBrokerSubmitTaskMessage(task);
+        const localBrokerId = correlation.linkId.split(":")[0] || "broker";
+        try {
+          await this.routeBrokerMessageToAgent(task.targetAgent, {
+            id: generateId(),
+            from: localBrokerId,
+            to: task.targetAgent,
+            type: "task_submit",
+            payload: {
+              ...task,
+              taskId: correlation.taskId,
+              contextId: correlation.contextId,
+              taskMessage,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          throw new Error(
+            `federation_forward_failed:${remoteBrokerId}:${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      },
+    };
+    return this.federationRoutingPort;
   }
 
   private getFederationControlHandlers(): FederationControlHandlerMap {
@@ -1357,6 +1397,97 @@ export class BrokerServer {
         undefined;
       const adapter = await this.getFederationAdapter();
       return Response.json(await adapter.getFederationStats(remoteBrokerId));
+    }
+
+    if (req.method === "GET" && url.pathname === "/federation/dead-letters") {
+      const remoteBrokerId = url.searchParams.get("remoteBrokerId") ??
+        undefined;
+      const adapter = await this.getFederationAdapter();
+      const deadLetters = await adapter.listDeadLetters(remoteBrokerId);
+      deadLetters.sort((left, right) => right.movedAt.localeCompare(left.movedAt));
+      return Response.json(deadLetters);
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/federation/dead-letter/replay"
+    ) {
+      const body = (await req.json().catch(() => null)) as {
+        remoteBrokerId?: string;
+        deadLetterId?: string;
+        maxAttempts?: number;
+        baseBackoffMs?: number;
+        maxBackoffMs?: number;
+      } | null;
+      const invalidAttempts = body?.maxAttempts !== undefined &&
+        (!Number.isInteger(body.maxAttempts) || body.maxAttempts <= 0);
+      const invalidBaseBackoff = body?.baseBackoffMs !== undefined &&
+        (!Number.isFinite(body.baseBackoffMs) || body.baseBackoffMs < 0);
+      const invalidMaxBackoff = body?.maxBackoffMs !== undefined &&
+        (!Number.isFinite(body.maxBackoffMs) || body.maxBackoffMs < 0);
+      const invalidBackoffRange = body?.baseBackoffMs !== undefined &&
+        body?.maxBackoffMs !== undefined &&
+        body.baseBackoffMs > body.maxBackoffMs;
+      if (
+        !body ||
+        typeof body.remoteBrokerId !== "string" ||
+        body.remoteBrokerId.length === 0 ||
+        typeof body.deadLetterId !== "string" ||
+        body.deadLetterId.length === 0 ||
+        invalidAttempts ||
+        invalidBaseBackoff ||
+        invalidMaxBackoff ||
+        invalidBackoffRange
+      ) {
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_DEAD_LETTER_REPLAY_REQUEST",
+              recovery:
+                "Provide { remoteBrokerId, deadLetterId, maxAttempts?, baseBackoffMs?, maxBackoffMs? } with positive numeric overrides",
+            },
+          },
+          { status: 400 },
+        );
+      }
+
+      const service = await this.getFederationService();
+      const traceId = crypto.randomUUID();
+      try {
+        const result = await service.replayDeadLetter({
+          remoteBrokerId: body.remoteBrokerId,
+          deadLetterId: body.deadLetterId,
+          traceId,
+          maxAttempts: body.maxAttempts,
+          baseBackoffMs: body.baseBackoffMs,
+          maxBackoffMs: body.maxBackoffMs,
+        });
+        return Response.json({ ok: true, traceId, result });
+      } catch (error) {
+        if (error instanceof FederationDeadLetterNotFoundError) {
+          return Response.json(
+            {
+              error: {
+                code: "FEDERATION_DEAD_LETTER_NOT_FOUND",
+                recovery: "Refresh the dead-letter list and retry replay",
+              },
+            },
+            { status: 404 },
+          );
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return Response.json(
+          {
+            error: {
+              code: "FEDERATION_DEAD_LETTER_REPLAY_FAILED",
+              cause: message,
+              recovery:
+                "Inspect the dead-letter entry and broker logs before retrying",
+            },
+          },
+          { status: 500 },
+        );
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/federation/policy") {

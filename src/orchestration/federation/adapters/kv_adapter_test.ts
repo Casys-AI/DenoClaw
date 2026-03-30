@@ -202,7 +202,18 @@ Deno.test(
         contextId: "ctx-1",
         linkId: "broker-a:broker-b",
         traceId: "trace-1",
+        task: {
+          targetAgent: "agent-1",
+          taskId: "task-1",
+          contextId: "ctx-1",
+          taskMessage: {
+            messageId: "msg-1",
+            role: "user",
+            parts: [{ kind: "text", text: "hello" }],
+          },
+        },
         payloadHash: "hash-1",
+        attempts: 1,
         reason: "network_timeout",
         movedAt: new Date().toISOString(),
       }, correlation);
@@ -210,6 +221,14 @@ Deno.test(
       assertEquals(deadLetters.length, 1);
       assertEquals(deadLetters[0].reason, "network_timeout");
       assertEquals(deadLetters[0].traceId, "trace-1");
+      assertEquals(deadLetters[0].task.targetAgent, "agent-1");
+      assertEquals(deadLetters[0].attempts, 1);
+      const fetched = await adapter.getDeadLetter("broker-b", "dead-1");
+      assertEquals(fetched?.task.taskId, "task-1");
+      await adapter.deleteDeadLetter("broker-b", "dead-1");
+      assertEquals(await adapter.getDeadLetter("broker-b", "dead-1"), null);
+      const statsAfterDelete = await adapter.getFederationStats("broker-b");
+      assertEquals(statsAfterDelete.deadLetterBacklog, 0);
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -350,7 +369,18 @@ Deno.test(
         contextId: "ctx-3",
         linkId: "broker-a:broker-b",
         traceId: "trace-3",
+        task: {
+          targetAgent: "agent-3",
+          taskId: "task-3",
+          contextId: "ctx-3",
+          taskMessage: {
+            messageId: "msg-3",
+            role: "user",
+            parts: [{ kind: "text", text: "stats" }],
+          },
+        },
         payloadHash: "hash",
+        attempts: 2,
         reason: "timeout",
         movedAt: new Date().toISOString(),
       }, {

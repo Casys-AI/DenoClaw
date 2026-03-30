@@ -139,6 +139,18 @@ export interface FederationDeliveryPort {
     entry: FederationDeadLetter,
     correlation: FederationCorrelationContext,
   ): Promise<void>;
+  deleteSubmissionRecord(
+    idempotencyKey: string,
+    correlation: FederationCorrelationContext,
+  ): Promise<void>;
+  getDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<FederationDeadLetter | null>;
+  deleteDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<void>;
   listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]>;
 }
 

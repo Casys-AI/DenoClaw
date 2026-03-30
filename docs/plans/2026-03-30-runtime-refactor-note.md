@@ -280,6 +280,13 @@ After landing the refactor into the local checkpoint branch:
 - local and cloud sandbox backends now share the same permission-intersection
   rule before execution; VM isolation remains cloud-specific, but grant
   semantics are no longer divergent
+- broker transport is now split into a stable façade plus focused runtime
+  collaborators:
+  - `src/orchestration/transport.ts`
+  - `src/orchestration/transport_types.ts`
+  - `src/orchestration/transport_message_factory.ts`
+  - `src/orchestration/transport_kv_queue.ts`
+  - `src/orchestration/transport_websocket.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -340,7 +347,11 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/tools/backends/sandbox_permissions.ts`: 53 lines
   - `src/agent/tools/backends/permission_flags.ts`: 24 lines
   - `src/agent/tools/backends/cloud.ts`: 198 lines
-  - `src/orchestration/transport.ts`: 364 lines
+  - `src/orchestration/transport.ts`: 11 lines
+  - `src/orchestration/transport_types.ts`: 42 lines
+  - `src/orchestration/transport_message_factory.ts`: 14 lines
+  - `src/orchestration/transport_kv_queue.ts`: 132 lines
+  - `src/orchestration/transport_websocket.ts`: 205 lines
   - `src/orchestration/transport_request_tracker.ts`: 49 lines
   - `src/orchestration/transport_websocket_runtime.ts`: 182 lines
 

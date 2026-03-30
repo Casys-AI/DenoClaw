@@ -4,8 +4,10 @@
   "exports": "./mod.ts",
   "nodeModulesDir": "auto",
   "tasks": {
-    "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all --env main.ts",
-    "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts",
+    "dev": "deno run --watch --unstable-kv --unstable-cron --allow-all --env main.ts dev",
+    "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts dev",
+    "deploy": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts deploy",
+    "publish": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts publish",
     "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
     "dashboard": "deno run -A npm:vite --config vite.config.ts",
     "dashboard:build": "deno run -A npm:vite build --config vite.config.ts",

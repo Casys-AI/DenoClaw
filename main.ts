@@ -373,6 +373,7 @@ Options:
 try {
   switch (command) {
     case "setup":
+      console.log("⚠ 'denoclaw setup' is deprecated. Use 'denoclaw init' instead.\n");
       switch (subcommand) {
         case "provider":
           await setupProvider();
@@ -438,34 +439,38 @@ try {
       break;
     }
 
+    case "dev": {
+      const config = await getConfig();
+      if (args.agent) {
+        await agent(config);
+      } else {
+        await gateway(config);
+      }
+      break;
+    }
+
     case undefined: {
-      // On Deno Deploy: auto-start gateway (no CLI, no interactive mode)
+      // On Deno Deploy: auto-start gateway
       if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
         const config = await getConfigOrDefault();
         await gateway(config);
         break;
       }
 
-      const config2 = await getConfigOrDefault();
-      const hasProvider2 = Object.values(config2.providers).some((p) =>
-        p?.apiKey || p?.enabled
-      );
-      if (!hasProvider2) {
-        console.log("No provider configured. Starting initial setup.\n");
-        await init();
-        break;
-      }
-      await agent(config2);
+      // Locally: show help
+      help();
       break;
     }
 
     case "gateway": {
+      console.log("⚠ 'denoclaw gateway' is deprecated. Use 'denoclaw dev' instead.\n");
       const config = await getConfig();
       await gateway(config);
       break;
     }
 
     case "broker": {
+      console.log("⚠ 'denoclaw broker' is deprecated. Use 'denoclaw deploy' for production.\n");
       const config = await getConfig();
       await broker(config);
       break;

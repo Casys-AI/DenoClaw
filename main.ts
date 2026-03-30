@@ -29,6 +29,7 @@ import {
 } from "./src/orchestration/monitoring.ts";
 import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
+import { initCliFlags } from "./src/cli/output.ts";
 import { log } from "./src/shared/log.ts";
 import { createDashboardHandler } from "./web/mod.ts";
 
@@ -43,11 +44,15 @@ const args = parseArgs(Deno.args, {
     "permissions",
     "peers",
     "accept-from",
+    "org",
+    "app",
   ],
-  boolean: ["force"],
-  alias: { m: "message", s: "session", a: "agent" },
+  boolean: ["force", "json", "yes"],
+  alias: { m: "message", s: "session", a: "agent", y: "yes" },
   default: { session: "default" },
 });
+
+initCliFlags({ json: !!args.json, yes: !!args.yes });
 
 const command = args._[0] as string | undefined;
 const subcommand = args._[1] as string | undefined;
@@ -335,46 +340,31 @@ function help(): void {
   console.log(`
 DenoClaw — Agent IA Deno-natif
 
-Startup:
-  denoclaw init               Guided setup (provider + channel + agent)
-
-Setup:
-  denoclaw setup provider     Configure an LLM provider
-  denoclaw setup channel      Configure a channel (Telegram, webhook)
-  denoclaw setup agent        Configure the agent (model, temperature, etc.)
+Workflow:
+  denoclaw init                 Guided setup (provider + channel + agent)
+  denoclaw dev                  Work locally (gateway + agents + dashboard)
+  denoclaw deploy               Deploy/update the broker on Deno Deploy
+  denoclaw publish [agent]      Push agent(s) to the remote broker
+  denoclaw status               Show local + remote status
+  denoclaw logs                 Stream broker logs
 
 Agents:
-  denoclaw agent              Interactive chat (default agent)
-  denoclaw agent -m "msg"     One-off message
-  denoclaw agent list         List all agents
-  denoclaw agent create <name> Create an agent (model, permissions, channel)
-  denoclaw agent delete <name> Delete an agent
+  denoclaw agent list           List all agents
+  denoclaw agent create <name>  Create an agent
+  denoclaw agent delete <name>  Delete an agent
 
-Usage:
-  denoclaw gateway            Start the multi-channel gateway
-  denoclaw status             Show system status
-
-Infra:
-  denoclaw broker             Start the broker (LLM proxy + message router)
-  denoclaw tunnel             Connect a local tunnel to the broker
-
-Publish:
-  denoclaw publish agent      Deploy an agent to Deno Subhosting
-  denoclaw publish gateway    Deploy the gateway to Deno Deploy
+Advanced:
+  denoclaw tunnel [url]         Connect a local tunnel to the broker
 
 Options:
-  -m, --message    Send a one-off message
+  -m, --message    Send a one-off message (with dev --agent)
   -s, --session    Session ID (default: "default")
+  -a, --agent      Target agent
   --model          Override the LLM model
-
-Examples:
-  denoclaw setup provider                      # configure Anthropic, Ollama, etc.
-  denoclaw setup channel                       # configure Telegram
-  denoclaw agent -m "Hello"                    # one-off message
-  denoclaw agent --model ollama/nemotron-3-super       # use Ollama
-  denoclaw agent --model claude-cli            # use Claude Code CLI
-  denoclaw gateway                             # start the multi-channel server
-  denoclaw publish gateway                     # deploy to Deno Deploy
+  --org            Deno Deploy organization
+  --app            Deno Deploy app name
+  --json           Structured JSON output (AX mode)
+  --yes, -y        Skip all confirmations
 `);
 }
 

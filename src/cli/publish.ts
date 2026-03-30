@@ -1,12 +1,12 @@
-import type { AgentDefaults } from "../agent/types.ts";
 import type { AgentEntry } from "../shared/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
 import { getDeployOrgToken } from "../shared/deploy_credentials.ts";
-import { deriveAgentKvName } from "../shared/naming.ts";
 import { ask, confirm, error, print, success } from "./prompt.ts";
 import { cliFlags, output, outputError } from "./output.ts";
 import { generateAgentEntrypoint } from "./setup/mod.ts";
+import { materializePublishedEntry } from "./publish_entry.ts";
+import { ensureAgentKvDatabase as ensureAgentKvDatabaseAssignment } from "./publish_kv.ts";
 import {
   buildDeployAssets,
   createDeployApiHeaders,
@@ -129,82 +129,6 @@ export async function publishAgents(agentName?: string): Promise<void> {
     };
   }
 
-  async function ensureAgentKvDatabase(
-    agentId: string,
-    appSlug: string,
-  ): Promise<void> {
-    const kvDatabase = deriveAgentKvName(agentId);
-    const brokerKvDatabase = config.deploy?.kvDatabase;
-
-    const provisionResult = await runDeployCli([
-      "deploy",
-      "database",
-      "provision",
-      kvDatabase,
-      "--kind",
-      "denokv",
-      "--org",
-      resolvedDeployOrg,
-    ]);
-
-    const provisionOutput =
-      `${provisionResult.stdout}\n${provisionResult.stderr}`;
-    if (
-      !provisionResult.success &&
-      !provisionOutput.includes("The requested slug is already in use.")
-    ) {
-      throw new Error(
-        `failed to provision agent KV ${kvDatabase}: ${provisionOutput.trim()}`
-          .trim(),
-      );
-    }
-
-    if (brokerKvDatabase && brokerKvDatabase !== kvDatabase) {
-      const detachResult = await runDeployCli([
-        "deploy",
-        "database",
-        "detach",
-        brokerKvDatabase,
-        "--org",
-        resolvedDeployOrg,
-        "--app",
-        appSlug,
-      ]);
-      const detachOutput = `${detachResult.stdout}\n${detachResult.stderr}`;
-      if (
-        !detachResult.success &&
-        !detachOutput.includes("not assigned") &&
-        !detachOutput.includes("not found")
-      ) {
-        throw new Error(
-          `failed to detach broker KV ${brokerKvDatabase} from ${appSlug}: ${detachOutput.trim()}`
-            .trim(),
-        );
-      }
-    }
-
-    const assignResult = await runDeployCli([
-      "deploy",
-      "database",
-      "assign",
-      kvDatabase,
-      "--org",
-      resolvedDeployOrg,
-      "--app",
-      appSlug,
-    ]);
-    const assignOutput = `${assignResult.stdout}\n${assignResult.stderr}`;
-    if (
-      !assignResult.success &&
-      !assignOutput.includes("already has a Deno KV database assigned.")
-    ) {
-      throw new Error(
-        `failed to assign agent KV ${kvDatabase} to ${appSlug}: ${assignOutput.trim()}`
-          .trim(),
-      );
-    }
-  }
-
   const results: {
     id: string;
     ok: boolean;
@@ -236,7 +160,13 @@ export async function publishAgents(agentName?: string): Promise<void> {
     }
 
     try {
-      await ensureAgentKvDatabase(id, app.slug);
+      await ensureAgentKvDatabaseAssignment({
+        agentId: id,
+        appSlug: app.slug,
+        deployOrg: resolvedDeployOrg,
+        brokerKvDatabase: config.deploy?.kvDatabase,
+        runDeployCli,
+      });
     } catch (kvError) {
       const message = kvError instanceof Error
         ? kvError.message
@@ -319,28 +249,4 @@ export async function publishAgents(agentName?: string): Promise<void> {
     { published, total: results.length, results },
     `\n✓ ${published}/${results.length} agent(s) published to Deno Deploy v2`,
   );
-}
-
-function materializePublishedEntry(
-  entry: AgentEntry,
-  defaults: AgentDefaults,
-): AgentEntry {
-  const sandbox = entry.sandbox
-    ? {
-      ...(defaults.sandbox ?? {}),
-      ...entry.sandbox,
-      allowedPermissions: entry.sandbox.allowedPermissions,
-    }
-    : defaults.sandbox
-    ? { ...defaults.sandbox }
-    : undefined;
-
-  return {
-    ...entry,
-    model: entry.model ?? defaults.model,
-    temperature: entry.temperature ?? defaults.temperature,
-    maxTokens: entry.maxTokens ?? defaults.maxTokens,
-    systemPrompt: entry.systemPrompt ?? defaults.systemPrompt,
-    ...(sandbox ? { sandbox } : {}),
-  };
 }

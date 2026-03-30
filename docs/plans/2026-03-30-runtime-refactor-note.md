@@ -263,6 +263,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/gateway/agent_routes.ts`
   - `src/orchestration/gateway/monitoring_routes.ts`
   - `src/orchestration/gateway/http_router.ts` remains only as a compatibility shim
+- agent publish flow now isolates:
+  - `src/cli/publish.ts`
+  - `src/cli/publish_entry.ts`
+  - `src/cli/publish_kv.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -309,6 +313,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/worker_pool_lifecycle.ts`: 198 lines
   - `src/agent/worker_pool_approval.ts`: 54 lines
   - `src/agent/worker_pool_types.ts`: 39 lines
+  - `src/cli/publish.ts`: 252 lines
+  - `src/cli/publish_entry.ts`: 26 lines
+  - `src/cli/publish_kv.ts`: 93 lines
   - `src/cli/setup/broker_deploy.ts`: 320 lines
   - `src/cli/setup/broker_deploy_naming.ts`: 52 lines
   - `src/orchestration/transport.ts`: 364 lines

@@ -394,7 +394,6 @@ try {
     case "deploy": {
       const subCmd = args._[1] as string | undefined;
       if (subCmd === "agent") {
-        // backward compat
         console.log(
           "⚠ 'denoclaw deploy agent' is deprecated. Use 'denoclaw publish <agent>' instead.\n",
         );
@@ -409,13 +408,12 @@ try {
       break;
     }
 
-    case "publish":
-      if (subcommand === "agent") {
-        await publishAgent();
-      } else {
-        console.log("Usage: denoclaw publish agent");
-      }
+    case "publish": {
+      const { publishAgents } = await import("./src/cli/publish.ts");
+      const target = args._[1] as string | undefined;
+      await publishAgents(target);
       break;
+    }
 
     case "init": {
       await init();

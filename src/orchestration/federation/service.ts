@@ -13,9 +13,11 @@ import type {
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
   FederationAuthorizationDecision,
+  FederationBrokerCorrelationContext,
   FederationCorrelationContext,
   FederationDeadLetter,
   FederationLink,
+  FederationLinkCorrelationContext,
   FederationSessionToken,
   RemoteAgentCatalogEntry,
   SignedCatalogEnvelope,
@@ -31,12 +33,16 @@ export interface FederationLinkOpenInput {
   localBrokerId: string;
   remoteBrokerId: string;
   requestedBy: string;
+  traceId: string;
 }
 
 export interface FederationRouteProbeInput {
   requesterBrokerId: string;
   remoteBrokerId: string;
   targetAgent: string;
+  taskId: string;
+  contextId: string;
+  traceId: string;
 }
 
 export interface FederationRouteProbeResult {
@@ -60,11 +66,12 @@ export interface FederationAuthorizationResult {
 
 export interface ForwardFederatedTaskInput {
   remoteBrokerId: string;
-  task: BrokerTaskSubmitPayload;
+  task: BrokerTaskSubmitPayload & { contextId: string };
   maxAttempts?: number;
   baseBackoffMs?: number;
   maxBackoffMs?: number;
-  linkId?: string;
+  linkId: string;
+  traceId: string;
 }
 
 export interface ForwardFederatedTaskResult {
@@ -99,15 +106,27 @@ export class FederationService {
       localBrokerId: input.localBrokerId,
       remoteBrokerId: input.remoteBrokerId,
       requestedBy: input.requestedBy,
+      correlation: this.buildLinkCorrelationContext({
+        linkId: input.linkId,
+        remoteBrokerId: input.remoteBrokerId,
+        traceId: input.traceId,
+      }),
     });
   }
 
-  async acknowledgeLink(linkId: string, accepted: boolean): Promise<void> {
-    await this.control.acknowledgeLink(linkId, accepted);
+  async acknowledgeLink(
+    correlation: FederationLinkCorrelationContext,
+    accepted: boolean,
+  ): Promise<void> {
+    await this.control.acknowledgeLink(
+      correlation.linkId,
+      accepted,
+      this.buildLinkCorrelationContext(correlation),
+    );
   }
 
   async rotateLinkSession(
-    linkId: string,
+    correlation: FederationLinkCorrelationContext,
     ttlSeconds?: number,
   ): Promise<FederationSessionToken> {
     if (
@@ -116,18 +135,34 @@ export class FederationService {
     ) {
       throw new Error("ttlSeconds must be a positive number");
     }
-    return await this.control.rotateLinkSession(linkId, ttlSeconds);
+    return await this.control.rotateLinkSession(
+      correlation.linkId,
+      this.buildLinkCorrelationContext(correlation),
+      ttlSeconds,
+    );
   }
 
   async syncCatalog(
     remoteBrokerId: string,
     entries: RemoteAgentCatalogEntry[],
+    correlation: FederationBrokerCorrelationContext,
   ): Promise<void> {
-    await this.discovery.setRemoteCatalog(remoteBrokerId, entries);
+    await this.discovery.setRemoteCatalog(
+      remoteBrokerId,
+      entries,
+      this.buildBrokerCorrelationContext(correlation),
+    );
   }
 
   async syncSignedCatalog(envelope: SignedCatalogEnvelope): Promise<void> {
-    const identity = await this.identity.getIdentity(envelope.remoteBrokerId);
+    const correlation = this.buildBrokerCorrelationContext({
+      remoteBrokerId: envelope.remoteBrokerId,
+      traceId: crypto.randomUUID(),
+    });
+    const identity = await this.identity.getIdentity(
+      envelope.remoteBrokerId,
+      { traceId: correlation.traceId },
+    );
     if (!identity || identity.status !== "trusted") {
       throw new Error(
         `Federation identity is not trusted for broker ${envelope.remoteBrokerId}`,
@@ -147,34 +182,44 @@ export class FederationService {
     await this.discovery.setRemoteCatalog(
       envelope.remoteBrokerId,
       envelope.entries,
+      correlation,
     );
   }
 
-  async closeLink(linkId: string): Promise<void> {
-    await this.control.terminateLink(linkId);
+  async closeLink(correlation: FederationLinkCorrelationContext): Promise<void> {
+    await this.control.terminateLink(
+      correlation.linkId,
+      this.buildLinkCorrelationContext(correlation),
+    );
   }
 
   async upsertIdentity(identity: BrokerIdentity): Promise<void> {
-    await this.identity.upsertIdentity(identity);
+    await this.identity.upsertIdentity(identity, { traceId: crypto.randomUUID() });
   }
 
   async revokeIdentity(brokerId: string): Promise<void> {
-    await this.identity.revokeIdentity(brokerId);
+    await this.identity.revokeIdentity(brokerId, { traceId: crypto.randomUUID() });
   }
 
   async rotateIdentityKey(
     brokerId: string,
     nextPublicKey: string,
   ): Promise<BrokerIdentity> {
-    return await this.identity.rotateIdentityKey(brokerId, nextPublicKey);
+    return await this.identity.rotateIdentityKey(
+      brokerId,
+      nextPublicKey,
+      { traceId: crypto.randomUUID() },
+    );
   }
 
   async getIdentity(brokerId: string): Promise<BrokerIdentity | null> {
-    return await this.identity.getIdentity(brokerId);
+    return await this.identity.getIdentity(brokerId, {
+      traceId: crypto.randomUUID(),
+    });
   }
 
   async listIdentities(): Promise<BrokerIdentity[]> {
-    return await this.identity.listIdentities();
+    return await this.identity.listIdentities({ traceId: crypto.randomUUID() });
   }
 
   async probeRoute(
@@ -198,10 +243,20 @@ export class FederationService {
   async evaluateRouteAuthorization(
     input: FederationRouteProbeInput,
   ): Promise<FederationAuthorizationResult> {
+    const correlation = this.buildCorrelationContext({
+      remoteBrokerId: input.remoteBrokerId,
+      taskId: input.taskId,
+      contextId: input.contextId,
+      linkId: `${input.requesterBrokerId}:${input.remoteBrokerId}`,
+      traceId: input.traceId,
+    });
     const requesterPolicy =
-      (await this.policy.getRoutePolicy(input.requesterBrokerId)) ??
+      (await this.policy.getRoutePolicy(input.requesterBrokerId, correlation)) ??
         DEFAULT_POLICY;
-    const remotePolicy = await this.policy.getRoutePolicy(input.remoteBrokerId);
+    const remotePolicy = await this.policy.getRoutePolicy(
+      input.remoteBrokerId,
+      correlation,
+    );
 
     const localDenied =
       requesterPolicy.denyAgentIds.includes(input.targetAgent) ||
@@ -227,7 +282,10 @@ export class FederationService {
       };
     }
 
-    const catalog = await this.discovery.listRemoteAgents(input.remoteBrokerId);
+    const catalog = await this.discovery.listRemoteAgents(
+      input.remoteBrokerId,
+      correlation,
+    );
     const available = catalog.some(
       (entry) => entry.agentId === input.targetAgent,
     );
@@ -253,6 +311,13 @@ export class FederationService {
       );
     }
 
+    const correlation = this.buildCorrelationContext({
+      remoteBrokerId: input.remoteBrokerId,
+      taskId: input.task.taskId,
+      contextId: input.task.contextId,
+      linkId: input.linkId,
+      traceId: input.traceId,
+    });
     const now = new Date().toISOString();
     const payloadHash = await this.computePayloadHash(input.task);
     const idempotencyKey =
@@ -264,15 +329,21 @@ export class FederationService {
       idempotencyKey,
       remoteBrokerId: input.remoteBrokerId,
       taskId: input.task.taskId,
+      contextId: correlation.contextId,
+      linkId: correlation.linkId,
+      traceId: correlation.traceId,
       payloadHash,
       status: "in_flight",
       createdAt: now,
       updatedAt: now,
       attempts: 0,
     };
-    const created = await this.delivery.createSubmissionRecord(initialRecord);
+    const created = await this.delivery.createSubmissionRecord(
+      initialRecord,
+      correlation,
+    );
     if (!created) {
-      return await this.waitForSettledSubmission(idempotencyKey);
+      return await this.waitForSettledSubmission(idempotencyKey, correlation);
     }
 
     let record = initialRecord;
@@ -285,17 +356,20 @@ export class FederationService {
         status: "in_flight",
         updatedAt: new Date().toISOString(),
       };
-      await this.delivery.upsertSubmissionRecord(record);
+      await this.delivery.upsertSubmissionRecord(record, correlation);
       const attemptStartedAt = Date.now();
 
       try {
-        await this.routing.forwardTask(input.task, input.remoteBrokerId);
+        await this.routing.forwardTask(
+          input.task,
+          input.remoteBrokerId,
+          correlation,
+        );
         const latencyMs = Date.now() - attemptStartedAt;
         await this.recordHop({
+          ...correlation,
           remoteBrokerId: input.remoteBrokerId,
           taskId: input.task.taskId,
-          contextId: input.task.contextId,
-          linkId: input.linkId,
           latencyMs,
           success: true,
         });
@@ -306,7 +380,7 @@ export class FederationService {
           resultRef: `${input.remoteBrokerId}:${input.task.taskId}`,
           lastErrorCode: undefined,
         };
-        await this.delivery.upsertSubmissionRecord(completed);
+        await this.delivery.upsertSubmissionRecord(completed, correlation);
         return {
           status: "forwarded",
           idempotencyKey,
@@ -316,10 +390,9 @@ export class FederationService {
         lastError = error instanceof Error ? error.message : String(error);
         const latencyMs = Date.now() - attemptStartedAt;
         await this.recordHop({
+          ...correlation,
           remoteBrokerId: input.remoteBrokerId,
           taskId: input.task.taskId,
-          contextId: input.task.contextId,
-          linkId: input.linkId,
           latencyMs,
           success: false,
           errorCode: lastError,
@@ -329,7 +402,7 @@ export class FederationService {
           lastErrorCode: lastError,
           updatedAt: new Date().toISOString(),
         };
-        await this.delivery.upsertSubmissionRecord(record);
+        await this.delivery.upsertSubmissionRecord(record, correlation);
         if (record.attempts < maxAttempts) {
           await this.sleep(
             this.nextBackoffMs(record.attempts, baseBackoffMs, maxBackoffMs),
@@ -343,19 +416,22 @@ export class FederationService {
       idempotencyKey,
       remoteBrokerId: input.remoteBrokerId,
       taskId: input.task.taskId,
+      contextId: correlation.contextId,
+      linkId: correlation.linkId,
+      traceId: correlation.traceId,
       payloadHash,
       reason: `forward_failed_after_${maxAttempts}_attempts:${lastError}`,
       movedAt: new Date().toISOString(),
     };
 
-    await this.delivery.moveToDeadLetter(deadLetter);
+    await this.delivery.moveToDeadLetter(deadLetter, correlation);
     const deadLetterRecord: FederatedSubmissionRecord = {
       ...record,
       status: "dead_letter",
       updatedAt: new Date().toISOString(),
       lastErrorCode: lastError,
     };
-    await this.delivery.upsertSubmissionRecord(deadLetterRecord);
+    await this.delivery.upsertSubmissionRecord(deadLetterRecord, correlation);
     return {
       status: "dead_letter",
       idempotencyKey,
@@ -385,10 +461,14 @@ export class FederationService {
 
   private async waitForSettledSubmission(
     idempotencyKey: string,
+    correlation: FederationCorrelationContext,
   ): Promise<ForwardFederatedTaskResult> {
     const deadline = Date.now() + SUBMISSION_SETTLE_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const existing = await this.delivery?.getSubmissionRecord(idempotencyKey);
+      const existing = await this.delivery?.getSubmissionRecord(
+        idempotencyKey,
+        correlation,
+      );
       if (existing?.status === "completed") {
         return {
           status: "deduplicated",
@@ -406,7 +486,10 @@ export class FederationService {
       await this.sleep(SUBMISSION_SETTLE_POLL_MS);
     }
 
-    const existing = await this.delivery?.getSubmissionRecord(idempotencyKey);
+    const existing = await this.delivery?.getSubmissionRecord(
+      idempotencyKey,
+      correlation,
+    );
     return {
       status: existing?.status === "dead_letter"
         ? "dead_letter"
@@ -425,14 +508,46 @@ export class FederationService {
   ): Promise<void> {
     if (!this.observability) return;
     await this.observability.recordCrossBrokerHop({
-      linkId: input.linkId ?? `federation:${input.remoteBrokerId}`,
+      linkId: input.linkId,
       remoteBrokerId: input.remoteBrokerId,
       taskId: input.taskId,
       contextId: input.contextId,
+      traceId: input.traceId,
       latencyMs: input.latencyMs,
       success: input.success,
       errorCode: input.errorCode,
       occurredAt: new Date().toISOString(),
     });
+  }
+
+  private buildBrokerCorrelationContext(
+    context: FederationBrokerCorrelationContext,
+  ): FederationBrokerCorrelationContext {
+    return {
+      remoteBrokerId: context.remoteBrokerId,
+      traceId: context.traceId,
+    };
+  }
+
+  private buildLinkCorrelationContext(
+    context: FederationLinkCorrelationContext,
+  ): FederationLinkCorrelationContext {
+    return {
+      remoteBrokerId: context.remoteBrokerId,
+      linkId: context.linkId,
+      traceId: context.traceId,
+    };
+  }
+
+  private buildCorrelationContext(
+    context: FederationCorrelationContext,
+  ): FederationCorrelationContext {
+    return {
+      remoteBrokerId: context.remoteBrokerId,
+      taskId: context.taskId,
+      contextId: context.contextId,
+      linkId: context.linkId,
+      traceId: context.traceId,
+    };
   }
 }

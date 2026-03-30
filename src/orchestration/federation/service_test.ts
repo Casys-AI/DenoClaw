@@ -11,13 +11,20 @@ import type {
   FederationObservabilityPort,
   FederationRoutingPort,
 } from "./ports.ts";
-import type { FederatedRoutePolicy } from "./types.ts";
+import type {
+  FederatedRoutePolicy,
+  FederationCorrelationContext,
+} from "./types.ts";
 
 class FlakyRoutingPort implements FederationRoutingPort {
   public calls = 0;
   constructor(private readonly failuresBeforeSuccess: number) {}
 
-  resolveTarget(_task: BrokerTaskSubmitPayload, _policy: FederatedRoutePolicy) {
+  resolveTarget(
+    _task: BrokerTaskSubmitPayload,
+    _policy: FederatedRoutePolicy,
+    _correlation: FederationCorrelationContext,
+  ) {
     return Promise.resolve({
       kind: "remote" as const,
       remoteBrokerId: "broker-b",
@@ -25,7 +32,11 @@ class FlakyRoutingPort implements FederationRoutingPort {
     });
   }
 
-  forwardTask(): Promise<void> {
+  forwardTask(
+    _task: BrokerTaskSubmitPayload,
+    _remoteBrokerId: string,
+    _correlation: FederationCorrelationContext,
+  ): Promise<void> {
     this.calls += 1;
     if (this.calls <= this.failuresBeforeSuccess) {
       return Promise.reject(new Error("temporary_network_error"));
@@ -37,7 +48,11 @@ class FlakyRoutingPort implements FederationRoutingPort {
 class DelayedRoutingPort implements FederationRoutingPort {
   public calls = 0;
 
-  resolveTarget(_task: BrokerTaskSubmitPayload, _policy: FederatedRoutePolicy) {
+  resolveTarget(
+    _task: BrokerTaskSubmitPayload,
+    _policy: FederatedRoutePolicy,
+    _correlation: FederationCorrelationContext,
+  ) {
     return Promise.resolve({
       kind: "remote" as const,
       remoteBrokerId: "broker-b",
@@ -45,7 +60,11 @@ class DelayedRoutingPort implements FederationRoutingPort {
     });
   }
 
-  async forwardTask(): Promise<void> {
+  async forwardTask(
+    _task: BrokerTaskSubmitPayload,
+    _remoteBrokerId: string,
+    _correlation: FederationCorrelationContext,
+  ): Promise<void> {
     this.calls += 1;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -76,36 +95,60 @@ Deno.test(
       const adapter = new KvFederationAdapter(kv);
       const service = new FederationService(adapter, adapter, adapter, adapter);
 
-      await adapter.setRemoteCatalog("broker-b", [
+      await adapter.setRemoteCatalog(
+        "broker-b",
+        [
+          {
+            remoteBrokerId: "broker-b",
+            agentId: "agent-1",
+            card: {},
+            capabilities: [],
+            visibility: "public",
+          },
+        ],
         {
           remoteBrokerId: "broker-b",
-          agentId: "agent-1",
-          card: {},
-          capabilities: [],
-          visibility: "public",
+          traceId: "trace-catalog-1",
         },
-      ]);
+      );
 
-      await adapter.setRoutePolicy("broker-a", {
-        policyId: "broker-a",
-        preferLocal: false,
-        preferredRemoteBrokerIds: ["broker-b"],
-        denyAgentIds: ["agent-denied-by-requester"],
-        allowAgentIds: ["agent-1"],
-      });
+      await adapter.setRoutePolicy(
+        "broker-a",
+        {
+          policyId: "broker-a",
+          preferLocal: false,
+          preferredRemoteBrokerIds: ["broker-b"],
+          denyAgentIds: ["agent-denied-by-requester"],
+          allowAgentIds: ["agent-1"],
+        },
+        {
+          remoteBrokerId: "broker-a",
+          traceId: "trace-policy-a",
+        },
+      );
 
-      await adapter.setRoutePolicy("broker-b", {
-        policyId: "broker-b",
-        preferLocal: false,
-        preferredRemoteBrokerIds: ["broker-a"],
-        denyAgentIds: ["agent-denied-by-remote"],
-        allowAgentIds: ["agent-1", "agent-denied-by-remote"],
-      });
+      await adapter.setRoutePolicy(
+        "broker-b",
+        {
+          policyId: "broker-b",
+          preferLocal: false,
+          preferredRemoteBrokerIds: ["broker-a"],
+          denyAgentIds: ["agent-denied-by-remote"],
+          allowAgentIds: ["agent-1", "agent-denied-by-remote"],
+        },
+        {
+          remoteBrokerId: "broker-b",
+          traceId: "trace-policy-b",
+        },
+      );
 
       const accepted = await service.probeRoute({
         requesterBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         targetAgent: "agent-1",
+        taskId: "task-route-1",
+        contextId: "ctx-route-1",
+        traceId: "trace-route-1",
       });
       assertEquals(accepted.accepted, true);
       assertEquals(accepted.reason, "route_available");
@@ -114,6 +157,9 @@ Deno.test(
         requesterBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         targetAgent: "agent-denied-by-requester",
+        taskId: "task-route-2",
+        contextId: "ctx-route-2",
+        traceId: "trace-route-2",
       });
       assertEquals(deniedByRequester.accepted, false);
       assertEquals(deniedByRequester.reason, "denied_by_policy");
@@ -122,6 +168,9 @@ Deno.test(
         requesterBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         targetAgent: "agent-denied-by-remote",
+        taskId: "task-route-3",
+        contextId: "ctx-route-3",
+        traceId: "trace-route-3",
       });
       assertEquals(deniedByRemote.accepted, false);
       assertEquals(deniedByRemote.reason, "denied_by_policy");
@@ -201,7 +250,14 @@ Deno.test(
       );
 
       await service.syncSignedCatalog(signedEnvelope);
-      const card = await adapter.getRemoteAgentCard("broker-b", "agent-signed");
+      const card = await adapter.getRemoteAgentCard(
+        "broker-b",
+        "agent-signed",
+        {
+          remoteBrokerId: "broker-b",
+          traceId: "trace-card-1",
+        },
+      );
       assertEquals(card?.name, "Signed Agent");
     } finally {
       kv.close();
@@ -269,33 +325,57 @@ Deno.test(
       const adapter = new KvFederationAdapter(kv);
       const service = new FederationService(adapter, adapter, adapter, adapter);
 
-      await adapter.setRemoteCatalog("broker-b", [
+      await adapter.setRemoteCatalog(
+        "broker-b",
+        [
+          {
+            remoteBrokerId: "broker-b",
+            agentId: "agent-1",
+            card: {},
+            capabilities: [],
+            visibility: "public",
+          },
+        ],
         {
           remoteBrokerId: "broker-b",
-          agentId: "agent-1",
-          card: {},
-          capabilities: [],
-          visibility: "public",
+          traceId: "trace-catalog-2",
         },
-      ]);
+      );
 
-      await adapter.setRoutePolicy("broker-a", {
-        policyId: "broker-a",
-        preferLocal: false,
-        preferredRemoteBrokerIds: ["broker-b"],
-        denyAgentIds: ["agent-local-denied"],
-      });
-      await adapter.setRoutePolicy("broker-b", {
-        policyId: "broker-b",
-        preferLocal: false,
-        preferredRemoteBrokerIds: ["broker-a"],
-        denyAgentIds: ["agent-remote-denied"],
-      });
+      await adapter.setRoutePolicy(
+        "broker-a",
+        {
+          policyId: "broker-a",
+          preferLocal: false,
+          preferredRemoteBrokerIds: ["broker-b"],
+          denyAgentIds: ["agent-local-denied"],
+        },
+        {
+          remoteBrokerId: "broker-a",
+          traceId: "trace-policy-a-2",
+        },
+      );
+      await adapter.setRoutePolicy(
+        "broker-b",
+        {
+          policyId: "broker-b",
+          preferLocal: false,
+          preferredRemoteBrokerIds: ["broker-a"],
+          denyAgentIds: ["agent-remote-denied"],
+        },
+        {
+          remoteBrokerId: "broker-b",
+          traceId: "trace-policy-b-2",
+        },
+      );
 
       const localDenied = await service.evaluateRouteAuthorization({
         requesterBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         targetAgent: "agent-local-denied",
+        taskId: "task-local-denied",
+        contextId: "ctx-local-denied",
+        traceId: "trace-local-denied",
       });
       assertEquals(localDenied.decision, "DENY_LOCAL_POLICY");
 
@@ -303,6 +383,9 @@ Deno.test(
         requesterBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         targetAgent: "agent-remote-denied",
+        taskId: "task-remote-denied",
+        contextId: "ctx-remote-denied",
+        traceId: "trace-remote-denied",
       });
       assertEquals(remoteDenied.decision, "DENY_REMOTE_POLICY");
     } finally {
@@ -331,9 +414,10 @@ Deno.test(
         observability,
       );
 
-      const task: BrokerTaskSubmitPayload = {
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
         targetAgent: "agent-1",
         taskId: "task-42",
+        contextId: "ctx-42",
         taskMessage: {
           messageId: "msg-42",
           role: "user",
@@ -346,6 +430,7 @@ Deno.test(
         task,
         maxAttempts: 3,
         linkId: "broker-a:broker-b",
+        traceId: "trace-42",
       });
       assertEquals(result.status, "forwarded");
       assertEquals(result.attempts, 2);
@@ -353,11 +438,24 @@ Deno.test(
       assertEquals(observability.events[0].success, false);
       assertEquals(observability.events[1].success, true);
       assertEquals(observability.events[0].linkId, "broker-a:broker-b");
+      assertEquals(observability.events[0].traceId, "trace-42");
+      assertEquals(observability.events[1].traceId, "trace-42");
+      const record = await adapter.getSubmissionRecord(result.idempotencyKey, {
+        remoteBrokerId: "broker-b",
+        taskId: "task-42",
+        contextId: "ctx-42",
+        linkId: "broker-a:broker-b",
+        traceId: "trace-42",
+      });
+      assertEquals(record?.traceId, "trace-42");
+      assertEquals(record?.contextId, "ctx-42");
 
       const deduplicated = await service.forwardTaskIdempotent({
         remoteBrokerId: "broker-b",
         task,
         maxAttempts: 3,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-42",
       });
       assertEquals(deduplicated.status, "deduplicated");
     } finally {
@@ -384,9 +482,10 @@ Deno.test(
         adapter,
       );
 
-      const task: BrokerTaskSubmitPayload = {
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
         targetAgent: "agent-unicode",
         taskId: "task-unicode",
+        contextId: "ctx-unicode",
         taskMessage: {
           messageId: "msg-unicode",
           role: "user",
@@ -398,9 +497,19 @@ Deno.test(
         remoteBrokerId: "broker-b",
         task,
         maxAttempts: 1,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-unicode",
       });
       assertEquals(result.status, "forwarded");
       assertEquals(result.idempotencyKey.includes("bonjour"), false);
+      const record = await adapter.getSubmissionRecord(result.idempotencyKey, {
+        remoteBrokerId: "broker-b",
+        taskId: "task-unicode",
+        contextId: "ctx-unicode",
+        linkId: "broker-a:broker-b",
+        traceId: "trace-unicode",
+      });
+      assertEquals(record?.traceId, "trace-unicode");
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -427,9 +536,10 @@ Deno.test(
         observability,
       );
 
-      const task: BrokerTaskSubmitPayload = {
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
         targetAgent: "agent-1",
         taskId: "task-dead-letter",
+        contextId: "ctx-dead-letter",
         taskMessage: {
           messageId: "msg-dead-letter",
           role: "user",
@@ -442,6 +552,7 @@ Deno.test(
         task,
         maxAttempts: 2,
         linkId: "broker-a:broker-b",
+        traceId: "trace-dead-letter",
       });
       assertEquals(result.status, "dead_letter");
       assertEquals(result.attempts, 2);
@@ -459,6 +570,7 @@ Deno.test(
         task,
         maxAttempts: 2,
         linkId: "broker-a:broker-b",
+        traceId: "trace-dead-letter",
       });
       assertEquals(replay.status, "dead_letter");
       assertEquals((await adapter.listDeadLetters("broker-b")).length, 1);
@@ -486,9 +598,10 @@ Deno.test(
         adapter,
       );
 
-      const task: BrokerTaskSubmitPayload = {
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
         targetAgent: "agent-1",
         taskId: "task-concurrent",
+        contextId: "ctx-concurrent",
         taskMessage: {
           messageId: "msg-concurrent",
           role: "user",
@@ -501,11 +614,15 @@ Deno.test(
           remoteBrokerId: "broker-b",
           task,
           maxAttempts: 1,
+          linkId: "broker-a:broker-b",
+          traceId: "trace-concurrent",
         }),
         service.forwardTaskIdempotent({
           remoteBrokerId: "broker-b",
           task,
           maxAttempts: 1,
+          linkId: "broker-a:broker-b",
+          traceId: "trace-concurrent",
         }),
       ]);
 
@@ -535,6 +652,7 @@ Deno.test(
         localBrokerId: "broker-a",
         remoteBrokerId: "broker-b",
         requestedBy: "broker-a",
+        traceId: "trace-link-open",
       });
 
       const identity = await service.rotateIdentityKey(
@@ -543,7 +661,11 @@ Deno.test(
       );
       assertEquals(identity.activeKeyId, "pub-key-v2");
 
-      const session = await service.rotateLinkSession("broker-a:broker-b", 120);
+      const session = await service.rotateLinkSession({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        traceId: "trace-rotate-session",
+      }, 120);
       assertEquals(session.linkId, "broker-a:broker-b");
       assertEquals(session.status, "active");
     } finally {

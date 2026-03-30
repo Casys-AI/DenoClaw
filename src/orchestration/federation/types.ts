@@ -51,6 +51,9 @@ export interface FederatedSubmissionRecord {
   idempotencyKey: string;
   remoteBrokerId: string;
   taskId: string;
+  contextId: string;
+  linkId: string;
+  traceId: string;
   payloadHash: string;
   status: "in_flight" | "completed" | "dead_letter";
   resultRef?: string;
@@ -65,16 +68,32 @@ export interface FederationDeadLetter {
   idempotencyKey: string;
   remoteBrokerId: string;
   taskId: string;
+  contextId: string;
+  linkId: string;
+  traceId: string;
   payloadHash: string;
   reason: string;
   movedAt: string;
 }
 
-export interface FederationCorrelationContext {
-  taskId: string;
-  contextId?: string;
+export interface FederationTraceContext {
+  traceId: string;
+}
+
+export interface FederationBrokerCorrelationContext
+  extends FederationTraceContext {
   remoteBrokerId: string;
-  linkId?: string;
+}
+
+export interface FederationLinkCorrelationContext
+  extends FederationBrokerCorrelationContext {
+  linkId: string;
+}
+
+export interface FederationCorrelationContext
+  extends FederationLinkCorrelationContext {
+  taskId: string;
+  contextId: string;
 }
 
 export interface FederationLinkStats {
@@ -84,6 +103,9 @@ export interface FederationLinkStats {
   errorCount: number;
   p50LatencyMs: number;
   p95LatencyMs: number;
+  lastTaskId?: string;
+  lastTraceId?: string;
+  lastOccurredAt?: string;
 }
 
 export interface FederationStatsSnapshot {

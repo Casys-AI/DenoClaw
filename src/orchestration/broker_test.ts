@@ -381,6 +381,7 @@ Deno.test(
           linkId: "link-a-b",
           localBrokerId: "broker-local",
           remoteBrokerId: "broker-remote",
+          traceId: "trace-open-1",
         },
         timestamp: new Date().toISOString(),
       });
@@ -394,7 +395,9 @@ Deno.test(
         { type: "federation_link_ack" }
       >;
       assertEquals(ack.payload.linkId, "link-a-b");
+      assertEquals(ack.payload.remoteBrokerId, "broker-remote");
       assertEquals(ack.payload.accepted, true);
+      assertEquals(ack.payload.traceId, "trace-open-1");
 
       await broker.stop();
     } finally {
@@ -453,6 +456,8 @@ Deno.test(
           remoteBrokerId: "broker-remote",
           targetAgent: "agent-x",
           taskId: "task-123",
+          contextId: "ctx-123",
+          traceId: "trace-probe-1",
         },
         timestamp: new Date().toISOString(),
       });
@@ -463,6 +468,8 @@ Deno.test(
       >;
       assertEquals(ack.payload.accepted, true);
       assertEquals(ack.payload.reason, "route_available");
+      assertEquals(ack.payload.remoteBrokerId, "broker-remote");
+      assertEquals(ack.payload.traceId, "trace-probe-1");
 
       await broker.stop();
     } finally {
@@ -530,6 +537,8 @@ Deno.test(
           remoteBrokerId: "broker-remote",
           targetAgent: "agent-denied-by-remote",
           taskId: "task-456",
+          contextId: "ctx-456",
+          traceId: "trace-probe-2",
         },
         timestamp: new Date().toISOString(),
       });
@@ -540,6 +549,8 @@ Deno.test(
       >;
       assertEquals(ack.payload.accepted, false);
       assertEquals(ack.payload.reason, "denied_by_policy");
+      assertEquals(ack.payload.remoteBrokerId, "broker-remote");
+      assertEquals(ack.payload.traceId, "trace-probe-2");
 
       await broker.stop();
     } finally {
@@ -572,6 +583,7 @@ Deno.test(
           linkId: "link-a2a",
           localBrokerId: "broker-local",
           remoteBrokerId: "broker-remote",
+          traceId: "trace-open-a2a-1",
         },
         timestamp: new Date().toISOString(),
       });
@@ -1317,11 +1329,18 @@ Deno.test(
               localBrokerId: string;
               remoteBrokerId: string;
               requestedBy: string;
+              correlation: {
+                linkId: string;
+                remoteBrokerId: string;
+                traceId: string;
+              };
             }): Promise<void>;
             recordCrossBrokerHop(event: {
               linkId: string;
               remoteBrokerId: string;
               taskId: string;
+              contextId: string;
+              traceId: string;
               latencyMs: number;
               success: boolean;
               occurredAt: string;
@@ -1331,6 +1350,9 @@ Deno.test(
               idempotencyKey: string;
               remoteBrokerId: string;
               taskId: string;
+              contextId: string;
+              linkId: string;
+              traceId: string;
               payloadHash: string;
               reason: string;
               movedAt: string;
@@ -1344,11 +1366,18 @@ Deno.test(
         localBrokerId: "broker-local",
         remoteBrokerId: "broker-remote",
         requestedBy: "broker-local",
+        correlation: {
+          linkId: "broker-local:broker-remote",
+          remoteBrokerId: "broker-remote",
+          traceId: "trace-link-stats",
+        },
       });
       await adapter.recordCrossBrokerHop({
         linkId: "broker-local:broker-remote",
         remoteBrokerId: "broker-remote",
         taskId: "task-stats",
+        contextId: "ctx-stats",
+        traceId: "trace-stats",
         latencyMs: 42,
         success: true,
         occurredAt: new Date().toISOString(),
@@ -1358,6 +1387,9 @@ Deno.test(
         idempotencyKey: "broker-remote:task-stats:hash",
         remoteBrokerId: "broker-remote",
         taskId: "task-stats",
+        contextId: "ctx-stats",
+        linkId: "broker-local:broker-remote",
+        traceId: "trace-stats",
         payloadHash: "hash",
         reason: "timeout",
         movedAt: new Date().toISOString(),
@@ -1372,6 +1404,7 @@ Deno.test(
       const stats = await statsResponse.json();
       assertEquals(stats.successCount, 1);
       assertEquals(stats.deadLetterBacklog, 1);
+      assertEquals(stats.links[0].lastTaskId, "task-stats");
 
       const rotateIdentityResponse = await handleHttp(
         new Request("http://localhost/federation/identity/rotate", {

@@ -39,7 +39,11 @@ Deno.test("federation control-plane router dispatches", async () => {
     id: "control-1",
     from: "broker-a",
     type: "federation_catalog_sync",
-    payload: { remoteBrokerId: "broker-b", agents: ["agent-1"] },
+    payload: {
+      remoteBrokerId: "broker-b",
+      agents: ["agent-1"],
+      traceId: "trace-sync-1",
+    },
     timestamp: new Date().toISOString(),
   };
 

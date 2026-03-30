@@ -3,7 +3,10 @@ import type { BrokerTaskSubmitPayload } from "../types.ts";
 import { KvFederationAdapter } from "./adapters/kv_adapter.ts";
 import type { FederationRoutingPort } from "./ports.ts";
 import { FederationService } from "./service.ts";
-import type { FederatedRoutePolicy } from "./types.ts";
+import type {
+  FederatedRoutePolicy,
+  FederationCorrelationContext,
+} from "./types.ts";
 
 class ScenarioRoutingPort implements FederationRoutingPort {
   private calls = 0;
@@ -11,7 +14,11 @@ class ScenarioRoutingPort implements FederationRoutingPort {
     private readonly behavior: (callNumber: number) => Promise<void>,
   ) {}
 
-  resolveTarget(_task: BrokerTaskSubmitPayload, _policy: FederatedRoutePolicy) {
+  resolveTarget(
+    _task: BrokerTaskSubmitPayload,
+    _policy: FederatedRoutePolicy,
+    _correlation: FederationCorrelationContext,
+  ) {
     return Promise.resolve({
       kind: "remote" as const,
       remoteBrokerId: "broker-b",
@@ -19,13 +26,17 @@ class ScenarioRoutingPort implements FederationRoutingPort {
     });
   }
 
-  async forwardTask(): Promise<void> {
+  async forwardTask(
+    _task: BrokerTaskSubmitPayload,
+    _remoteBrokerId: string,
+    _correlation: FederationCorrelationContext,
+  ): Promise<void> {
     this.calls += 1;
     await this.behavior(this.calls);
   }
 }
 
-function sampleTask(taskId: string): BrokerTaskSubmitPayload {
+function sampleTask(taskId: string): BrokerTaskSubmitPayload & { contextId: string } {
   return {
     targetAgent: "agent-1",
     taskId,
@@ -68,6 +79,7 @@ Deno.test(
         baseBackoffMs: 0,
         maxBackoffMs: 0,
         linkId: "broker-a:broker-b",
+        traceId: "trace-link-drop",
       });
 
       assertEquals(result.status, "forwarded");
@@ -108,6 +120,7 @@ Deno.test(
         baseBackoffMs: 0,
         maxBackoffMs: 0,
         linkId: "broker-a:broker-b",
+        traceId: "trace-high-latency",
       });
 
       assertEquals(result.status, "dead_letter");
@@ -147,6 +160,7 @@ Deno.test(
         baseBackoffMs: 0,
         maxBackoffMs: 0,
         linkId: "broker-a:broker-b",
+        traceId: "trace-token-expired",
       });
 
       assertEquals(result.status, "dead_letter");
@@ -187,6 +201,7 @@ Deno.test(
         baseBackoffMs: 0,
         maxBackoffMs: 0,
         linkId: "broker-a:broker-b",
+        traceId: "trace-remote-down",
       });
       const second = await service.forwardTaskIdempotent({
         remoteBrokerId: "broker-b",
@@ -195,6 +210,7 @@ Deno.test(
         baseBackoffMs: 0,
         maxBackoffMs: 0,
         linkId: "broker-a:broker-b",
+        traceId: "trace-remote-down",
       });
 
       assertEquals(first.idempotencyKey, second.idempotencyKey);

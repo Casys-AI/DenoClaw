@@ -2,11 +2,15 @@ import type {
   BrokerIdentity,
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
+  FederationBrokerCorrelationContext,
+  FederationCorrelationContext,
   FederationDeadLetter,
   FederationLink,
+  FederationLinkCorrelationContext,
   FederationLinkState,
   FederationSessionToken,
   FederationStatsSnapshot,
+  FederationTraceContext,
   RemoteAgentCatalogEntry,
 } from "../types.ts";
 import type {
@@ -51,11 +55,22 @@ export class KvFederationAdapter
     return link;
   }
 
-  async acknowledgeLink(linkId: string, accepted: boolean): Promise<void> {
-    await this.setLinkState(linkId, accepted ? "active" : "failed");
+  async acknowledgeLink(
+    linkId: string,
+    accepted: boolean,
+    correlation: FederationLinkCorrelationContext,
+  ): Promise<void> {
+    await this.setLinkState(
+      linkId,
+      accepted ? "active" : "failed",
+      correlation,
+    );
   }
 
-  async terminateLink(linkId: string): Promise<void> {
+  async terminateLink(
+    linkId: string,
+    _correlation: FederationLinkCorrelationContext,
+  ): Promise<void> {
     await this.kv.delete(["federation", "links", linkId]);
   }
 
@@ -73,6 +88,7 @@ export class KvFederationAdapter
 
   async rotateLinkSession(
     linkId: string,
+    _correlation: FederationLinkCorrelationContext,
     ttlSeconds = 900,
   ): Promise<FederationSessionToken> {
     if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
@@ -106,7 +122,10 @@ export class KvFederationAdapter
     return session;
   }
 
-  async refreshTrust(remoteBrokerId: string): Promise<BrokerIdentity> {
+  async refreshTrust(
+    remoteBrokerId: string,
+    _correlation: FederationBrokerCorrelationContext,
+  ): Promise<BrokerIdentity> {
     const identity = {
       brokerId: remoteBrokerId,
       instanceUrl: "",
@@ -119,6 +138,7 @@ export class KvFederationAdapter
 
   async listRemoteAgents(
     remoteBrokerId: string,
+    _correlation: FederationBrokerCorrelationContext,
   ): Promise<RemoteAgentCatalogEntry[]> {
     const entry = await this.kv.get<RemoteAgentCatalogEntry[]>([
       "federation",
@@ -131,23 +151,31 @@ export class KvFederationAdapter
   async getRemoteAgentCard(
     remoteBrokerId: string,
     agentId: string,
+    correlation: FederationBrokerCorrelationContext,
   ): Promise<Record<string, unknown> | null> {
-    const entries = await this.listRemoteAgents(remoteBrokerId);
+    const entries = await this.listRemoteAgents(remoteBrokerId, correlation);
     return entries.find((entry) => entry.agentId === agentId)?.card ?? null;
   }
 
   async setRemoteCatalog(
     remoteBrokerId: string,
     entries: RemoteAgentCatalogEntry[],
+    _correlation: FederationBrokerCorrelationContext,
   ): Promise<void> {
     await this.kv.set(["federation", "catalog", remoteBrokerId], entries);
   }
 
-  async upsertIdentity(identity: BrokerIdentity): Promise<void> {
+  async upsertIdentity(
+    identity: BrokerIdentity,
+    _correlation?: FederationTraceContext,
+  ): Promise<void> {
     await this.kv.set(["federation", "identity", identity.brokerId], identity);
   }
 
-  async getIdentity(brokerId: string): Promise<BrokerIdentity | null> {
+  async getIdentity(
+    brokerId: string,
+    _correlation?: FederationTraceContext,
+  ): Promise<BrokerIdentity | null> {
     const entry = await this.kv.get<BrokerIdentity>([
       "federation",
       "identity",
@@ -156,7 +184,9 @@ export class KvFederationAdapter
     return entry.value ?? null;
   }
 
-  async listIdentities(): Promise<BrokerIdentity[]> {
+  async listIdentities(
+    _correlation?: FederationTraceContext,
+  ): Promise<BrokerIdentity[]> {
     const identities: BrokerIdentity[] = [];
     for await (
       const entry of this.kv.list<BrokerIdentity>({
@@ -168,18 +198,22 @@ export class KvFederationAdapter
     return identities;
   }
 
-  async revokeIdentity(brokerId: string): Promise<void> {
-    const existing = await this.getIdentity(brokerId);
+  async revokeIdentity(
+    brokerId: string,
+    correlation?: FederationTraceContext,
+  ): Promise<void> {
+    const existing = await this.getIdentity(brokerId, correlation);
     if (!existing) return;
-    await this.upsertIdentity({ ...existing, status: "revoked" });
+    await this.upsertIdentity({ ...existing, status: "revoked" }, correlation);
   }
 
   async rotateIdentityKey(
     brokerId: string,
     nextPublicKey: string,
+    correlation?: FederationTraceContext,
   ): Promise<BrokerIdentity> {
     const now = new Date().toISOString();
-    const existing = await this.getIdentity(brokerId);
+    const existing = await this.getIdentity(brokerId, correlation);
     const updated: BrokerIdentity = existing
       ? {
         ...existing,
@@ -198,18 +232,22 @@ export class KvFederationAdapter
         rotatedAt: now,
         status: "pending",
       };
-    await this.upsertIdentity(updated);
+    await this.upsertIdentity(updated, correlation);
     return updated;
   }
 
   async setRoutePolicy(
     brokerId: string,
     policy: FederatedRoutePolicy,
+    _correlation: FederationBrokerCorrelationContext,
   ): Promise<void> {
     await this.kv.set(["federation", "policies", brokerId], policy);
   }
 
-  async getRoutePolicy(brokerId: string): Promise<FederatedRoutePolicy | null> {
+  async getRoutePolicy(
+    brokerId: string,
+    _correlation: FederationBrokerCorrelationContext,
+  ): Promise<FederatedRoutePolicy | null> {
     const entry = await this.kv.get<FederatedRoutePolicy>([
       "federation",
       "policies",
@@ -221,6 +259,7 @@ export class KvFederationAdapter
   async setLinkState(
     linkId: string,
     state: FederationLinkState,
+    _correlation: FederationLinkCorrelationContext,
   ): Promise<void> {
     const key: Deno.KvKey = ["federation", "links", linkId];
     const entry = await this.kv.get<FederationLink>(key);
@@ -255,6 +294,7 @@ export class KvFederationAdapter
 
   async createSubmissionRecord(
     record: FederatedSubmissionRecord,
+    _correlation: FederationCorrelationContext,
   ): Promise<boolean> {
     const key: Deno.KvKey = [
       "federation",
@@ -271,6 +311,7 @@ export class KvFederationAdapter
 
   async getSubmissionRecord(
     idempotencyKey: string,
+    _correlation: FederationCorrelationContext,
   ): Promise<FederatedSubmissionRecord | null> {
     const entry = await this.kv.get<FederatedSubmissionRecord>([
       "federation",
@@ -282,6 +323,7 @@ export class KvFederationAdapter
 
   async upsertSubmissionRecord(
     record: FederatedSubmissionRecord,
+    _correlation: FederationCorrelationContext,
   ): Promise<void> {
     await this.kv.set(
       ["federation", "submissions", record.idempotencyKey],
@@ -289,16 +331,17 @@ export class KvFederationAdapter
     );
   }
 
-  async moveToDeadLetter(entry: FederationDeadLetter): Promise<void> {
+  async moveToDeadLetter(
+    entry: FederationDeadLetter,
+    _correlation: FederationCorrelationContext,
+  ): Promise<void> {
     await this.kv.set(
       ["federation", "dead-letter", entry.remoteBrokerId, entry.deadLetterId],
       entry,
     );
   }
 
-  async listDeadLetters(
-    remoteBrokerId?: string,
-  ): Promise<FederationDeadLetter[]> {
+  async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
     const prefix: Deno.KvKey = remoteBrokerId
       ? ["federation", "dead-letter", remoteBrokerId]
       : ["federation", "dead-letter"];
@@ -309,9 +352,7 @@ export class KvFederationAdapter
     return entries;
   }
 
-  async getFederationStats(
-    remoteBrokerId?: string,
-  ): Promise<FederationStatsSnapshot> {
+  async getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot> {
     const eventPrefix: Deno.KvKey = ["federation", "events"];
     const byLink = new Map<
       string,
@@ -321,6 +362,9 @@ export class KvFederationAdapter
         successCount: number;
         errorCount: number;
         latencies: number[];
+        lastTaskId?: string;
+        lastTraceId?: string;
+        lastOccurredAt?: string;
       }
     >();
     let successCount = 0;
@@ -343,6 +387,14 @@ export class KvFederationAdapter
         latencies: [],
       };
       link.latencies.push(event.latencyMs);
+      if (
+        !link.lastOccurredAt ||
+        event.occurredAt.localeCompare(link.lastOccurredAt) > 0
+      ) {
+        link.lastOccurredAt = event.occurredAt;
+        link.lastTaskId = event.taskId;
+        link.lastTraceId = event.traceId;
+      }
       if (event.success) {
         link.successCount += 1;
         successCount += 1;
@@ -361,6 +413,9 @@ export class KvFederationAdapter
       errorCount: entry.errorCount,
       p50LatencyMs: this.percentile(entry.latencies, 50),
       p95LatencyMs: this.percentile(entry.latencies, 95),
+      lastTaskId: entry.lastTaskId,
+      lastTraceId: entry.lastTraceId,
+      lastOccurredAt: entry.lastOccurredAt,
     }));
 
     return {

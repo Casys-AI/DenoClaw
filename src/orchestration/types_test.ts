@@ -127,22 +127,30 @@ Deno.test("Broker federation classifier isolates control-plane methods", () => {
       linkId: "link-1",
       localBrokerId: "broker-a",
       remoteBrokerId: "broker-b",
+      traceId: "trace-open-1",
     }),
     baseMessage("federation_link_ack", {
       linkId: "link-1",
+      remoteBrokerId: "broker-b",
       accepted: true,
+      traceId: "trace-ack-1",
     }),
     baseMessage("federation_catalog_sync", {
       remoteBrokerId: "broker-b",
       agents: ["agent-1"],
+      traceId: "trace-sync-1",
     }),
     baseMessage("federation_route_probe", {
       remoteBrokerId: "broker-b",
       targetAgent: "agent-1",
       taskId: "task-1",
+      contextId: "ctx-1",
+      traceId: "trace-probe-1",
     }),
     baseMessage("federation_link_close", {
       linkId: "link-1",
+      remoteBrokerId: "broker-b",
+      traceId: "trace-close-1",
     }),
   ];
 

@@ -932,19 +932,49 @@ export class BrokerServer {
   }
 
   private getFederationControlHandlers(): FederationControlHandlerMap {
+    const requireNonEmptyString = (
+      value: unknown,
+      field: string,
+      messageType: BrokerMessage["type"],
+    ): string => {
+      if (typeof value !== "string" || value.length === 0) {
+        throw new Error(
+          `Invalid ${messageType} payload: ${field} must be a non-empty string`,
+        );
+      }
+      return value;
+    };
+
     return {
       federation_link_open: async (envelope) => {
-        const payload = envelope.payload as {
-          linkId: string;
-          localBrokerId: string;
-          remoteBrokerId: string;
-        };
+        const payload = envelope.payload as Record<string, unknown>;
+        const linkId = requireNonEmptyString(
+          payload.linkId,
+          "linkId",
+          envelope.type,
+        );
+        const localBrokerId = requireNonEmptyString(
+          payload.localBrokerId,
+          "localBrokerId",
+          envelope.type,
+        );
+        const remoteBrokerId = requireNonEmptyString(
+          payload.remoteBrokerId,
+          "remoteBrokerId",
+          envelope.type,
+        );
+        const traceId = requireNonEmptyString(
+          payload.traceId,
+          "traceId",
+          envelope.type,
+        );
         const service = await this.getFederationService();
         await service.openLink({
-          linkId: payload.linkId,
-          localBrokerId: payload.localBrokerId,
-          remoteBrokerId: payload.remoteBrokerId,
+          linkId,
+          localBrokerId,
+          remoteBrokerId,
           requestedBy: envelope.from,
+          traceId,
         });
 
         const ack: Extract<BrokerMessage, { type: "federation_link_ack" }> = {
@@ -952,47 +982,122 @@ export class BrokerServer {
           from: "broker",
           to: envelope.from,
           type: "federation_link_ack",
-          payload: { linkId: payload.linkId, accepted: true },
+          payload: {
+            linkId,
+            remoteBrokerId,
+            accepted: true,
+            traceId,
+          },
           timestamp: new Date().toISOString(),
         };
         await this.sendReply(ack);
       },
       federation_link_ack: async (envelope) => {
-        const payload = envelope.payload as {
-          linkId: string;
-          accepted: boolean;
-        };
+        const payload = envelope.payload as Record<string, unknown>;
+        const linkId = requireNonEmptyString(
+          payload.linkId,
+          "linkId",
+          envelope.type,
+        );
+        const remoteBrokerId = requireNonEmptyString(
+          payload.remoteBrokerId,
+          "remoteBrokerId",
+          envelope.type,
+        );
+        const traceId = requireNonEmptyString(
+          payload.traceId,
+          "traceId",
+          envelope.type,
+        );
+        if (typeof payload.accepted !== "boolean") {
+          throw new Error(
+            `Invalid ${envelope.type} payload: accepted must be a boolean`,
+          );
+        }
         const service = await this.getFederationService();
-        await service.acknowledgeLink(payload.linkId, payload.accepted);
+        await service.acknowledgeLink(
+          {
+            linkId,
+            remoteBrokerId,
+            traceId,
+          },
+          payload.accepted,
+        );
       },
       federation_catalog_sync: async (envelope) => {
-        const payload = envelope.payload as {
-          remoteBrokerId: string;
-          agents: string[];
-        };
+        const payload = envelope.payload as Record<string, unknown>;
+        const remoteBrokerId = requireNonEmptyString(
+          payload.remoteBrokerId,
+          "remoteBrokerId",
+          envelope.type,
+        );
+        const traceId = requireNonEmptyString(
+          payload.traceId,
+          "traceId",
+          envelope.type,
+        );
+        const agents = Array.isArray(payload.agents)
+          ? payload.agents.filter((agent): agent is string =>
+            typeof agent === "string"
+          )
+          : null;
+        if (!agents) {
+          throw new Error(
+            `Invalid ${envelope.type} payload: agents must be a string[]`,
+          );
+        }
         const service = await this.getFederationService();
         await service.syncCatalog(
-          payload.remoteBrokerId,
-          payload.agents.map((agentId) => ({
-            remoteBrokerId: payload.remoteBrokerId,
+          remoteBrokerId,
+          agents.map((agentId) => ({
+            remoteBrokerId,
             agentId,
             card: {},
             capabilities: [],
             visibility: "public",
           })),
+          {
+            remoteBrokerId,
+            traceId,
+          },
         );
       },
       federation_route_probe: async (envelope) => {
-        const payload = envelope.payload as {
-          remoteBrokerId: string;
-          targetAgent: string;
-        };
+        const payload = envelope.payload as Record<string, unknown>;
+        const remoteBrokerId = requireNonEmptyString(
+          payload.remoteBrokerId,
+          "remoteBrokerId",
+          envelope.type,
+        );
+        const targetAgent = requireNonEmptyString(
+          payload.targetAgent,
+          "targetAgent",
+          envelope.type,
+        );
+        const taskId = requireNonEmptyString(
+          payload.taskId,
+          "taskId",
+          envelope.type,
+        );
+        const contextId = requireNonEmptyString(
+          payload.contextId,
+          "contextId",
+          envelope.type,
+        );
+        const traceId = requireNonEmptyString(
+          payload.traceId,
+          "traceId",
+          envelope.type,
+        );
 
         const service = await this.getFederationService();
         const result = await service.probeRoute({
           requesterBrokerId: envelope.from,
-          remoteBrokerId: payload.remoteBrokerId,
-          targetAgent: payload.targetAgent,
+          remoteBrokerId,
+          targetAgent,
+          taskId,
+          contextId,
+          traceId,
         });
 
         const reply: Extract<BrokerMessage, { type: "federation_link_ack" }> = {
@@ -1002,7 +1107,9 @@ export class BrokerServer {
           type: "federation_link_ack",
           payload: {
             linkId: result.linkId,
+            remoteBrokerId,
             accepted: result.accepted,
+            traceId,
             reason: result.reason,
           },
           timestamp: new Date().toISOString(),
@@ -1010,9 +1117,24 @@ export class BrokerServer {
         await this.sendReply(reply);
       },
       federation_link_close: async (envelope) => {
-        const payload = envelope.payload as { linkId: string };
+        const payload = envelope.payload as Record<string, unknown>;
+        const linkId = requireNonEmptyString(
+          payload.linkId,
+          "linkId",
+          envelope.type,
+        );
+        const remoteBrokerId = requireNonEmptyString(
+          payload.remoteBrokerId,
+          "remoteBrokerId",
+          envelope.type,
+        );
+        const traceId = requireNonEmptyString(
+          payload.traceId,
+          "traceId",
+          envelope.type,
+        );
         const service = await this.getFederationService();
-        await service.closeLink(payload.linkId);
+        await service.closeLink({ linkId, remoteBrokerId, traceId });
       },
     };
   }
@@ -1222,7 +1344,12 @@ export class BrokerServer {
         );
       }
       const adapter = await this.getFederationAdapter();
-      return Response.json(await adapter.listRemoteAgents(remoteBrokerId));
+      return Response.json(
+        await adapter.listRemoteAgents(remoteBrokerId, {
+          remoteBrokerId,
+          traceId: crypto.randomUUID(),
+        }),
+      );
     }
 
     if (req.method === "GET" && url.pathname === "/federation/stats") {
@@ -1246,7 +1373,12 @@ export class BrokerServer {
         );
       }
       const adapter = await this.getFederationAdapter();
-      return Response.json(await adapter.getRoutePolicy(brokerId));
+      return Response.json(
+        await adapter.getRoutePolicy(brokerId, {
+          remoteBrokerId: brokerId,
+          traceId: crypto.randomUUID(),
+        }),
+      );
     }
 
     if (req.method === "PUT" && url.pathname === "/federation/policy") {
@@ -1269,7 +1401,10 @@ export class BrokerServer {
         );
       }
       const adapter = await this.getFederationAdapter();
-      await adapter.setRoutePolicy(body.policyId, body);
+      await adapter.setRoutePolicy(body.policyId, body, {
+        remoteBrokerId: body.policyId,
+        traceId: crypto.randomUUID(),
+      });
       return Response.json({ ok: true, policyId: body.policyId });
     }
 
@@ -1398,8 +1533,27 @@ export class BrokerServer {
         );
       }
       const service = await this.getFederationService();
+      const adapter = await this.getFederationAdapter();
+      const link = (await adapter.listLinks()).find((entry) =>
+        entry.linkId === body.linkId
+      );
+      if (!link) {
+        return Response.json(
+          {
+            error: {
+              code: "FEDERATION_LINK_NOT_FOUND",
+              recovery: "Create the link before rotating its session",
+            },
+          },
+          { status: 404 },
+        );
+      }
       const session = await service.rotateLinkSession(
-        body.linkId,
+        {
+          linkId: body.linkId,
+          remoteBrokerId: link.remoteBrokerId,
+          traceId: crypto.randomUUID(),
+        },
         typeof body.ttlSeconds === "number" ? body.ttlSeconds : undefined,
       );
       return Response.json({ ok: true, session });
@@ -1533,6 +1687,10 @@ export class BrokerServer {
             await service.syncCatalog(
               tunnelId,
               mapInstanceTunnelToCatalog(tunnelId, caps),
+              {
+                remoteBrokerId: tunnelId,
+                traceId: crypto.randomUUID(),
+              },
             );
           }
           log.info(

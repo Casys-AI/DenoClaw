@@ -90,28 +90,35 @@ export interface FederationLinkOpenPayload {
   linkId: string;
   localBrokerId: string;
   remoteBrokerId: string;
+  traceId: string;
 }
 
 export interface FederationLinkAckPayload {
   linkId: string;
+  remoteBrokerId: string;
   accepted: boolean;
+  traceId: string;
   reason?: string;
 }
 
 export interface FederationCatalogSyncPayload {
   remoteBrokerId: string;
   agents: string[];
+  traceId: string;
 }
 
 export interface FederationRouteProbePayload {
   remoteBrokerId: string;
   targetAgent: string;
   taskId: string;
-  contextId?: string;
+  contextId: string;
+  traceId: string;
 }
 
 export interface FederationLinkClosePayload {
   linkId: string;
+  remoteBrokerId: string;
+  traceId: string;
   reason?: string;
 }
 

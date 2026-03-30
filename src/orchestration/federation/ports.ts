@@ -3,11 +3,15 @@ import type {
   BrokerIdentity,
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
+  FederationBrokerCorrelationContext,
+  FederationCorrelationContext,
   FederationDeadLetter,
   FederationLink,
+  FederationLinkCorrelationContext,
   FederationLinkState,
   FederationSessionToken,
   FederationStatsSnapshot,
+  FederationTraceContext,
   RemoteAgentCatalogEntry,
 } from "./types.ts";
 
@@ -16,53 +20,94 @@ export interface EstablishFederationLinkInput {
   localBrokerId: string;
   remoteBrokerId: string;
   requestedBy: string;
+  correlation: FederationLinkCorrelationContext;
 }
 
 export interface FederationControlPort {
   establishLink(input: EstablishFederationLinkInput): Promise<FederationLink>;
-  acknowledgeLink(linkId: string, accepted: boolean): Promise<void>;
-  terminateLink(linkId: string): Promise<void>;
-  setLinkState(linkId: string, state: FederationLinkState): Promise<void>;
+  acknowledgeLink(
+    linkId: string,
+    accepted: boolean,
+    correlation: FederationLinkCorrelationContext,
+  ): Promise<void>;
+  terminateLink(
+    linkId: string,
+    correlation: FederationLinkCorrelationContext,
+  ): Promise<void>;
+  setLinkState(
+    linkId: string,
+    state: FederationLinkState,
+    correlation: FederationLinkCorrelationContext,
+  ): Promise<void>;
   rotateLinkSession(
     linkId: string,
+    correlation: FederationLinkCorrelationContext,
     ttlSeconds?: number,
   ): Promise<FederationSessionToken>;
   listLinks(): Promise<FederationLink[]>;
-  refreshTrust(remoteBrokerId: string): Promise<BrokerIdentity>;
+  refreshTrust(
+    remoteBrokerId: string,
+    correlation: FederationBrokerCorrelationContext,
+  ): Promise<BrokerIdentity>;
 }
 
 export interface FederationDiscoveryPort {
-  listRemoteAgents(remoteBrokerId: string): Promise<RemoteAgentCatalogEntry[]>;
+  listRemoteAgents(
+    remoteBrokerId: string,
+    correlation: FederationBrokerCorrelationContext,
+  ): Promise<RemoteAgentCatalogEntry[]>;
   setRemoteCatalog(
     remoteBrokerId: string,
     entries: RemoteAgentCatalogEntry[],
+    correlation: FederationBrokerCorrelationContext,
   ): Promise<void>;
   getRemoteAgentCard(
     remoteBrokerId: string,
     agentId: string,
+    correlation: FederationBrokerCorrelationContext,
   ): Promise<Record<string, unknown> | null>;
 }
 
 export interface FederationIdentityPort {
-  upsertIdentity(identity: BrokerIdentity): Promise<void>;
-  getIdentity(brokerId: string): Promise<BrokerIdentity | null>;
-  listIdentities(): Promise<BrokerIdentity[]>;
-  revokeIdentity(brokerId: string): Promise<void>;
+  upsertIdentity(
+    identity: BrokerIdentity,
+    correlation?: FederationTraceContext,
+  ): Promise<void>;
+  getIdentity(
+    brokerId: string,
+    correlation?: FederationTraceContext,
+  ): Promise<BrokerIdentity | null>;
+  listIdentities(
+    correlation?: FederationTraceContext,
+  ): Promise<BrokerIdentity[]>;
+  revokeIdentity(
+    brokerId: string,
+    correlation?: FederationTraceContext,
+  ): Promise<void>;
   rotateIdentityKey(
     brokerId: string,
     nextPublicKey: string,
+    correlation?: FederationTraceContext,
   ): Promise<BrokerIdentity>;
 }
 
 export interface FederationPolicyPort {
-  setRoutePolicy(brokerId: string, policy: FederatedRoutePolicy): Promise<void>;
-  getRoutePolicy(brokerId: string): Promise<FederatedRoutePolicy | null>;
+  setRoutePolicy(
+    brokerId: string,
+    policy: FederatedRoutePolicy,
+    correlation: FederationBrokerCorrelationContext,
+  ): Promise<void>;
+  getRoutePolicy(
+    brokerId: string,
+    correlation: FederationBrokerCorrelationContext,
+  ): Promise<FederatedRoutePolicy | null>;
 }
 
 export interface FederationRoutingPort {
   resolveTarget(
     task: BrokerTaskSubmitPayload,
     policy: FederatedRoutePolicy,
+    correlation: FederationCorrelationContext,
   ): Promise<{
     kind: "local" | "remote";
     remoteBrokerId?: string;
@@ -71,16 +116,27 @@ export interface FederationRoutingPort {
   forwardTask(
     task: BrokerTaskSubmitPayload,
     remoteBrokerId: string,
+    correlation: FederationCorrelationContext,
   ): Promise<void>;
 }
 
 export interface FederationDeliveryPort {
-  createSubmissionRecord(record: FederatedSubmissionRecord): Promise<boolean>;
+  createSubmissionRecord(
+    record: FederatedSubmissionRecord,
+    correlation: FederationCorrelationContext,
+  ): Promise<boolean>;
   getSubmissionRecord(
     idempotencyKey: string,
+    correlation: FederationCorrelationContext,
   ): Promise<FederatedSubmissionRecord | null>;
-  upsertSubmissionRecord(record: FederatedSubmissionRecord): Promise<void>;
-  moveToDeadLetter(entry: FederationDeadLetter): Promise<void>;
+  upsertSubmissionRecord(
+    record: FederatedSubmissionRecord,
+    correlation: FederationCorrelationContext,
+  ): Promise<void>;
+  moveToDeadLetter(
+    entry: FederationDeadLetter,
+    correlation: FederationCorrelationContext,
+  ): Promise<void>;
   listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]>;
 }
 
@@ -88,11 +144,10 @@ export interface FederationMetricsPort {
   getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot>;
 }
 
-export interface CrossBrokerHopEvent {
+export interface CrossBrokerHopEvent extends FederationCorrelationContext {
   linkId: string;
   remoteBrokerId: string;
   taskId: string;
-  contextId?: string;
   latencyMs: number;
   success: boolean;
   errorCode?: string;

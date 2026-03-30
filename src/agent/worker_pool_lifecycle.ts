@@ -63,6 +63,8 @@ export class WorkerPoolLifecycle {
         "Agent already running",
       );
     }
+    // Keep the resolved in-memory registry aligned for hot-added workers.
+    // This is runtime-only state, not canonical persisted agent storage.
     if (!this.deps.config.agents.registry) {
       this.deps.config.agents.registry = {};
     }
@@ -83,6 +85,8 @@ export class WorkerPoolLifecycle {
     }
     this.agents.delete(agentId);
     if (this.deps.config.agents.registry) {
+      // Remove from the in-memory resolved registry used by already-running
+      // workers and peer routing.
       delete this.deps.config.agents.registry[agentId];
     }
     this.deps.callbacks.onWorkerStopped?.(agentId);

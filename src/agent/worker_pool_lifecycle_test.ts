@@ -114,46 +114,49 @@ Deno.test("WorkerPoolLifecycle starts workers and forwards runtime messages", as
   assertEquals(messages, [{ agentId: "agent-alpha", type: "task_completed" }]);
 });
 
-Deno.test("WorkerPoolLifecycle addAgent and removeAgent update registry", async () => {
-  const workers = new Map<string, FakeWorker>();
-  const stopped: string[] = [];
-  const config = createWorkerConfig();
-  const lifecycle = new WorkerPoolLifecycle({
-    config,
-    entrypointUrl: "file:///worker_entrypoint.ts",
-    callbacks: {
-      onWorkerStopped: (agentId) => stopped.push(agentId),
-    },
-    onWorkerMessage: () => {},
-    prepareSharedStorage: () => Promise.resolve(),
-    prepareAgentStorage: () => Promise.resolve(),
-    getKvPaths: (agentId) => ({
-      private: `/tmp/${agentId}.db`,
-      shared: "/tmp/shared.db",
-    }),
-    workerFactory: (_url, agentId) => {
-      const worker = new FakeWorker();
-      workers.set(agentId, worker);
-      return worker;
-    },
-  });
-  const agentEntry = { model: "gpt-5.4" } as AgentEntry;
+Deno.test(
+  "WorkerPoolLifecycle addAgent and removeAgent update the resolved runtime registry",
+  async () => {
+    const workers = new Map<string, FakeWorker>();
+    const stopped: string[] = [];
+    const config = createWorkerConfig();
+    const lifecycle = new WorkerPoolLifecycle({
+      config,
+      entrypointUrl: "file:///worker_entrypoint.ts",
+      callbacks: {
+        onWorkerStopped: (agentId) => stopped.push(agentId),
+      },
+      onWorkerMessage: () => {},
+      prepareSharedStorage: () => Promise.resolve(),
+      prepareAgentStorage: () => Promise.resolve(),
+      getKvPaths: (agentId) => ({
+        private: `/tmp/${agentId}.db`,
+        shared: "/tmp/shared.db",
+      }),
+      workerFactory: (_url, agentId) => {
+        const worker = new FakeWorker();
+        workers.set(agentId, worker);
+        return worker;
+      },
+    });
+    const agentEntry = { model: "gpt-5.4" } as AgentEntry;
 
-  const pending = lifecycle.addAgent("agent-beta", agentEntry);
-  await flushAsync();
-  const worker = workers.get("agent-beta");
-  if (!worker) throw new Error("expected fake worker");
-  worker.emit({ type: "ready", agentId: "agent-beta" });
-  await pending;
+    const pending = lifecycle.addAgent("agent-beta", agentEntry);
+    await flushAsync();
+    const worker = workers.get("agent-beta");
+    if (!worker) throw new Error("expected fake worker");
+    worker.emit({ type: "ready", agentId: "agent-beta" });
+    await pending;
 
-  assertEquals(config.agents.registry?.["agent-beta"], agentEntry);
-  assertEquals(lifecycle.isReady("agent-beta"), true);
+    assertEquals(config.agents.registry?.["agent-beta"], agentEntry);
+    assertEquals(lifecycle.isReady("agent-beta"), true);
 
-  assertEquals(lifecycle.removeAgent("agent-beta"), true);
-  assertEquals(worker.terminated, true);
-  assertEquals(config.agents.registry?.["agent-beta"], undefined);
-  assertEquals(stopped, ["agent-beta"]);
-});
+    assertEquals(lifecycle.removeAgent("agent-beta"), true);
+    assertEquals(worker.terminated, true);
+    assertEquals(config.agents.registry?.["agent-beta"], undefined);
+    assertEquals(stopped, ["agent-beta"]);
+  },
+);
 
 Deno.test("WorkerPoolLifecycle rejects init failures", async () => {
   const worker = new FakeWorker();

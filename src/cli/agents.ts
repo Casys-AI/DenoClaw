@@ -3,15 +3,19 @@ import type {
   ChannelRouting,
   SandboxPermission,
 } from "../shared/types.ts";
-import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
+import {
+  getConfigOrDefault,
+  getPersistedConfigOrDefault,
+  saveConfig,
+} from "../config/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 
 export async function listAgents(): Promise<void> {
   const config = await getConfigOrDefault();
-  // Merge: workspace agents + legacy registry
+  const persistedConfig = await getPersistedConfigOrDefault();
   const wsRegistry = await WorkspaceLoader.buildRegistry();
-  const legacyRegistry = config.agents.registry || {};
+  const legacyRegistry = persistedConfig.agents.registry || {};
   const registry = { ...legacyRegistry, ...wsRegistry };
   const agents = Object.entries(registry);
 
@@ -59,6 +63,8 @@ export async function createAgent(
   opts?: CreateAgentOptions,
 ): Promise<void> {
   const config = await getConfigOrDefault();
+  const persistedConfig = await getPersistedConfigOrDefault();
+  const legacyRegistry = persistedConfig.agents.registry || {};
   const interactive = !opts ||
     (!opts.description && !opts.model && !opts.systemPrompt &&
       !opts.permissions && !opts.peers && !opts.acceptFrom && !opts.force);
@@ -69,7 +75,9 @@ export async function createAgent(
     return;
   }
 
-  if (await WorkspaceLoader.exists(agentName)) {
+  const workspaceExists = await WorkspaceLoader.exists(agentName);
+  const legacyExists = !!legacyRegistry[agentName];
+  if (workspaceExists || legacyExists) {
     if (opts?.force) { /* overwrite */ }
     else if (interactive) {
       if (
@@ -194,27 +202,29 @@ export async function createAgent(
     channelRouting: channels.length > 0 ? channelRouting : undefined,
   };
 
-  // Write to workspace (agent.json + soul.md)
   await WorkspaceLoader.create(agentName, entry, systemPrompt);
 
-  // Also keep in config.json registry for backward compat
-  if (!config.agents.registry) config.agents.registry = {};
-  config.agents.registry[agentName] = entry;
-  if (systemPrompt) {
-    config.agents.registry[agentName].systemPrompt = systemPrompt;
+  if (legacyExists) {
+    delete legacyRegistry[agentName];
+    if (Object.keys(legacyRegistry).length === 0) {
+      delete persistedConfig.agents.registry;
+    } else {
+      persistedConfig.agents.registry = legacyRegistry;
+    }
+    await saveConfig(persistedConfig, { persistAgentRegistry: true });
   }
-  await saveConfig(config);
 
-  success(`Agent "${agentName}" created (workspace + config).`);
+  success(`Agent "${agentName}" created in workspace.`);
 }
 
 export async function deleteAgent(
   name?: string,
   opts?: { yes?: boolean },
 ): Promise<void> {
-  const config = await getConfigOrDefault();
+  const persistedConfig = await getPersistedConfigOrDefault();
   const wsAgents = await WorkspaceLoader.listAll();
-  const registryAgents = Object.keys(config.agents.registry || {});
+  const legacyRegistry = { ...(persistedConfig.agents.registry || {}) };
+  const registryAgents = Object.keys(legacyRegistry);
   const allAgents = [...new Set([...wsAgents, ...registryAgents])];
 
   const agentName = name || await ask("Agent name to delete");
@@ -224,27 +234,32 @@ export async function deleteAgent(
     return;
   }
 
-  if (!opts?.yes && !await confirm(`Delete agent "${agentName}"?`, false)) return;
+  if (!opts?.yes && !await confirm(`Delete agent "${agentName}"?`, false)) {
+    return;
+  }
 
   // Delete workspace
   await WorkspaceLoader.delete(agentName);
 
-  // Delete from config registry
-  if (config.agents.registry?.[agentName]) {
-    delete config.agents.registry[agentName];
+  let changedLegacyRegistry = false;
+  if (legacyRegistry[agentName]) {
+    delete legacyRegistry[agentName];
+    changedLegacyRegistry = true;
   }
 
-  // Remove from peers/acceptFrom of other agents in config
-  if (config.agents.registry) {
-    for (const agent of Object.values(config.agents.registry)) {
-      if (agent.peers) agent.peers = agent.peers.filter((p) => p !== agentName);
-      if (agent.acceptFrom) {
-        agent.acceptFrom = agent.acceptFrom.filter((p) => p !== agentName);
-      }
+  // Remove from peers/acceptFrom of legacy config agents.
+  for (const agent of Object.values(legacyRegistry)) {
+    if (agent.peers?.includes(agentName)) {
+      agent.peers = agent.peers.filter((p) => p !== agentName);
+      changedLegacyRegistry = true;
+    }
+    if (agent.acceptFrom?.includes(agentName)) {
+      agent.acceptFrom = agent.acceptFrom.filter((p) => p !== agentName);
+      changedLegacyRegistry = true;
     }
   }
 
-  // Remove from peers/acceptFrom of workspace agents
+  // Remove from peers/acceptFrom of workspace agents.
   for (const otherId of wsAgents) {
     if (otherId === agentName) continue;
     const ws = await WorkspaceLoader.load(otherId);
@@ -263,8 +278,18 @@ export async function deleteAgent(
     }
   }
 
-  await saveConfig(config);
+  if (changedLegacyRegistry) {
+    if (Object.keys(legacyRegistry).length === 0) {
+      delete persistedConfig.agents.registry;
+    } else {
+      persistedConfig.agents.registry = legacyRegistry;
+    }
+    await saveConfig(persistedConfig, { persistAgentRegistry: true });
+  }
+
   success(
-    `Agent "${agentName}" deleted (workspace + config, removed from peers).`,
+    `Agent "${agentName}" deleted (workspace${
+      changedLegacyRegistry ? " + legacy config cleanup" : ""
+    }, removed from peers).`,
   );
 }

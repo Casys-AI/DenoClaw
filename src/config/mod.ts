@@ -2,6 +2,7 @@ export {
   createDefaultConfig,
   getConfig,
   getConfigOrDefault,
+  getPersistedConfigOrDefault,
   loadConfig,
   saveConfig,
 } from "./loader.ts";

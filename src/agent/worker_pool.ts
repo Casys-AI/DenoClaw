@@ -151,7 +151,7 @@ export class WorkerPool {
       throw new AgentError("NO_WORKER", {
         agentId,
         available: this.getAgentIds(),
-      }, "Use an agentId that exists in agents.registry");
+      }, "Use an agentId that exists in the resolved agent registry");
     }
     if (!entry.ready) {
       throw new AgentError(

@@ -9,6 +9,10 @@ import {
 } from "../shared/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
 
+export interface SaveConfigOptions {
+  persistAgentRegistry?: boolean;
+}
+
 function createDefaultConfig(): Config {
   return {
     providers: {},
@@ -74,11 +78,30 @@ export async function loadConfig(): Promise<Config> {
   }
 }
 
-export async function saveConfig(config: Config): Promise<void> {
+function cloneConfig(config: Config): Config {
+  return JSON.parse(JSON.stringify(config)) as Config;
+}
+
+function prepareConfigForPersistence(
+  config: Config,
+  options: SaveConfigOptions = {},
+): Config {
+  const persistable = cloneConfig(config);
+  if (!options.persistAgentRegistry && persistable.agents) {
+    delete persistable.agents.registry;
+  }
+  return persistable;
+}
+
+export async function saveConfig(
+  config: Config,
+  options: SaveConfigOptions = {},
+): Promise<void> {
   const homeDir = getHomeDir();
   await ensureDir(homeDir);
   const configPath = getConfigPath();
-  await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2));
+  const persistable = prepareConfigForPersistence(config, options);
+  await Deno.writeTextFile(configPath, JSON.stringify(persistable, null, 2));
   log.info("Config saved", configPath);
 }
 
@@ -104,6 +127,33 @@ export async function getConfig(): Promise<Config> {
   return mergeWorkspaceAgents(withEnv);
 }
 
+/**
+ * Returns the raw persisted config file (or defaults when absent).
+ *
+ * Unlike getConfig()/getConfigOrDefault(), this does not merge environment
+ * variables or workspace agents. It is only for legacy migration flows that
+ * still need to inspect or clean up persisted registry state.
+ */
+export async function getPersistedConfigOrDefault(): Promise<Config> {
+  try {
+    return await loadConfig();
+  } catch (e) {
+    if (e instanceof ConfigError) {
+      log.debug("No persisted config found, using default values");
+      return createDefaultConfig();
+    }
+    throw e;
+  }
+}
+
+/**
+ * Returns the resolved runtime config.
+ *
+ * This is the canonical read path for CLI/runtime behavior. It merges:
+ * - persisted config
+ * - environment provider overrides
+ * - workspace agent declarations
+ */
 export async function getConfigOrDefault(): Promise<Config> {
   try {
     return await getConfig();

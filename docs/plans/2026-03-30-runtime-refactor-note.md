@@ -244,6 +244,8 @@ After landing the refactor into the local checkpoint branch:
   them by default
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
+  - broker message dispatch in
+    `src/orchestration/broker/message_runtime.ts`
   - `src/orchestration/broker/llm_proxy.ts`
   - `src/orchestration/broker/agent_message_router.ts`
   - slimmer federation wiring in
@@ -256,7 +258,8 @@ After landing the refactor into the local checkpoint branch:
   - startup/shutdown coordination in
     `src/orchestration/broker/lifecycle_runtime.ts`
 - current broker/federation/agent runtime file sizes are now:
-  - `src/orchestration/broker/server.ts`: 499 lines
+  - `src/orchestration/broker/server.ts`: 382 lines
+  - `src/orchestration/broker/message_runtime.ts`: 119 lines
   - `src/orchestration/broker/federation_runtime.ts`: 110 lines
   - `src/orchestration/broker/federation_routing_port.ts`: 98 lines
   - `src/orchestration/broker/federation_control_handlers.ts`: 211 lines

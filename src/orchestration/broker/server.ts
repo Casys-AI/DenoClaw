@@ -1,5 +1,4 @@
 import type {
-  BrokerFederationMessage,
   BrokerMessage,
   BrokerTaskContinuePayload,
   BrokerTaskQueryPayload,
@@ -40,6 +39,7 @@ import type { ToolExecutionPort } from "../tool_execution_port.ts";
 import { LocalToolExecutionAdapter } from "../adapters/tool_execution_local.ts";
 import { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
 import { getSandboxAccessToken } from "../../shared/deploy_credentials.ts";
+import { BrokerMessageRuntime } from "./message_runtime.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -83,6 +83,7 @@ export class BrokerServer {
   private federationRuntime: BrokerFederationRuntime;
   private httpRuntime: BrokerHttpRuntime;
   private lifecycleRuntime: BrokerLifecycleRuntime;
+  private messageRuntime: BrokerMessageRuntime;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
@@ -170,6 +171,15 @@ export class BrokerServer {
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
       sendReply: (reply) => this.sendReply(reply),
     });
+    this.messageRuntime = new BrokerMessageRuntime({
+      llmProxy: this.llmProxy,
+      toolDispatcher: this.toolDispatcher,
+      replyDispatcher: this.replyDispatcher,
+      taskDispatcher: this.taskDispatcher,
+      federationRuntime: this.federationRuntime,
+      sendStructuredError: (to, requestId, error) =>
+        this.sendStructuredError(to, requestId, error),
+    });
   }
 
   private createDefaultToolExecutionAdapter(): ToolExecutionPort {
@@ -224,82 +234,7 @@ export class BrokerServer {
    * Called from HTTP handler, WebSocket tunnel, or local KV Queue.
    */
   async handleIncomingMessage(msg: BrokerMessage): Promise<void> {
-    if (msg.to !== "broker") return;
-    await this.handleMessage(msg);
-  }
-
-  private async handleMessage(msg: BrokerMessage): Promise<void> {
-    log.info(`Broker: ${msg.type} from ${msg.from}`);
-
-    try {
-      switch (msg.type) {
-        case "llm_request":
-          await this.handleLLMRequest(msg);
-          break;
-        case "tool_request":
-          await this.handleToolRequest(msg);
-          break;
-        case "task_submit":
-          await this.handleTaskSubmit(msg);
-          break;
-        case "task_get":
-          await this.handleTaskGet(msg);
-          break;
-        case "task_continue":
-          await this.handleTaskContinue(msg);
-          break;
-        case "task_cancel":
-          await this.handleTaskCancel(msg);
-          break;
-        case "task_result":
-          await this.handleTaskResult(msg);
-          break;
-        case "federation_link_open":
-        case "federation_link_ack":
-        case "federation_catalog_sync":
-        case "federation_route_probe":
-        case "federation_link_close":
-          await this.handleFederationControlMessage(msg);
-          break;
-        default:
-          log.warn(`Unknown message type: ${msg.type}`);
-      }
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      log.error(`Message handler failed for ${msg.type} from ${msg.from}`, err);
-      try {
-        await this.sendStructuredError(msg.from, msg.id, {
-          code: "BROKER_ERROR",
-          context: {
-            messageType: msg.type,
-            from: msg.from,
-            cause: err.message,
-          },
-          recovery: "Check broker logs for details",
-        });
-      } catch (sendErr) {
-        log.error(
-          "Failed to send error reply to agent (KV unavailable?)",
-          sendErr,
-        );
-      }
-    }
-  }
-
-  // ── LLM Proxy ───────────────────────────────────────
-
-  private async handleLLMRequest(
-    msg: Extract<BrokerMessage, { type: "llm_request" }>,
-  ): Promise<void> {
-    await this.llmProxy.handleRequest(msg);
-  }
-
-  // ── Tool routing (ADR-005: permissions par intersection) ─
-
-  private async handleToolRequest(
-    msg: Extract<BrokerMessage, { type: "tool_request" }>,
-  ): Promise<void> {
-    await this.toolDispatcher.handleToolRequest(msg);
+    await this.messageRuntime.handleIncomingMessage(msg);
   }
 
   async resolveBrokerToolApprovalRequirement(
@@ -316,56 +251,10 @@ export class BrokerServer {
     );
   }
 
-  // ── Canonical task message handlers ─────────────────
-
-  private async handleTaskSubmit(
-    msg: Extract<BrokerMessage, { type: "task_submit" }>,
+  async handleToolRequest(
+    msg: Extract<BrokerMessage, { type: "tool_request" }>,
   ): Promise<void> {
-    await this.replyDispatcher.sendTaskResult(
-      msg.from,
-      msg.id,
-      await this.submitAgentTask(msg.from, msg.payload),
-    );
-  }
-
-  private async handleTaskGet(
-    msg: Extract<BrokerMessage, { type: "task_get" }>,
-  ): Promise<void> {
-    await this.replyDispatcher.sendTaskResult(
-      msg.from,
-      msg.id,
-      await this.getTask(msg.payload),
-    );
-  }
-
-  private async handleTaskContinue(
-    msg: Extract<BrokerMessage, { type: "task_continue" }>,
-  ): Promise<void> {
-    await this.replyDispatcher.sendTaskResult(
-      msg.from,
-      msg.id,
-      await this.continueAgentTask(msg.from, msg.payload),
-    );
-  }
-
-  private async handleTaskCancel(
-    msg: Extract<BrokerMessage, { type: "task_cancel" }>,
-  ): Promise<void> {
-    await this.replyDispatcher.sendTaskResult(
-      msg.from,
-      msg.id,
-      await this.cancelTask(msg.payload),
-    );
-  }
-
-  private async handleTaskResult(
-    msg: Extract<BrokerMessage, { type: "task_result" }>,
-  ): Promise<void> {
-    await this.replyDispatcher.sendTaskResult(
-      msg.from,
-      msg.id,
-      await this.recordTaskResult(msg.from, msg.payload),
-    );
+    await this.toolDispatcher.handleToolRequest(msg);
   }
 
   async submitAgentTask(
@@ -407,12 +296,6 @@ export class BrokerServer {
     return await this.federationRuntime.getService();
   }
 
-  private async handleFederationControlMessage(
-    msg: BrokerFederationMessage,
-  ): Promise<void> {
-    await this.federationRuntime.handleControlMessage(msg);
-  }
-
   // ── Tunnel management ───────────────────────────────
 
   private findTunnelForProvider(_model: string): WebSocket | null {
@@ -445,7 +328,7 @@ export class BrokerServer {
       return;
     }
     try {
-      await this.handleMessage(msg);
+      await this.messageRuntime.handleMessage(msg);
     } catch (e) {
       log.error(`Failed to handle tunnel message from ${tunnelId}`, e);
     }

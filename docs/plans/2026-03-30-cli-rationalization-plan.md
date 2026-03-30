@@ -1,10 +1,17 @@
 # CLI Rationalization — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rationaliser le CLI DenoClaw autour d'un workflow par étapes : dev local → deploy → publish, avec compatibilité AX (--json, --yes, TTY detection).
+**Goal:** Rationaliser le CLI DenoClaw autour d'un workflow par étapes : dev
+local → deploy → publish, avec compatibilité AX (--json, --yes, TTY detection).
 
-**Architecture:** Refactor de `main.ts` (command switch) + ajout d'un module `src/cli/output.ts` pour la couche AX. Les fonctions existantes dans `src/cli/setup.ts` et `src/cli/agents.ts` sont réutilisées et adaptées. `publishGateway()` est câblé dans la nouvelle commande `deploy`.
+**Architecture:** Refactor de `main.ts` (command switch) + ajout d'un module
+`src/cli/output.ts` pour la couche AX. Les fonctions existantes dans
+`src/cli/setup.ts` et `src/cli/agents.ts` sont réutilisées et adaptées.
+`publishGateway()` est câblé dans la nouvelle commande `deploy`.
 
 **Tech Stack:** Deno, @std/cli, deno deploy CLI
 
@@ -13,6 +20,7 @@
 ### Task 1: Couche output AX-compatible (`src/cli/output.ts`)
 
 **Files:**
+
 - Create: `src/cli/output.ts`
 - Modify: `src/cli/prompt.ts`
 
@@ -46,7 +54,10 @@ export function cliFlags(): CliFlags {
 }
 
 /** Output a result — JSON object in AX mode, human text otherwise. */
-export function output(data: Record<string, unknown>, humanText?: string): void {
+export function output(
+  data: Record<string, unknown>,
+  humanText?: string,
+): void {
   if (_flags.json) {
     console.log(JSON.stringify(data));
   } else if (humanText) {
@@ -95,7 +106,9 @@ export async function ask(
   defaultValue?: string,
 ): Promise<string> {
   if (!cliFlags().interactive && !defaultValue) {
-    throw new Error(`Missing required input: ${question} (non-interactive mode, no default)`);
+    throw new Error(
+      `Missing required input: ${question} (non-interactive mode, no default)`,
+    );
   }
   if (!cliFlags().interactive) return defaultValue!;
 
@@ -123,11 +136,13 @@ git commit -m "feat(cli): add AX-compatible output layer with --json, --yes, TTY
 ### Task 2: Commande `dev` (remplace `gateway` + `agent`)
 
 **Files:**
+
 - Modify: `main.ts`
 
 - [ ] **Step 1: Ajouter le cas `dev` dans le switch de `main.ts`**
 
-La commande `dev` lance le gateway local. Avec `--agent <id>` sans `gateway`, elle lance le mode REPL.
+La commande `dev` lance le gateway local. Avec `--agent <id>` sans `gateway`,
+elle lance le mode REPL.
 
 ```typescript
 case "dev": {
@@ -146,7 +161,8 @@ case "dev": {
 }
 ```
 
-- [ ] **Step 2: Garder `gateway` et `agent` comme alias (backward compat temporaire)**
+- [ ] **Step 2: Garder `gateway` et `agent` comme alias (backward compat
+      temporaire)**
 
 Ajouter un log de deprecation dans les anciens cas :
 
@@ -181,12 +197,15 @@ git commit -m "feat(cli): add 'dev' command replacing gateway+agent for local wo
 ### Task 3: Commande `deploy` (broker en ligne)
 
 **Files:**
+
 - Modify: `main.ts`
-- Modify: `src/cli/setup.ts` (refactor `publishGateway` pour utiliser `deno deploy` au lieu de `deployctl`)
+- Modify: `src/cli/setup.ts` (refactor `publishGateway` pour utiliser
+  `deno deploy`)
 
-- [ ] **Step 1: Refactorer `publishGateway()` → `deployBroker()` dans `src/cli/setup.ts`**
+- [ ] **Step 1: Refactorer `publishGateway()` → `deployBroker()` dans
+      `src/cli/setup.ts`**
 
-Remplacer l'implémentation `deployctl` par `deno deploy` :
+Remplacer l'ancienne implémentation legacy par `deno deploy` :
 
 ```typescript
 export async function deployBroker(opts?: {
@@ -198,15 +217,20 @@ export async function deployBroker(opts?: {
   const interactive = cliFlags().interactive;
 
   // 1. Determine org and app
-  const org = opts?.org || (interactive
-    ? await ask("Deploy org", config.deploy?.org || "casys")
-    : config.deploy?.org);
-  const app = opts?.app || (interactive
-    ? await ask("Deploy app name", config.deploy?.app || "denoclaw")
-    : config.deploy?.app);
+  const org = opts?.org ||
+    (interactive
+      ? await ask("Deploy org", config.deploy?.org || "casys")
+      : config.deploy?.org);
+  const app = opts?.app ||
+    (interactive
+      ? await ask("Deploy app name", config.deploy?.app || "denoclaw")
+      : config.deploy?.app);
 
   if (!org || !app) {
-    outputError("MISSING_ORG_APP", "Organization and app name are required. Use --org and --app.");
+    outputError(
+      "MISSING_ORG_APP",
+      "Organization and app name are required. Use --org and --app.",
+    );
     return;
   }
 
@@ -251,7 +275,16 @@ export async function deployBroker(opts?: {
     if (cfg?.apiKey && envMap[name]) {
       print(`Setting ${envMap[name]}...`);
       const envCmd = new Deno.Command("deno", {
-        args: ["deploy", "env", "add", "--org", org, "--app", app, `${envMap[name]}=${cfg.apiKey}`],
+        args: [
+          "deploy",
+          "env",
+          "add",
+          "--org",
+          org,
+          "--app",
+          app,
+          `${envMap[name]}=${cfg.apiKey}`,
+        ],
         stdout: "piped",
         stderr: "piped",
       });
@@ -265,7 +298,16 @@ export async function deployBroker(opts?: {
     apiToken = crypto.randomUUID();
     print(`Setting DENOCLAW_API_TOKEN...`);
     const tokenCmd = new Deno.Command("deno", {
-      args: ["deploy", "env", "add", "--org", org, "--app", app, `DENOCLAW_API_TOKEN=${apiToken}`],
+      args: [
+        "deploy",
+        "env",
+        "add",
+        "--org",
+        org,
+        "--app",
+        app,
+        `DENOCLAW_API_TOKEN=${apiToken}`,
+      ],
       stdout: "piped",
       stderr: "piped",
     });
@@ -340,6 +382,7 @@ git commit -m "feat(cli): add 'deploy' command for one-step broker deployment to
 ### Task 4: Commande `publish` (push agent vers broker)
 
 **Files:**
+
 - Modify: `main.ts`
 - Create: `src/cli/publish.ts`
 
@@ -348,7 +391,7 @@ git commit -m "feat(cli): add 'deploy' command for one-step broker deployment to
 ```typescript
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { WorkspaceLoader } from "../agent/workspace.ts";
-import { ask, confirm, print, success, error } from "./prompt.ts";
+import { ask, confirm, error, print, success } from "./prompt.ts";
 import { cliFlags, output, outputError } from "./output.ts";
 
 /**
@@ -363,11 +406,17 @@ export async function publishAgents(agentName?: string): Promise<void> {
   const apiToken = Deno.env.get("DENOCLAW_API_TOKEN");
 
   if (!brokerUrl) {
-    outputError("NO_BROKER", "No broker deployed. Run 'denoclaw deploy' first.");
+    outputError(
+      "NO_BROKER",
+      "No broker deployed. Run 'denoclaw deploy' first.",
+    );
     return;
   }
   if (!apiToken) {
-    outputError("NO_TOKEN", "DENOCLAW_API_TOKEN not set. Set it in .env or environment.");
+    outputError(
+      "NO_TOKEN",
+      "DENOCLAW_API_TOKEN not set. Set it in .env or environment.",
+    );
     return;
   }
 
@@ -378,7 +427,10 @@ export async function publishAgents(agentName?: string): Promise<void> {
   if (agentName) {
     const entry = wsRegistry[agentName];
     if (!entry) {
-      outputError("AGENT_NOT_FOUND", `Agent "${agentName}" not found in workspace.`);
+      outputError(
+        "AGENT_NOT_FOUND",
+        `Agent "${agentName}" not found in workspace.`,
+      );
       return;
     }
     agentsToPublish = [[agentName, entry]];
@@ -388,7 +440,11 @@ export async function publishAgents(agentName?: string): Promise<void> {
       outputError("NO_AGENTS", "No agents in workspace.");
       return;
     }
-    print(`Found ${agentsToPublish.length} agent(s): ${agentsToPublish.map(([n]) => n).join(", ")}`);
+    print(
+      `Found ${agentsToPublish.length} agent(s): ${
+        agentsToPublish.map(([n]) => n).join(", ")
+      }`,
+    );
     if (!await confirm("Publish all?")) return;
   }
 
@@ -417,8 +473,14 @@ export async function publishAgents(agentName?: string): Promise<void> {
   }
 
   output(
-    { published: results.filter((r) => r.ok).length, total: results.length, results },
-    `\n✓ ${results.filter((r) => r.ok).length}/${results.length} agent(s) published to ${brokerUrl}`,
+    {
+      published: results.filter((r) => r.ok).length,
+      total: results.length,
+      results,
+    },
+    `\n✓ ${
+      results.filter((r) => r.ok).length
+    }/${results.length} agent(s) published to ${brokerUrl}`,
   );
 }
 ```
@@ -445,6 +507,7 @@ git commit -m "feat(cli): add 'publish' command to push agents to remote broker"
 ### Task 5: Commande `status` enrichie + `logs`
 
 **Files:**
+
 - Modify: `src/cli/setup.ts` (`showStatus`)
 - Modify: `main.ts`
 
@@ -453,40 +516,40 @@ git commit -m "feat(cli): add 'publish' command to push agents to remote broker"
 Ajouter à la fin de `showStatus()` dans `src/cli/setup.ts` :
 
 ```typescript
-  // Remote broker status
-  const deploy = config.deploy;
-  if (deploy?.app) {
-    const brokerUrl = `https://${deploy.app}.deno.dev`;
-    const token = Deno.env.get("DENOCLAW_API_TOKEN");
-    print(`\n── Remote Broker ──\n`);
-    print(`URL          : ${brokerUrl}`);
+// Remote broker status
+const deploy = config.deploy;
+if (deploy?.app) {
+  const brokerUrl = `https://${deploy.app}.deno.dev`;
+  const token = Deno.env.get("DENOCLAW_API_TOKEN");
+  print(`\n── Remote Broker ──\n`);
+  print(`URL          : ${brokerUrl}`);
 
-    if (token) {
-      try {
-        const res = await fetch(`${brokerUrl}/health`, {
-          headers: { "Authorization": `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const health = await res.json();
-          print(`Status       : online`);
-          print(`Tunnels      : ${health.tunnelCount ?? 0}`);
-        } else {
-          print(`Status       : error (${res.status})`);
-        }
-      } catch {
-        print(`Status       : unreachable`);
+  if (token) {
+    try {
+      const res = await fetch(`${brokerUrl}/health`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const health = await res.json();
+        print(`Status       : online`);
+        print(`Tunnels      : ${health.tunnelCount ?? 0}`);
+      } else {
+        print(`Status       : error (${res.status})`);
       }
-    } else {
-      print(`Status       : no token (set DENOCLAW_API_TOKEN)`);
+    } catch {
+      print(`Status       : unreachable`);
     }
+  } else {
+    print(`Status       : no token (set DENOCLAW_API_TOKEN)`);
   }
+}
 
-  output({
-    providers,
-    model: config.agents.defaults.model,
-    channels,
-    deploy: deploy ?? null,
-  });
+output({
+  providers,
+  model: config.agents.defaults.model,
+  channels,
+  deploy: deploy ?? null,
+});
 ```
 
 - [ ] **Step 2: Ajouter commande `logs` dans `main.ts`**
@@ -523,6 +586,7 @@ git commit -m "feat(cli): enrich status with remote broker info, add logs comman
 ### Task 6: Refactor `main.ts` — flags globaux, help, cleanup
 
 **Files:**
+
 - Modify: `main.ts`
 
 - [ ] **Step 1: Ajouter flags globaux `--json`, `--yes` au `parseArgs`**
@@ -530,9 +594,17 @@ git commit -m "feat(cli): enrich status with remote broker info, add logs comman
 ```typescript
 const args = parseArgs(Deno.args, {
   string: [
-    "message", "session", "model", "agent",
-    "description", "system-prompt", "permissions", "peers", "accept-from",
-    "org", "app",
+    "message",
+    "session",
+    "model",
+    "agent",
+    "description",
+    "system-prompt",
+    "permissions",
+    "peers",
+    "accept-from",
+    "org",
+    "app",
   ],
   boolean: ["force", "json", "yes"],
   alias: { m: "message", s: "session", a: "agent", y: "yes" },
@@ -585,7 +657,8 @@ Options:
 
 - [ ] **Step 3: Nettoyer les anciens cas — ajouter deprecation warnings**
 
-Pour `gateway`, `broker`, `setup`, `start` : ajouter un message de deprecation puis exécuter la nouvelle commande correspondante.
+Pour `gateway`, `broker`, `setup`, `start` : ajouter un message de deprecation
+puis exécuter la nouvelle commande correspondante.
 
 - [ ] **Step 4: Mettre à jour les tasks dans `deno.json`**
 
@@ -612,6 +685,7 @@ git commit -m "feat(cli): rationalize commands with global --json/--yes flags an
 ### Task 7: Mettre à jour le comportement par défaut (Deno Deploy + local)
 
 **Files:**
+
 - Modify: `main.ts`
 
 - [ ] **Step 1: Simplifier le cas `undefined` (aucune commande)**
@@ -643,6 +717,7 @@ git commit -m "feat(cli): show help by default locally, auto-gateway on Deploy"
 ### Task 8: Ajouter le champ `deploy` au type Config
 
 **Files:**
+
 - Modify: `src/config/types.ts`
 - Modify: `src/config/loader.ts` (si nécessaire pour persister `deploy`)
 

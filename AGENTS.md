@@ -12,12 +12,12 @@
 ## Project Overview
 
 DenoClaw is a Deno-native AI agent framework inspired by nano-claw/PicoClaw.
-Zero Node.js dependencies. Agents live in Deno Subhosting (warm-cached isolates,
-stateful via KV), execute code in Deno Sandbox (ephemeral, hardened
+Zero Node.js dependencies. Agents run as dedicated Deno Deploy apps (warm-cached
+isolates, stateful via KV), execute code in Deno Sandbox (ephemeral, hardened
 permissions), and communicate via a Broker on Deno Deploy (LLM proxy, message
-router, tunnel hub, cron scheduler). The Broker orchestrates — agents are
-reactive (HTTP request/response). Inter-agent communication uses A2A protocol.
-See `docs/architecture-distributed.md` and ADRs in `docs/`.
+router, tunnel hub, cron scheduler). The Broker orchestrates; agents stay
+reactive over HTTP request/response. Inter-agent communication uses A2A
+protocol. See `docs/architecture-distributed.md` and ADRs in `docs/`.
 
 ## AX — Agent Experience Principles
 
@@ -71,17 +71,17 @@ Hard rules:
 
 ## Build, Test & Development Commands
 
-| Command              | Purpose                         |
-| -------------------- | ------------------------------- |
-| `deno task dev`      | Dev with watch (gateway + agents + dashboard) |
-| `deno task start`    | Run in dev mode (alias for dev) |
-| `deno task deploy`   | Deploy broker to Deno Deploy    |
-| `deno task publish`  | Push agents to remote broker    |
-| `deno task test`     | Run all tests                   |
-| `deno task check`    | Type-check `main.ts` + `mod.ts` |
-| `deno task lint`     | Lint                            |
-| `deno task fmt`      | Format                          |
-| `deno task dashboard`| Vite dashboard dev              |
+| Command               | Purpose                                       |
+| --------------------- | --------------------------------------------- |
+| `deno task dev`       | Dev with watch (gateway + agents + dashboard) |
+| `deno task start`     | Run in dev mode (alias for dev)               |
+| `deno task deploy`    | Deploy broker to Deno Deploy                  |
+| `deno task publish`   | Push agents to remote broker                  |
+| `deno task test`      | Run all tests                                 |
+| `deno task check`     | Type-check `main.ts` + `mod.ts`               |
+| `deno task lint`      | Lint                                          |
+| `deno task fmt`       | Format                                        |
+| `deno task dashboard` | Vite dashboard dev                            |
 
 All commands require `--unstable-kv --unstable-cron`. Already configured in
 `deno.json` tasks.
@@ -151,7 +151,7 @@ denoclaw tunnel [url]         Connect a local tunnel to the broker
 │  ├── Metrics (/stats)             │
 │  └── Agent Lifecycle              │
 │                                   │
-│  Subhosting agents (per-agent KV) │
+│  Agent apps (per-agent KV)        │
 │  ├── agent "researcher"           │
 │  ├── agent "coder"                │
 │  └── agent "reviewer"             │
@@ -166,10 +166,10 @@ denoclaw tunnel [url]         Connect a local tunnel to the broker
 
 ### Key Patterns
 
-- **Broker → Subhosting → Sandbox**: Broker orchestrates (cron, routing,
-  lifecycle). Agents in Subhosting are reactive (warm-cached V8 isolates, wake
-  on HTTP, sleep when idle). Code execution in Sandbox (ephemeral, hardened). No
-  `Deno.cron()` or `listenQueue()` in Subhosting. In local mode: **Process**
+- **Broker → Agent App → Sandbox**: Broker orchestrates (cron, routing,
+  lifecycle). Agent apps are reactive (warm-cached V8 isolates, wake on HTTP,
+  sleep when idle). Code execution happens in Sandbox (ephemeral, hardened). No
+  `Deno.cron()` or `listenQueue()` in agent apps. In local mode: **Process**
   (broker) → **Worker** (agent) → **Subprocess** (`Deno.Command`, sandbox). Same
   3-layer model, same code, different transport.
 - **Broker as single entry point**: All LLM calls, tool executions, and
@@ -185,12 +185,12 @@ denoclaw tunnel [url]         Connect a local tunnel to the broker
 ### Data Flow
 
 ```
-User → Channel (Telegram/Webhook) → Broker → HTTP POST → Agent (Subhosting)
+User → Channel (Telegram/Webhook) → Broker → HTTP POST → Agent (Deploy app)
 Agent → Broker (llm_request) → LLM API or CLI on VPS → Broker → Agent
 Agent → Broker (tool_request) → Sandbox or Tunnel → Broker → Agent
 Agent → Broker (task_submit) → peer check → HTTP POST or Tunnel → Target Agent
 Agent → Broker (task_continue) → peer check → HTTP POST or Tunnel → Target Agent
-Broker → Deno.cron() → HTTP POST /cron/:job → Agent (Subhosting)  [scheduled tasks]
+Broker → Deno.cron() → HTTP POST /cron/:job → Agent (Deploy app)  [scheduled tasks]
 ```
 
 ## Error Handling
@@ -220,18 +220,19 @@ recovery path.
 
 ## External APIs / Services
 
-### Deno Deploy / Subhosting
+### Deno Deploy Agent Apps
 
 - API: **v2** (`https://api.deno.com/v2`) — v1 sunsets July 2026, use v2 for all
   new code
-- Auth: Bearer token (Subhosting access token)
+- Auth: Bearer token (organization access token, `ddo_...`)
 - Used for: agent lifecycle (CRUD deployments)
 - Limitations: no `Deno.cron()`, no `Deno.Kv.listenQueue()`, isolates are
   warm-cached (not persistent)
 
 ### Deno Sandbox
 
-- Auth: `DENO_SANDBOX_API_TOKEN` or OIDC
+- Auth: `DENO_DEPLOY_ORG_TOKEN` (preferred), `DENO_SANDBOX_API_TOKEN` legacy
+  alias, or OIDC
 - Used for: ephemeral code execution with hardened permissions
 
 ### LLM Providers
@@ -258,7 +259,8 @@ recovery path.
 
 ## Security Guardrails
 
-- All agents run in Sandbox — no code executes in Subhosting directly.
+- All agents run in Sandbox — no code executes directly inside the deployed
+  agent app runtime.
 - Sandbox permissions by intersection (tool needs ∩ agent allows). Deny by
   default.
 - A2A peers explicitly declared. Closed by default (`peers: []`,
@@ -271,8 +273,7 @@ recovery path.
 
 ## What NOT to Do
 
-- Do not execute code directly in Subhosting agents — always dispatch to
-  Sandbox.
+- Do not execute code directly in agent apps — always dispatch to Sandbox.
 - Do not expose agent endpoints publicly — only the broker has a public URL.
 - Do not use raw string errors — always `DenoClawError` with
   code/context/recovery.
@@ -314,21 +315,21 @@ See CLI Flags / Config section. Key variables:
 | `GITHUB_CLIENT_ID`             | GitHub OAuth app client ID                      | none                         |
 | `GITHUB_CLIENT_SECRET`         | GitHub OAuth app client secret                  | none                         |
 | `DENOCLAW_DASHBOARD_AUTH_MODE` | Dashboard auth mode (`github`, `token`, `none`) | `none`                       |
-| `DENO_SUBHOSTING_ORG_ID`      | Subhosting org ID (for `publish`)               | none                         |
-| `DENO_SUBHOSTING_TOKEN`       | Subhosting access token (for `publish`)         | none                         |
+| `DENO_DEPLOY_ORG_TOKEN`        | Deploy v2 organization token (publish, sandbox) | none                         |
+| `DENO_DEPLOY_PAT`              | Personal Deploy token                           | none                         |
 
 ## ADRs
 
 | ADR | Decision                                          |
 | --- | ------------------------------------------------- |
-| 001 | Agents in Subhosting, code execution in Sandbox   |
+| 001 | Agent apps on Deploy, code execution in Sandbox   |
 | 002 | LLM Proxy dual: API + CLI on VPS, auth via tunnel |
 | 003 | OIDC + credentials materialization                |
 | 004 | GCP Secret Manager via OIDC (optional)            |
 | 005 | Sandbox permissions by intersection               |
 | 006 | A2A protocol for inter-agent communication        |
 | 007 | Real-time dashboard observability                 |
-| 008 | Subhosting architecture corrections               |
+| 008 | Deploy agent runtime corrections                  |
 | 009 | Agent memory (kvdex dual: KV + .md)               |
 | 010 | Exec policy and sandbox backend                   |
 | 011 | A2A canonical internal protocol                   |

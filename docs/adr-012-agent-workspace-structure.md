@@ -19,7 +19,7 @@ Agent data currently lives entirely in `~/.denoclaw/agents/<id>/`:
 
 This creates three problems:
 
-1. **Not deployable.** Subhosting deployment needs agent definitions (config, soul, skills) bundled with the deployment. Files in `~/` are machine-local and cannot be deployed from CI/CD.
+1. **Not deployable.** Deploy agent app deployment needs agent definitions (config, soul, skills) bundled with the deployment. Files in `~/` are machine-local and cannot be deployed from CI/CD.
 
 2. **Not versionable.** Agent definitions describe _what the agent is_ — they are source artifacts. Storing them outside the project prevents `git add` and peer review of agent configuration changes.
 
@@ -42,7 +42,7 @@ What the agent **is**. Versionable, deployable, portable.
 
 - Checked into git (agent definitions are source artifacts)
 - Read by `WorkspaceLoader` and `ConfigLoader.mergeWorkspaceAgents()`
-- Bundled into Subhosting deployments by `setup.ts`
+- Bundled into Deploy agent app deployments by `setup.ts`
 - Created by `denoclaw agent create`, deleted by `denoclaw agent delete`
 
 ### Machine-level: `~/.denoclaw/agents/<id>/` — Agent Runtime
@@ -126,7 +126,7 @@ A `denoclaw agent migrate` command moves definitions from `~/.denoclaw/` to `./d
 
 **Positive:**
 - Agent definitions are versionable and reviewable via git
-- Subhosting deployment can bundle `./data/agents/<id>/` directly
+- Deploy agent app deployment can bundle `./data/agents/<id>/` directly
 - CI/CD can deploy agents without access to the developer's home directory
 - Runtime data stays private and machine-local
 - Clear separation makes backup/restore straightforward

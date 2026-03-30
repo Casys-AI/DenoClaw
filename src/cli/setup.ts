@@ -1,7 +1,21 @@
 import type { Config } from "../config/types.ts";
+import type { AgentEntry } from "../shared/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
+import { getDeployOrgToken } from "../shared/deploy_credentials.ts";
+import { deriveBrokerKvName } from "../shared/naming.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
 import { output } from "./output.ts";
+import {
+  buildDeployAssets,
+  createDeployApiHeaders,
+  createDeployEnvVars,
+  deployAppRevision,
+  ensureDeployApp,
+  getDeployAppEndpoint,
+  registerAgentEndpointWithBroker,
+  resolveBrokerUrl,
+  updateDeployAppConfig,
+} from "./deploy_api.ts";
 
 // ── setup provider ──────────────────────────────────────
 
@@ -22,7 +36,10 @@ const NO_KEY_PROVIDERS = new Set(["claude-cli", "codex-cli"]);
 export async function setupProvider(): Promise<void> {
   const config = await getConfigOrDefault();
 
-  const choice = await choose("Which provider should be configured?", PROVIDER_OPTIONS);
+  const choice = await choose(
+    "Which provider should be configured?",
+    PROVIDER_OPTIONS,
+  );
   const providerName = choice.split("—")[0].trim().split(/\s+/)[0];
 
   if (NO_KEY_PROVIDERS.has(providerName)) {
@@ -151,8 +168,8 @@ export async function setupChannel(): Promise<void> {
           : undefined,
       };
 
-      success("Telegram configured. Start the gateway:");
-      print("  denoclaw gateway");
+      success("Telegram configured. Start local dev mode:");
+      print("  denoclaw dev");
       break;
     }
 
@@ -168,7 +185,7 @@ export async function setupChannel(): Promise<void> {
       };
 
       success(`Webhook configured on port ${port || 8787}.`);
-      print("  denoclaw gateway");
+      print("  denoclaw dev");
       break;
     }
   }
@@ -209,18 +226,19 @@ export async function setupAgent(): Promise<void> {
   print("  denoclaw agent -m .. — one-off message");
 }
 
-// ── publish agent (Subhosting) ──────────────────────────
+// ── publish agent app (Deploy API) ──────────────────────
 
 export async function publishAgent(): Promise<void> {
-  print("\n=== Publish an Agent to Deno Subhosting ===\n");
+  print("\n=== Publish an Agent App to Deno Deploy ===\n");
 
-  const orgId = await ask("Organization ID Subhosting");
-  const token = await ask("Access token Subhosting");
+  const token = await ask("Deno Deploy organization access token");
   const agentName = await ask("Agent name", "denoclaw-agent-1");
 
-  if (!orgId || !token) {
-    error("Organization ID and token are required.");
-    print("  Create them at https://dash.deno.com/subhosting");
+  if (!token) {
+    error("A Deno Deploy organization access token is required.");
+    print(
+      "  Create it from Settings > Access Tokens in the Deno Deploy dashboard",
+    );
     return;
   }
 
@@ -229,87 +247,65 @@ export async function publishAgent(): Promise<void> {
   const model = config.agents.defaults.model;
   const sandboxPerms = config.agents.defaults.sandbox?.allowedPermissions ||
     ["read", "write", "run", "net"];
+  const brokerUrl = resolveBrokerUrl(config) || await ask("Broker URL");
+  const brokerOidcAudience = Deno.env.get("DENOCLAW_BROKER_OIDC_AUDIENCE") ||
+    config.deploy?.oidcAudience ||
+    brokerUrl;
+  const brokerToken = Deno.env.get("DENOCLAW_API_TOKEN") ||
+    await ask("Broker token (empty = rely on OIDC / unauthenticated broker)");
 
   print(`  Agent: ${agentName}`);
   print(`  Model: ${model}`);
   print(`  Sandbox permissions: ${sandboxPerms.join(", ")}`);
+  print(`  Broker URL: ${brokerUrl}`);
 
-  const headers = {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-  const apiBase = "https://api.deno.com/v2";
+  const headers = createDeployApiHeaders(token);
 
   try {
-    // 1. Create the project
-    print("\n1. Creating the Subhosting project...");
-    const projRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name: agentName }),
-    });
-
-    if (!projRes.ok && (await projRes.text()).includes("already exists")) {
-      print("   Project already exists, continuing.");
-    } else if (!projRes.ok) {
-      error(`Project creation failed: ${projRes.status}`);
-      return;
-    } else {
-      const project = await projRes.json() as { id: string };
-      success(`Project created: ${project.id}`);
-    }
-
-    // 2. List projects to find the ID
-    const listRes = await fetch(`${apiBase}/organizations/${orgId}/projects`, {
-      headers,
-    });
-    const projects = await listRes.json() as { id: string; name: string }[];
-    const project = projects.find((p) => p.name === agentName);
-    if (!project) {
-      error("Project not found after creation");
-      return;
-    }
+    print("\n1. Ensuring the Deploy app exists...");
+    const app = await ensureDeployApp(agentName, headers);
 
     // 3. Create the deployment with the AgentRuntime code
     print("2. Deploying AgentRuntime...");
 
-    const entrypoint = generateAgentEntrypoint(agentName, model, sandboxPerms);
+    const entry: AgentEntry = {
+      model,
+      sandbox: { allowedPermissions: sandboxPerms },
+    };
+    const entrypoint = generateAgentEntrypoint(agentName, entry);
+    const assets = await buildDeployAssets(entrypoint);
+    const envVars = createDeployEnvVars({
+      DENOCLAW_AGENT_ID: agentName,
+      DENOCLAW_BROKER_URL: brokerUrl,
+      ...(brokerOidcAudience && brokerOidcAudience !== brokerUrl
+        ? { DENOCLAW_BROKER_OIDC_AUDIENCE: brokerOidcAudience }
+        : {}),
+      ...(brokerToken ? { DENOCLAW_API_TOKEN: brokerToken } : {}),
+    });
 
-    const deployRes = await fetch(
-      `${apiBase}/projects/${project.id}/deployments`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          entryPointUrl: "main.ts",
-          assets: {
-            "main.ts": { kind: "file", content: entrypoint, encoding: "utf-8" },
-          },
-          envVars: {
-            DENOCLAW_AGENT_ID: agentName,
-            DENOCLAW_MODEL: model,
-          },
-        }),
-      },
-    );
+    const revision = await deployAppRevision({
+      app,
+      assets,
+      envVars,
+      headers,
+    });
+    const endpoint = getDeployAppEndpoint(app);
 
-    if (!deployRes.ok) {
-      const body = await deployRes.text();
-      error(`Deployment failed: ${deployRes.status} ${body}`);
-      return;
+    success(`Agent deployed: ${revision.id}`);
+    print(`  URL: ${endpoint}`);
+    if (brokerToken) {
+      await registerAgentEndpointWithBroker({
+        brokerUrl,
+        authToken: brokerToken,
+        agentId: agentName,
+        endpoint,
+        config: entry,
+      });
+      print("  Broker registration: ok");
     }
 
-    const deployment = await deployRes.json() as {
-      id: string;
-      domainMappings?: { domain: string }[];
-    };
-    const domain = deployment.domainMappings?.[0]?.domain;
-
-    success(`Agent deployed: ${deployment.id}`);
-    if (domain) print(`  URL: https://${domain}`);
-
     print(`
-✓ Agent "${agentName}" published to Subhosting!
+✓ Agent "${agentName}" published to Deno Deploy!
 
   The agent exposes a broker-driven runtime.
   It talks to the broker for LLM calls, tool execution, and durable persistence.
@@ -324,50 +320,21 @@ export async function publishAgent(): Promise<void> {
 }
 
 /**
- * Generate the entrypoint code for a Subhosting agent.
+ * Generate the entrypoint code for a deployed agent app.
  * Uses the real AgentRuntime + BrokerClient from the DenoClaw SDK.
  */
 export function generateAgentEntrypoint(
   agentId: string,
-  model: string,
-  permissions: string[],
+  entry: AgentEntry,
 ): string {
   return `// Auto-generated DenoClaw Agent Runtime
-// Agent: ${agentId} | Model: ${model}
+// Agent: ${agentId} | Model: ${entry.model ?? "unknown"}
 
-import { AgentRuntime } from "@denoclaw/denoclaw";
-import { BrokerClient } from "@denoclaw/denoclaw";
+import { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
 
-const agentId = Deno.env.get("DENOCLAW_AGENT_ID") || "${agentId}";
-const model = Deno.env.get("DENOCLAW_MODEL") || "${model}";
-
-// Store agent config for broker permission checks
-const kv = await Deno.openKv();
-await kv.set(["agents", agentId, "config"], {
-  model,
-  sandbox: { allowedPermissions: ${JSON.stringify(permissions)} },
-});
-kv.close();
-
-// Create the runtime with a real BrokerClient (implements both runtime ports)
-const broker = new BrokerClient(agentId);
-const runtime = new AgentRuntime(agentId, { model }, broker, broker);
-
-await runtime.start();
-await runtime.startKvQueueIntake();
-console.log("Agent started:", agentId, "model:", model);
-
-// Graceful shutdown
-const ac = new AbortController();
-Deno.addSignalListener("SIGINT", () => ac.abort());
-Deno.addSignalListener("SIGTERM", () => ac.abort());
-
-// Keep alive
-Deno.serve({ port: 8000, signal: ac.signal }, () => new Response("DenoClaw Agent: " + agentId));
-
-ac.signal.addEventListener("abort", async () => {
-  await runtime.stop();
-  console.log("Agent stopped:", agentId);
+await startDeployedAgentRuntime({
+  agentId: ${JSON.stringify(agentId)},
+  entry: ${JSON.stringify(entry, null, 2)},
 });
 `;
 }
@@ -377,45 +344,252 @@ ac.signal.addEventListener("abort", async () => {
 export async function deployBroker(opts?: {
   org?: string;
   app?: string;
+  region?: string;
   prod?: boolean;
 }): Promise<void> {
   const config = await getConfigOrDefault();
+  const deployToken = getDeployOrgToken() ??
+    await ask("Deno Deploy organization access token");
 
   // 1. Determine org and app
   const org = opts?.org || config.deploy?.org ||
     await ask("Deploy org", config.deploy?.org || "casys");
   const app = opts?.app || config.deploy?.app ||
     await ask("Deploy app name", config.deploy?.app || "denoclaw");
+  const region = opts?.region || config.deploy?.region || "global";
+  const kvDatabase = config.deploy?.kvDatabase || deriveBrokerKvName(app);
 
   if (!org || !app) {
     error("Organization and app name are required. Use --org and --app.");
     return;
   }
 
-  // 2. Check if app exists, create if needed
-  print(`\nChecking app ${app} on org ${org}...`);
-  const checkCmd = new Deno.Command("deno", {
-    args: ["deploy", "logs", "--org", org, "--app", app, "--limit", "1"],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const checkResult = await checkCmd.output();
+  if (!deployToken) {
+    error(
+      "A Deno Deploy organization access token is required. Set DENO_DEPLOY_ORG_TOKEN.",
+    );
+    return;
+  }
 
-  if (!checkResult.success) {
-    print("App not found. Creating...");
-    const createCmd = new Deno.Command("deno", {
-      args: ["deploy", "create", "--org", org, "--app", app],
-      stdout: "inherit",
-      stderr: "inherit",
+  const repoRoot = Deno.cwd();
+  const cliEnv = {
+    ...Deno.env.toObject(),
+    DENO_DEPLOY_TOKEN: deployToken,
+  };
+  const decoder = new TextDecoder();
+  const apiHeaders = createDeployApiHeaders(deployToken);
+  const brokerAppConfig = {
+    install: "true",
+    build: "true",
+    predeploy: "true",
+    runtime: {
+      type: "dynamic" as const,
+      entrypoint: "./main.ts",
+      args: ["broker"],
+      cwd: ".",
+    },
+    crons: true,
+  };
+
+  async function runDeployCli(
+    args: string[],
+    opts?: { cwd?: string; echo?: boolean },
+  ): Promise<{ success: boolean; stdout: string; stderr: string }> {
+    const cmd = new Deno.Command("deno", {
+      args,
+      cwd: opts?.cwd,
+      env: cliEnv,
+      stdout: "piped",
+      stderr: "piped",
     });
-    const createResult = await createCmd.output();
+    const result = await cmd.output();
+    const stdout = decoder.decode(result.stdout).trim();
+    const stderr = decoder.decode(result.stderr).trim();
+
+    if (opts?.echo) {
+      if (stdout) print(stdout);
+      if (stderr) print(stderr);
+    }
+
+    return { success: result.success, stdout, stderr };
+  }
+
+  async function ensureBrokerApp(): Promise<boolean> {
+    try {
+      await updateDeployAppConfig({
+        app,
+        headers: apiHeaders,
+        config: brokerAppConfig,
+      });
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes("(404)")) throw err;
+    }
+
+    print(`App ${app} not found. Creating...`);
+    const createResult = await runDeployCli([
+      "deploy",
+      "create",
+      "--no-wait",
+      "--org",
+      org,
+      "--app",
+      app,
+      "--source",
+      "local",
+      "--app-directory",
+      ".",
+      "--do-not-use-detected-build-config",
+      "--install-command",
+      "true",
+      "--build-command",
+      "true",
+      "--pre-deploy-command",
+      "true",
+      "--region",
+      region,
+      "--runtime-mode",
+      "dynamic",
+      "--entrypoint",
+      "./main.ts",
+      "--arguments",
+      "broker",
+      "--working-directory",
+      ".",
+    ], { cwd: repoRoot, echo: true });
+
     if (!createResult.success) {
       error("Failed to create app on Deno Deploy.");
+      return false;
+    }
+
+    success(`App ${app} created on org ${org}`);
+    await updateDeployAppConfig({
+      app,
+      headers: apiHeaders,
+      config: brokerAppConfig,
+    });
+    return true;
+  }
+
+  if (!await ensureBrokerApp()) {
+    return;
+  }
+
+  async function ensureBrokerKvDatabase(): Promise<void> {
+    print(`Ensuring shared KV database ${kvDatabase}...`);
+
+    const provisionResult = await runDeployCli(
+      [
+        "deploy",
+        "database",
+        "provision",
+        kvDatabase,
+        "--kind",
+        "denokv",
+        "--org",
+        org,
+      ],
+      { cwd: "/tmp" },
+    );
+
+    if (!provisionResult.success) {
+      const provisionOutput =
+        `${provisionResult.stdout}\n${provisionResult.stderr}`;
+      if (!provisionOutput.includes("The requested slug is already in use.")) {
+        throw new Error(
+          `failed to provision shared KV database ${kvDatabase}: ${provisionOutput.trim()}`
+            .trim(),
+        );
+      }
+    }
+
+    const assignResult = await runDeployCli(
+      [
+        "deploy",
+        "database",
+        "assign",
+        kvDatabase,
+        "--org",
+        org,
+        "--app",
+        app,
+      ],
+      { cwd: "/tmp" },
+    );
+
+    if (!assignResult.success) {
+      const assignOutput = `${assignResult.stdout}\n${assignResult.stderr}`;
+      if (
+        !assignOutput.includes(
+          "The app already has a Deno KV database assigned.",
+        )
+      ) {
+        throw new Error(
+          `failed to assign shared KV database ${kvDatabase}: ${assignOutput.trim()}`
+            .trim(),
+        );
+      }
+    }
+  }
+
+  await ensureBrokerKvDatabase();
+
+  async function upsertDeployEnvVar(
+    key: string,
+    value: string,
+  ): Promise<void> {
+    const addResult = await runDeployCli(
+      [
+        "deploy",
+        "env",
+        "add",
+        "--org",
+        org,
+        "--app",
+        app,
+        "--secret",
+        key,
+        value,
+      ],
+      { cwd: "/tmp" },
+    );
+
+    if (addResult.success) {
       return;
     }
-    success(`App ${app} created on org ${org}`);
-  } else {
-    print(`App ${app} exists.`);
+
+    const combined = `${addResult.stdout}\n${addResult.stderr}`.toLowerCase();
+    if (
+      combined.includes("already exists") ||
+      combined.includes("already been taken")
+    ) {
+      const updateResult = await runDeployCli(
+        [
+          "deploy",
+          "env",
+          "update-value",
+          "--org",
+          org,
+          "--app",
+          app,
+          key,
+          value,
+        ],
+        { cwd: "/tmp" },
+      );
+
+      if (updateResult.success) {
+        return;
+      }
+
+      const body = `${updateResult.stdout}\n${updateResult.stderr}`.trim();
+      throw new Error(`failed to update env var ${key}: ${body}`.trim());
+    }
+
+    const body = `${addResult.stdout}\n${addResult.stderr}`.trim();
+    throw new Error(`failed to add env var ${key}: ${body}`.trim());
   }
 
   // 3. Sync env vars (LLM keys from local config)
@@ -432,21 +606,7 @@ export async function deployBroker(opts?: {
   for (const [name, cfg] of Object.entries(config.providers)) {
     if (cfg?.apiKey && envMap[name]) {
       print(`Setting ${envMap[name]}...`);
-      const envCmd = new Deno.Command("deno", {
-        args: [
-          "deploy",
-          "env",
-          "add",
-          "--org",
-          org,
-          "--app",
-          app,
-          `${envMap[name]}=${cfg.apiKey}`,
-        ],
-        stdout: "piped",
-        stderr: "piped",
-      });
-      await envCmd.output();
+      await upsertDeployEnvVar(envMap[name], cfg.apiKey);
     }
   }
 
@@ -454,50 +614,41 @@ export async function deployBroker(opts?: {
   let apiToken = Deno.env.get("DENOCLAW_API_TOKEN");
   if (!apiToken) {
     apiToken = crypto.randomUUID();
-    print("Setting DENOCLAW_API_TOKEN...");
-    const tokenCmd = new Deno.Command("deno", {
-      args: [
-        "deploy",
-        "env",
-        "add",
-        "--org",
-        org,
-        "--app",
-        app,
-        `DENOCLAW_API_TOKEN=${apiToken}`,
-      ],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    await tokenCmd.output();
   }
+
+  print("Setting DENOCLAW_API_TOKEN...");
+  await upsertDeployEnvVar("DENOCLAW_API_TOKEN", apiToken);
 
   // 4. Deploy
   print("\nDeploying...");
-  const deployArgs = ["deploy", "--org", org, "--app", app];
+  const deployArgs = ["deploy", repoRoot, "--org", org, "--app", app];
   if (opts?.prod !== false) deployArgs.push("--prod");
-
-  const deployCmd = new Deno.Command("deno", {
-    args: deployArgs,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const deployResult = await deployCmd.output();
+  const deployResult = await runDeployCli(deployArgs, { echo: true });
 
   if (!deployResult.success) {
     error("Deployment failed.");
     return;
   }
 
+  const combinedOutput = `${deployResult.stdout}\n${deployResult.stderr}`;
+  const deployedUrl = combinedOutput.match(
+    /Production url:\s*\n\s*(https:\/\/\S+)/i,
+  )?.[1] ?? `https://${app}.${org}.deno.net`;
+
   // 5. Save deploy config locally for future use
-  config.deploy = { org, app };
+  config.deploy = {
+    org,
+    app,
+    region,
+    kvDatabase,
+    url: deployedUrl,
+  };
   await saveConfig(config);
 
-  const url = `https://${app}.deno.dev`;
-  success(`Broker deployed to ${url}`);
+  success(`Broker deployed to ${deployedUrl}`);
   print(`\n  API token: ${apiToken}`);
   print(
-    `  Test: curl -H "Authorization: Bearer ${apiToken}" ${url}/health`,
+    `  Test: curl -H "Authorization: Bearer ${apiToken}" ${deployedUrl}/health`,
   );
 }
 
@@ -547,8 +698,8 @@ export async function showStatus(config: Config): Promise<void> {
 
   // Remote broker status
   const deploy = config.deploy;
-  if (deploy?.app) {
-    const brokerUrl = `https://${deploy.app}.deno.dev`;
+  if (deploy?.url) {
+    const brokerUrl = deploy.url;
     const token = Deno.env.get("DENOCLAW_API_TOKEN");
     print(`\n── Remote Broker ──\n`);
     print(`URL          : ${brokerUrl}`);
@@ -572,6 +723,12 @@ export async function showStatus(config: Config): Promise<void> {
     } else {
       print(`Status       : no token (set DENOCLAW_API_TOKEN)`);
     }
+  } else if (deploy?.app) {
+    print(`\n── Remote Broker ──\n`);
+    print(`App          : ${deploy.app}`);
+    print(
+      `URL          : not configured (set deploy.url or DENOCLAW_BROKER_URL)`,
+    );
   }
 
   print("");

@@ -138,7 +138,7 @@ export class DenoSandboxBackend implements SandboxBackend {
         error: {
           code: "SANDBOX_EXEC_ERROR",
           context: { tool: req.tool, message: msg },
-          recovery: "Check sandbox connectivity and DENO_DEPLOY_TOKEN",
+          recovery: "Check sandbox connectivity and DENO_DEPLOY_ORG_TOKEN",
         },
       };
     }

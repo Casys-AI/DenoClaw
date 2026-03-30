@@ -5,9 +5,9 @@
 
 ## Context
 
-ADR-003 concluded that LLM API keys (Anthropic, OpenAI, etc.) were the
-**only static secret** left in the architecture, stored as encrypted env vars on
-Deno Deploy. Everything else used OIDC or credentials materialization.
+ADR-003 concluded that LLM API keys (Anthropic, OpenAI, etc.) were the **only
+static secret** left in the architecture, stored as encrypted env vars on Deno
+Deploy. Everything else used OIDC or credentials materialization.
 
 However, Deno Deploy is a **native OIDC provider**. It can issue ephemeral OIDC
 tokens that prove the app's identity (organization, project, context). Those
@@ -45,12 +45,12 @@ Broker (Deno Deploy)                    GCP
 
 ## GCP Configuration — Setup integrated into the CLI
 
-The `denoclaw publish gateway` command guides setup in 3 steps:
+The broker deploy flow guides setup in 3 steps:
 
 ### Step 1: Deploy
 
 ```bash
-deployctl deploy --project=denoclaw-gateway --prod main.ts
+deno deploy --org=my-org --app=denoclaw-gateway --prod
 ```
 
 ### Step 2: GCP OIDC connection (automated)
@@ -108,8 +108,8 @@ Stored secrets:
 
 ## Consequences
 
-- Dependency on GCP — the broker needs GCP to retrieve keys
-  (mitigation: in-memory TTL cache)
+- Dependency on GCP — the broker needs GCP to retrieve keys (mitigation:
+  in-memory TTL cache)
 - Startup latency — first Secret Manager call when the broker boots (~100ms)
 - Initial configuration — Workload Identity Pool + Service Account + Secrets
   must be set up once

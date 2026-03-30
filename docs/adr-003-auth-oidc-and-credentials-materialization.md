@@ -6,15 +6,15 @@
 
 The DenoClaw architecture has several authentication boundaries:
 
-- Broker → Deno Subhosting + Sandbox API (lifecycle management)
+- Broker → Deno Deploy agent apps + Sandbox API (lifecycle management)
 - Broker → LLM API (Anthropic, OpenAI, etc.)
 - Tunnel → Broker (machines/VPS connecting as nodes)
-- **Agent (Subhosting) → Broker** (the agent calls the broker over HTTP for
-  LLM, tools, A2A)
+- **Agent (Deploy app) → Broker** (the agent calls the broker over HTTP for LLM,
+  tools, A2A)
 - Sandbox → Broker (code executed in Sandbox communicates with the broker)
 
-The goal is to minimize static secrets. Every static secret is a risk
-(leakage, missed rotation, non-revocable access).
+The goal is to minimize static secrets. Every static secret is a risk (leakage,
+missed rotation, non-revocable access).
 
 ## Decision
 
@@ -46,14 +46,14 @@ For local tunnels (not on Deploy), the broker issues a single-use invite token.
 The tunnel uses it for the initial connection, then receives an ephemeral
 session token.
 
-### Agent (Subhosting) → Broker: `@deno/oidc` (preferred)
+### Agent (Deploy app) → Broker: `@deno/oidc` (preferred)
 
-The Subhosting agent calls the Broker over HTTP (`fetch()`) for LLM, tools, and
+The deployed agent calls the Broker over HTTP (`fetch()`) for LLM, tools, and
 A2A requests. It authenticates via OIDC — the same mechanism used by the Broker
 for the Sandbox API.
 
 ```typescript
-// Agent side (Subhosting)
+// Agent side (Deploy app)
 const token = await getIdToken(brokerUrl); // @deno/oidc, ephemeral 5 min
 await fetch(brokerUrl + "/llm", {
   headers: { "Authorization": `Bearer ${token}` },
@@ -73,7 +73,7 @@ await fetch(brokerUrl + "/llm", {
 The Broker identifies the agent via `app_id` (stable, does not change on
 redeploy) and `org_id` (our organization).
 
-**Fallbacks if OIDC is unavailable in Subhosting:**
+**Fallbacks if OIDC is unavailable in the deployed agent app runtime:**
 
 1. **Layers (API v2)** — the Broker injects a rotating token via the Layers
    feature, without redeploying
@@ -108,14 +108,14 @@ details.
 
 ## Summary
 
-| Boundary                          | Mechanism                                            | Static secret?         |
-| --------------------------------- | ---------------------------------------------------- | ---------------------- |
-| Broker → Subhosting + Sandbox API | `@deno/oidc`                                         | No                     |
-| **Agent (Subhosting) → Broker**   | **`@deno/oidc`** (preferred), Layers/invite fallback | **No**                 |
-| Tunnel → Broker                   | Ephemeral OIDC / invite token                        | No                     |
-| Sandbox → Broker                  | Credentials materialization                          | No (invisible to code) |
-| Broker → LLM API                  | GCP Secret Manager via OIDC (ADR-004)                | **No**                 |
-| Local (Worker → Main)             | None (internal postMessage)                          | N/A                    |
+| Boundary                                 | Mechanism                                            | Static secret?         |
+| ---------------------------------------- | ---------------------------------------------------- | ---------------------- |
+| Broker → Deploy agent apps + Sandbox API | `@deno/oidc`                                         | No                     |
+| **Agent (Deploy app) → Broker**          | **`@deno/oidc`** (preferred), Layers/invite fallback | **No**                 |
+| Tunnel → Broker                          | Ephemeral OIDC / invite token                        | No                     |
+| Sandbox → Broker                         | Credentials materialization                          | No (invisible to code) |
+| Broker → LLM API                         | GCP Secret Manager via OIDC (ADR-004)                | **No**                 |
+| Local (Worker → Main)                    | None (internal postMessage)                          | N/A                    |
 
 ## Consequences
 

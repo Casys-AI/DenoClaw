@@ -3,6 +3,9 @@ deno.lock
 node_modules/
 _fresh/
 
+# Vite
+vite.config.ts.timestamp-*
+
 # KV local database
 *.sqlite3
 *.sqlite3-journal

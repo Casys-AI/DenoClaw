@@ -16,8 +16,8 @@ real time and in detail**:
 
 ### 1. Fresh dashboard with KV watch
 
-A web dashboard (Deno Fresh) observes KV in real time through `kv.watch()`.
-No polling, no custom WebSocket layer, direct KV-driven reads.
+A web dashboard (Deno Fresh) observes KV in real time through `kv.watch()`. No
+polling, no custom WebSocket layer, direct KV-driven reads.
 
 ### 2. Deep observability: trace the agent loop
 
@@ -46,8 +46,8 @@ What we want to see:
 
 ### How to trace the agent loop
 
-The `AgentRuntime` in Subhosting writes trace entries into KV as execution
-progresses:
+The `AgentRuntime` in a deployed agent app writes trace entries into KV as
+execution progresses:
 
 ```typescript
 // Each agent-loop step is persisted in KV
@@ -144,8 +144,8 @@ History   : OTEL spans → Grafana / Jaeger
 
 ## Consequences
 
-- Detailed traces consume KV space, so they need a TTL and cleanup
-  (delete traces older than 24h)
+- Detailed traces consume KV space, so they need a TTL and cleanup (delete
+  traces older than 24h)
 - The Fresh dashboard is optional; the broker still works without it
 - Every `AgentRuntime` must write traces into KV (added in the agent loop)
 - This is similar to OpenClaw tool-call tracing, but deeper: every ReAct-loop

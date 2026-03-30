@@ -1,11 +1,14 @@
 import type { Config } from "../config/types.ts";
 import type { BrokerServerDeps } from "./broker.ts";
 import type { ToolExecutionPort } from "./tool_execution_port.ts";
+import { getSandboxAccessToken } from "../shared/deploy_credentials.ts";
 import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
 import { LocalToolExecutionAdapter } from "./adapters/tool_execution_local.ts";
 
-export function createBrokerToolExecutionPort(config: Config): ToolExecutionPort {
-  const sandboxToken = Deno.env.get("DENO_SANDBOX_API_TOKEN") ?? "";
+export function createBrokerToolExecutionPort(
+  config: Config,
+): ToolExecutionPort {
+  const sandboxToken = getSandboxAccessToken() ?? "";
   const defaultSandboxConfig = config.agents?.defaults?.sandbox ?? {
     allowedPermissions: [],
   };
@@ -25,6 +28,8 @@ export function createBrokerServerDeps(config: Config): BrokerServerDeps {
   };
 }
 
-export function createRelayToolExecutionPort(tools: string[]): ToolExecutionPort {
+export function createRelayToolExecutionPort(
+  tools: string[],
+): ToolExecutionPort {
   return LocalToolExecutionAdapter.forRelay(tools);
 }

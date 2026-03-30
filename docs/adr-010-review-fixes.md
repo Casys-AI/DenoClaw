@@ -1,7 +1,7 @@
 # ADR-010 — Review Fixes
 
-**Date:** 2026-03-27 **Source:** Cross-review by 5 agents
-(code reviewer, silent failure hunter, type design, test coverage, architecture)
+**Date:** 2026-03-27 **Source:** Cross-review by 5 agents (code reviewer, silent
+failure hunter, type design, test coverage, architecture)
 
 ## Critical issues (must fix)
 
@@ -22,25 +22,25 @@ forced.
 **File:** `src/agent/tools/shell.ts:54` **Problem:**
 `if (allowed.length > 0 && !allowed.includes(binary))` becomes false when the
 list is empty, so everything is allowed. `DEFAULT_EXEC_POLICY` uses
-`allowedCommands: []`, which makes the default effectively permissive.
-**Fix:** change the condition to `if (!allowed.includes(binary))` so an empty
-list means deny-all. That matches AX #2 Safe Defaults.
+`allowedCommands: []`, which makes the default effectively permissive. **Fix:**
+change the condition to `if (!allowed.includes(binary))` so an empty list means
+deny-all. That matches AX #2 Safe Defaults.
 
 ### Fix 3 — `initPromise` poisoned after cloud init failure
 
-**File:** `src/agent/tools/backends/cloud.ts` (`ensureInitialized`)
-**Problem:** if `init()` throws, `initPromise` keeps pointing to a rejected
-promise forever. Every later call fails with the same error. No retry is
-possible. **Fix:** clear `initPromise` in the catch block and log the error.
-Also clean up the VM when `Sandbox.create()` succeeds but `fs.upload()` fails,
-otherwise the VM is orphaned.
+**File:** `src/agent/tools/backends/cloud.ts` (`ensureInitialized`) **Problem:**
+if `init()` throws, `initPromise` keeps pointing to a rejected promise forever.
+Every later call fails with the same error. No retry is possible. **Fix:** clear
+`initPromise` in the catch block and log the error. Also clean up the VM when
+`Sandbox.create()` succeeds but `fs.upload()` fails, otherwise the VM is
+orphaned.
 
 ### Fix 4 — `askPending` in the worker has no timeout, so the promise can hang forever
 
 **File:** `src/agent/worker_entrypoint.ts` (`askApproval`) **Problem:** the
 promise only has `resolve`, with no `reject` and no timeout. If `WorkerPool`
-never returns `ask_response`, the promise hangs forever and the worker becomes
-a zombie. **Fix:** add timeout + reject in `askApproval()` (symmetric to
+never returns `ask_response`, the promise hangs forever and the worker becomes a
+zombie. **Fix:** add timeout + reject in `askApproval()` (symmetric to
 `sendToAgent`, which already has a timeout), and drain `askPending` during
 shutdown.
 
@@ -49,9 +49,9 @@ shutdown.
 **File:** `src/agent/tools/backends/local.ts` (`enforceExecPolicy`,
 `Promise.race`) **Problem:** when approval arrives before timeout, the
 `setTimeout` from `approvalTimeout()` is never cleared. That leaks one timer per
-approval request. **Fix:** keep a cancellable timer handle and `clearTimeout`
-it in a `finally` block after `Promise.race`. Also distinguish timeout vs crash
-in the catch block (`warn` for timeout, `error` for everything else).
+approval request. **Fix:** keep a cancellable timer handle and `clearTimeout` it
+in a `finally` block after `Promise.race`. Also distinguish timeout vs crash in
+the catch block (`warn` for timeout, `error` for everything else).
 
 ### Fix 6 — cloud backend has no timeout around `sandbox.sh`
 
@@ -82,9 +82,9 @@ worker already terminated, the process can crash with an unhandled rejection.
 **File:** `src/agent/tools/registry.ts` (`execute`) **Problem:** the
 `SandboxExecRequest` is built with `networkAllow: undefined`. Sandbox config has
 `networkAllow`, but it is never passed to the backend. If `net` is granted, the
-subprocess starts without any network restriction. **Fix:** store
-`networkAllow` inside `ToolRegistry` through `setBackend()` and pass it on each
-`execute()` call.
+subprocess starts without any network restriction. **Fix:** store `networkAllow`
+inside `ToolRegistry` through `setBackend()` and pass it on each `execute()`
+call.
 
 ### Fix 10 — `factory.ts` throws `new Error(JSON.stringify(...))` instead of `DenoClawError`
 
@@ -92,7 +92,7 @@ subprocess starts without any network restriction. **Fix:** store
 payload is serialized into the message string of a raw `Error`. Callers cannot
 inspect `.code` or `.context`, which violates the project's structured-error
 pattern. **Fix:**
-`throw new ToolError("SANDBOX_UNAVAILABLE", { backend: "cloud", reason: "DENO_DEPLOY_TOKEN not set" }, "Set DENO_DEPLOY_TOKEN or use backend: 'local'")`.
+`throw new ToolError("SANDBOX_UNAVAILABLE", { backend: "cloud", reason: "DENO_DEPLOY_ORG_TOKEN not set" }, "Set DENO_DEPLOY_ORG_TOKEN or use backend: 'local'")`.
 
 ---
 
@@ -121,8 +121,8 @@ is a typed union. That is a type divergence on a security-sensitive path.
 
 An agent configured with `security: "deny"` can still execute in the cloud
 backend. The ADR says cloud enforcement is optional, but `security: "deny"`
-should at least be honored. **Options:** honor `security: "deny"` in cloud,
-even if the rest of the policy remains ignored because the VM already isolates.
+should at least be honored. **Options:** honor `security: "deny"` in cloud, even
+if the rest of the policy remains ignored because the VM already isolates.
 
 ### Design 5 — cloud backend `--allow-all` ignores ADR-005 permission intersection
 

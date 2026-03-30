@@ -1,0 +1,11 @@
+node_modules/
+data/
+.claude/
+.git/
+.env
+docs/
+tests/
+scripts/
+*.test.ts
+*_test.ts
+vite.config.ts.timestamp-*

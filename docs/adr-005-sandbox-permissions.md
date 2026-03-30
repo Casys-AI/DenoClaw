@@ -108,7 +108,7 @@ In addition to Deno permissions, the Sandbox has a **network allowlist**:
 ## End-to-End Flow
 
 ```
-Agent (Subhosting)          Broker (Deploy)              Sandbox (ephemeral)
+Agent (Deploy app)          Broker (Deploy)              Sandbox (ephemeral)
      │                           │                            │
      │ tool_request: "shell"     │                            │
      ├──────────────────────────►│                            │

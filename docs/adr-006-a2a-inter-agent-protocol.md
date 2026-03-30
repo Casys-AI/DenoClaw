@@ -37,11 +37,11 @@ agentic work, including when execution flows through an internal transport.
 | Object    | Role                                                                                 |
 | --------- | ------------------------------------------------------------------------------------ |
 | AgentCard | "Business card" published at `/.well-known/agent-card.json` — skills, endpoint, auth |
-| Task      | Unit of work, with lifecycle: submitted → working → completed/failed                |
-| Message   | Communication inside a Task: role (user/agent) + Parts                              |
-| Part      | Atomic content: TextPart, FilePart, DataPart, FunctionCallPart                      |
-| Artifact  | Output produced by a Task, composed of Parts                                        |
-| Skill     | Capability declared on the AgentCard                                                |
+| Task      | Unit of work, with lifecycle: submitted → working → completed/failed                 |
+| Message   | Communication inside a Task: role (user/agent) + Parts                               |
+| Part      | Atomic content: TextPart, FilePart, DataPart, FunctionCallPart                       |
+| Artifact  | Output produced by a Task, composed of Parts                                         |
+| Skill     | Capability declared on the AgentCard                                                 |
 
 **Task lifecycle:**
 
@@ -62,19 +62,19 @@ submitted → working → completed
 
 ## Mapping to DenoClaw
 
-| Current DenoClaw          | A2A                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------ |
-| `AgentEntry` (registry)   | `AgentCard` (skills, capabilities)                                                   |
-| `BrokerMessage` (custom)  | JSON-RPC 2.0 `message/send`                                                          |
-| `ChannelMessage`          | A2A `Message` with `Parts`                                                           |
-| `Skill` type              | A2A `AgentSkill` (+ id, tags, examples)                                              |
-| KV Queue routing          | Broker routes canonically via `task_submit`/`task_continue`. KV Queue is an optional local transport, not the routing mechanism. |
-| WebSocket streaming       | SSE via `Deno.serve()` + `ReadableStream`                                            |
+| Current DenoClaw         | A2A                                                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `AgentEntry` (registry)  | `AgentCard` (skills, capabilities)                                                                                               |
+| `BrokerMessage` (custom) | JSON-RPC 2.0 `message/send`                                                                                                      |
+| `ChannelMessage`         | A2A `Message` with `Parts`                                                                                                       |
+| `Skill` type             | A2A `AgentSkill` (+ id, tags, examples)                                                                                          |
+| KV Queue routing         | Broker routes canonically via `task_submit`/`task_continue`. KV Queue is an optional local transport, not the routing mechanism. |
+| WebSocket streaming      | SSE via `Deno.serve()` + `ReadableStream`                                                                                        |
 
 ## Architecture
 
 ```
-Agent "researcher" (Subhosting)     Broker (Deploy)         Agent "coder" (Subhosting)
+Agent "researcher" (Deploy app)     Broker (Deploy)         Agent "coder" (Deploy app)
      │                                   │                       │
      │ /.well-known/agent-card.json      │                       │ /.well-known/agent-card.json
      │ skills: [research, analyze]       │                       │ skills: [code, test, review]
@@ -90,9 +90,9 @@ Agent "researcher" (Subhosting)     Broker (Deploy)         Agent "coder" (Subho
      │◄──────── HTTP response ──────────┤  Task result           │
 ```
 
-Each Subhosting agent exposes an HTTP A2A endpoint. The broker:
+Each deployed agent exposes an HTTP A2A endpoint. The broker:
 
-1. Routes Tasks between internal agents (HTTP POST to each Subhosting agent)
+1. Routes Tasks between internal agents (HTTP POST to each deployed agent)
 2. Routes cross-instance Tasks (via Broker ↔ Broker tunnels)
 3. Receives/sends Tasks from external agents (standard A2A HTTP)
 
@@ -191,12 +191,12 @@ const result = await fetch(card.url, {
 
 | Module                        | Role                                                                                               | Status   |
 | ----------------------------- | -------------------------------------------------------------------------------------------------- | -------- |
-| `src/messaging/a2a/types.ts`  | Full A2A v1.0 types (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE)                        | **done** |
-| `src/messaging/a2a/server.ts` | A2A server: JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming      | **done** |
-| `src/messaging/a2a/client.ts` | A2A client: discover, send, stream (SSE async generator), getTask, cancelTask                     | **done** |
-| `src/messaging/a2a/card.ts`   | AgentCard generation from registry config (permissions → skills)                                  | **done** |
+| `src/messaging/a2a/types.ts`  | Full A2A v1.0 types (AgentCard, Task, Message, Part, Skill, JSON-RPC, SSE)                         | **done** |
+| `src/messaging/a2a/server.ts` | A2A server: JSON-RPC (message/send, message/stream, tasks/get, tasks/cancel) + SSE streaming       | **done** |
+| `src/messaging/a2a/client.ts` | A2A client: discover, send, stream (SSE async generator), getTask, cancelTask                      | **done** |
+| `src/messaging/a2a/card.ts`   | AgentCard generation from registry config (permissions → skills)                                   | **done** |
 | `src/messaging/a2a/tasks.ts`  | KV task store (lifecycle SUBMITTED→WORKING→COMPLETED/FAILED, artifacts, terminal-state protection) | **done** |
-| `src/orchestration/broker.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) in inter-agent routing                        | **done** |
+| `src/orchestration/broker.ts` | Peer verification (PEER_NOT_ALLOWED, PEER_REJECTED) in inter-agent routing                         | **done** |
 
 ## Consequences
 

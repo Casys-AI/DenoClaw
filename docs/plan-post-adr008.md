@@ -11,35 +11,35 @@
 - [x] Gateway accepts `agentId` in `/chat` and WebSocket
 - [x] `AgentError` structured error type
 - [x] Review + fixes (addEventListener, init timeout, ready check, Map drain)
-- [x] Monitoring endpoints (`/stats`, `/agents`, `/cron`) + `MetricsCollector` DI
+- [x] Monitoring endpoints (`/stats`, `/agents`, `/cron`) + `MetricsCollector`
+      DI
 - [x] `WorkerPoolCallbacks` (`onWorkerReady`, `onWorkerStopped`)
 - [x] Fresh handler slot in `GatewayDeps` (future dashboard)
 - [x] End-to-end test OK (Worker + Ollama Cloud)
 
 ## Phase 1.5 — A2A routing + shared KV + observability ✅ DONE
 
-- [x] `SendToAgentTool` — A2A tool with injected callback
-      (transport-agnostic)
+- [x] `SendToAgentTool` — A2A tool with injected callback (transport-agnostic)
 - [x] Worker protocol extended (`run`, `peer_deliver`, `peer_result`,
       `peer_response`, `task_started`, `task_completed`, `task_observe`)
-- [x] `WorkerPool` A2A routing with peer checks
-      (`peers` / `acceptFrom` closed by default)
+- [x] `WorkerPool` A2A routing with peer checks (`peers` / `acceptFrom` closed
+      by default)
 - [x] Workers no longer write to shared KV directly; they emit messages and the
       main process writes instead (deploy-compatible)
-- [x] Observability types moved into `shared/`
-      (`TaskObservationEntry`, `AgentStatusEntry`, etc.)
+- [x] Observability types moved into `shared/` (`TaskObservationEntry`,
+      `AgentStatusEntry`, etc.)
 - [x] Gateway routes: `/tasks/observations`, `/agents/:name/task`,
       `/.well-known/agent-card.json`
 - [x] KV watch SSE extended with `task_observation` events
-- [x] Naming normalized: `task_observations` KV,
-      `task_observation_update` sentinel
+- [x] Naming normalized: `task_observations` KV, `task_observation_update`
+      sentinel
 - [x] `AgentCard` URL aligned with the real endpoints
-- [x] `SendToAgentTool` preserves structured errors
-      (`DenoClawError` passthrough)
+- [x] `SendToAgentTool` preserves structured errors (`DenoClawError`
+      passthrough)
 - [x] `SSE controller.close()` + `deno.json --unstable-cron`
 - [x] 83 tests, `check`, and `lint` OK
 
-## Phase 2 — Deploy / Subhosting
+## Phase 2 — Deploy / Agent Apps
 
 ### Workstream 2.1 — BrokerClient HTTP mode ✅ DONE
 
@@ -67,7 +67,7 @@
 
 - Deadline: July 20, 2026
 
-### Workstream 2.6 — Subhosting entrypoint
+### Workstream 2.6 — Agent app entrypoint
 
 - `Deno.serve()` HTTP handler
 
@@ -77,25 +77,25 @@
 
 ## Identified design debt (reviews)
 
-| Issue                                                                      | Priority | Ref          |
-| -------------------------------------------------------------------------- | -------- | ------------ |
-| WorkerPool does too much — extract `PeerPolicy` and `PendingMap`           | Medium   | Arch review  |
-| `Gateway.handleHttp` = 230 unstructured lines — extract a router           | Medium   | Arch review  |
-| Agent message naming — consider an outbound/inbound pattern                | Low      | Arch + Codex |
-| Endpoints are not very RESTful                                             | Low      | Codex naming |
-| Telemetry KV keys still use `a2a` prefix (protocol dimension; acceptable)  | Low      | Codex        |
-| Dashboard islands do not yet pass the auth token                           | Medium   | Codex arch   |
+| Issue                                                                     | Priority | Ref          |
+| ------------------------------------------------------------------------- | -------- | ------------ |
+| WorkerPool does too much — extract `PeerPolicy` and `PendingMap`          | Medium   | Arch review  |
+| `Gateway.handleHttp` = 230 unstructured lines — extract a router          | Medium   | Arch review  |
+| Agent message naming — consider an outbound/inbound pattern               | Low      | Arch + Codex |
+| Endpoints are not very RESTful                                            | Low      | Codex naming |
+| Telemetry KV keys still use `a2a` prefix (protocol dimension; acceptable) | Low      | Codex        |
+| Dashboard islands do not yet pass the auth token                          | Medium   | Codex arch   |
 
 ## Decisions taken
 
-| Topic                                 | Decision                                                      |
-| ------------------------------------- | ------------------------------------------------------------- |
-| **KV Queues locally**                 | Keep them. HTTP only for Subhosting.                          |
-| **3-layer communication**             | HTTP (wake) + WS (perf) + BC (infra only).                    |
-| **Routing = Broker**                  | All agent↔agent communication goes through the Broker.        |
-| **Agent never does `kv.watch()`**     | Only the Broker watches. Agents only read/write.              |
-| **Workers do not write shared KV**    | They emit messages; the main process writes. Deploy-compatible. |
-| **OAuth LLM**                         | Lower priority. Ollama Cloud API by default.                  |
-| **Prefer OIDC auth**                  | OIDC everywhere except Sandbox and local mode.                |
-| **Multi-agent = default**             | Always multi-agent. `--agent` is required.                    |
-| **Subhosting API v2**                 | Mandatory. Deadline July 20, 2026.                            |
+| Topic                              | Decision                                                        |
+| ---------------------------------- | --------------------------------------------------------------- |
+| **KV Queues locally**              | Keep them. HTTP only for deployed agent apps.                   |
+| **3-layer communication**          | HTTP (wake) + WS (perf) + BC (infra only).                      |
+| **Routing = Broker**               | All agent↔agent communication goes through the Broker.          |
+| **Agent never does `kv.watch()`**  | Only the Broker watches. Agents only read/write.                |
+| **Workers do not write shared KV** | They emit messages; the main process writes. Deploy-compatible. |
+| **OAuth LLM**                      | Lower priority. Ollama Cloud API by default.                    |
+| **Prefer OIDC auth**               | OIDC everywhere except Sandbox and local mode.                  |
+| **Multi-agent = default**          | Always multi-agent. `--agent` is required.                      |
+| **Deno Deploy API v2**             | Mandatory. Deadline July 20, 2026.                              |

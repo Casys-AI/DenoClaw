@@ -41,15 +41,19 @@ import {
   type BrokerIdentity,
   createFederationControlRouter,
   type FederatedRoutePolicy,
-  FederationDeadLetterNotFoundError,
   type FederationControlEnvelope,
   type FederationControlHandlerMap,
+  FederationDeadLetterNotFoundError,
   type FederationRoutingPort,
   FederationService,
   isFederationControlMethod,
   KvFederationAdapter,
   mapInstanceTunnelToCatalog,
 } from "./federation/mod.ts";
+import {
+  DENOCLAW_AGENT_PROTOCOL,
+  isAgentSocketRegisterMessage,
+} from "./agent_socket_protocol.ts";
 import {
   assertTunnelRegisterMessage,
   DENOCLAW_TUNNEL_PROTOCOL,
@@ -68,7 +72,7 @@ import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
  * - LLM Proxy (API keys + CLI tunnel routing)
  * - Canonical A2A task routing between agents
  * - Tunnel hub (WebSocket connections to local machines)
- * - Agent lifecycle (Subhosting + Sandbox CRUD)
+ * - Agent lifecycle (Deploy agent apps + Sandbox CRUD)
  *
  * Transport: KV Queue locally, HTTP/SSE on the network.
  * KV Queue is the current local transport — not the canonical model.
@@ -104,6 +108,12 @@ interface TunnelConnection {
   registered: boolean;
 }
 
+interface ConnectedAgentSocket {
+  ws: WebSocket;
+  connectedAt: string;
+  authIdentity: string;
+}
+
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
   allowedCommands: [],
@@ -127,6 +137,7 @@ export class BrokerServer {
   private ownsKv: boolean;
   private taskStore: TaskStore;
   private tunnels = new Map<string, TunnelConnection>();
+  private connectedAgents = new Map<string, ConnectedAgentSocket>();
   private federationAdapter: KvFederationAdapter | null = null;
   private federationRoutingPort: FederationRoutingPort | null = null;
   private federationService: FederationService | null = null;
@@ -178,8 +189,37 @@ export class BrokerServer {
   private async getAuth(): Promise<AuthManager> {
     if (!this.auth) {
       this.auth = new AuthManager(await this.getKv());
+      const oidcAudience = Deno.env.get("DENOCLAW_BROKER_OIDC_AUDIENCE") ||
+        Deno.env.get("DENOCLAW_BROKER_URL");
+      if (oidcAudience) {
+        this.auth.setOIDCAudience(oidcAudience);
+      }
     }
     return this.auth;
+  }
+
+  private async saveAgentConfig(
+    agentId: string,
+    config: AgentEntry,
+  ): Promise<void> {
+    const kv = await this.getKv();
+    await kv.set(["agents", agentId, "config"], config);
+  }
+
+  private async saveAgentEndpoint(
+    agentId: string,
+    endpoint: string,
+  ): Promise<void> {
+    const kv = await this.getKv();
+    await kv.set(["agents", agentId, "endpoint"], endpoint);
+  }
+
+  private async getAgentEndpoint(agentId: string): Promise<string | null> {
+    const kv = await this.getKv();
+    const entry = await kv.get<string>(["agents", agentId, "endpoint"]);
+    return typeof entry.value === "string" && entry.value.length > 0
+      ? entry.value
+      : null;
   }
 
   async start(port = 3000): Promise<void> {
@@ -893,11 +933,29 @@ export class BrokerServer {
   ): Promise<void> {
     await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
+    const connectedAgent = this.connectedAgents.get(targetAgentId);
+    if (connectedAgent) {
+      this.routeToTunnel(connectedAgent.ws, message);
+      log.info(
+        `A2A routed via agent socket: ${message.from} → ${targetAgentId} (${message.type})`,
+      );
+      return;
+    }
+
     const tunnel = this.findTunnelByAgentId(targetAgentId);
     if (tunnel) {
       this.routeToTunnel(tunnel, message);
       log.info(
         `A2A routed via tunnel: ${message.from} → ${targetAgentId} (${message.type})`,
+      );
+      return;
+    }
+
+    const endpoint = await this.getAgentEndpoint(targetAgentId);
+    if (endpoint) {
+      await this.postMessageToAgentEndpoint(endpoint, message);
+      log.info(
+        `A2A routed via HTTP wake-up: ${message.from} → ${targetAgentId} (${message.type})`,
       );
       return;
     }
@@ -909,6 +967,35 @@ export class BrokerServer {
     log.info(
       `A2A routed via KV Queue: ${message.from} → ${targetAgentId} (${message.type})`,
     );
+  }
+
+  private async postMessageToAgentEndpoint(
+    endpoint: string,
+    message: Extract<BrokerMessage, { type: "task_submit" | "task_continue" }>,
+  ): Promise<void> {
+    const token = Deno.env.get("DENOCLAW_API_TOKEN");
+    const res = await fetch(new URL("/tasks", endpoint), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { "authorization": `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new DenoClawError(
+        "AGENT_WAKE_FAILED",
+        {
+          endpoint,
+          status: res.status,
+          body,
+          messageType: message.type,
+        },
+        "Check the deployed agent endpoint and broker-to-agent auth",
+      );
+    }
   }
 
   // ── Federation control-plane ───────────────────────────
@@ -938,7 +1025,9 @@ export class BrokerServer {
     if (this.federationRoutingPort) return this.federationRoutingPort;
     this.federationRoutingPort = {
       resolveTarget: async (task, _policy, correlation) => {
-        const tunnel = this.findTunnelForRemoteBroker(correlation.remoteBrokerId);
+        const tunnel = this.findTunnelForRemoteBroker(
+          correlation.remoteBrokerId,
+        );
         const advertisedAgents = tunnel?.capabilities.agents ?? [];
         if (!tunnel) {
           return {
@@ -1359,6 +1448,11 @@ export class BrokerServer {
       return await this.handleTunnelUpgrade(req);
     }
 
+    // Agent WebSocket — auth via static token / agent token / OIDC
+    if (url.pathname === "/agent/socket") {
+      return await this.handleAgentSocketUpgrade(req);
+    }
+
     // Invite token generation — admin endpoint
     if (req.method === "POST" && url.pathname === "/auth/invite") {
       const auth = await this.getAuth();
@@ -1398,6 +1492,36 @@ export class BrokerServer {
         return Response.json(await this.metrics.getAgentMetrics(agentId));
       }
       return Response.json(await this.metrics.getSummary());
+    }
+
+    if (req.method === "POST" && url.pathname === "/agents/register") {
+      const body = (await req.json().catch(() => null)) as {
+        agentId?: string;
+        endpoint?: string;
+        config?: AgentEntry;
+      } | null;
+      if (
+        !body ||
+        typeof body.agentId !== "string" ||
+        body.agentId.length === 0 ||
+        typeof body.endpoint !== "string" ||
+        body.endpoint.length === 0
+      ) {
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_AGENT_REGISTRATION",
+              recovery: "Provide { agentId, endpoint, config? }",
+            },
+          },
+          { status: 400 },
+        );
+      }
+      await this.saveAgentEndpoint(body.agentId, body.endpoint);
+      if (body.config) {
+        await this.saveAgentConfig(body.agentId, body.config);
+      }
+      return Response.json({ ok: true, agentId: body.agentId });
     }
 
     // Detailed per-agent stats
@@ -1453,7 +1577,9 @@ export class BrokerServer {
         undefined;
       const adapter = await this.getFederationAdapter();
       const deadLetters = await adapter.listDeadLetters(remoteBrokerId);
-      deadLetters.sort((left, right) => right.movedAt.localeCompare(left.movedAt));
+      deadLetters.sort((left, right) =>
+        right.movedAt.localeCompare(left.movedAt)
+      );
       return Response.json(deadLetters);
     }
 
@@ -1742,6 +1868,110 @@ export class BrokerServer {
     return new Response("Not Found", { status: 404 });
   }
 
+  private async handleAgentSocketUpgrade(req: Request): Promise<Response> {
+    const upgrade = req.headers.get("upgrade") || "";
+    if (upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
+    }
+
+    const requestedProtocols = (req.headers.get("sec-websocket-protocol") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!requestedProtocols.includes(DENOCLAW_AGENT_PROTOCOL)) {
+      return new Response(
+        `Expected WebSocket subprotocol: ${DENOCLAW_AGENT_PROTOCOL}`,
+        { status: 426 },
+      );
+    }
+
+    const auth = await this.getAuth();
+    const authResult = await auth.checkRequest(req);
+    if (!authResult.ok) {
+      return Response.json(
+        { error: { code: authResult.code, recovery: authResult.recovery } },
+        { status: 401 },
+      );
+    }
+
+    const { socket, response } = Deno.upgradeWebSocket(req, {
+      protocol: DENOCLAW_AGENT_PROTOCOL,
+      idleTimeout: TUNNEL_IDLE_TIMEOUT_SECONDS,
+    });
+
+    let registeredAgentId: string | null = null;
+
+    socket.onmessage = (event) => {
+      void (async () => {
+        try {
+          if (typeof event.data !== "string") {
+            socket.close(1003, "Agent WebSocket frames must be text JSON");
+            return;
+          }
+
+          const raw = JSON.parse(event.data);
+          if (!registeredAgentId) {
+            if (!isAgentSocketRegisterMessage(raw)) {
+              socket.close(1002, "Expected register_agent as first message");
+              return;
+            }
+
+            registeredAgentId = raw.agentId;
+            const previous = this.connectedAgents.get(raw.agentId);
+            if (previous && previous.ws !== socket) {
+              try {
+                previous.ws.close(1000, "Replaced by a newer agent socket");
+              } catch {
+                // ignore close errors
+              }
+            }
+
+            this.connectedAgents.set(raw.agentId, {
+              ws: socket,
+              connectedAt: new Date().toISOString(),
+              authIdentity: authResult.identity,
+            });
+
+            if (raw.config) {
+              await this.saveAgentConfig(raw.agentId, raw.config);
+            }
+            if (raw.endpoint) {
+              await this.saveAgentEndpoint(raw.agentId, raw.endpoint);
+            }
+
+            socket.send(
+              JSON.stringify({
+                type: "registered_agent",
+                agentId: raw.agentId,
+              }),
+            );
+            log.info(`Agent socket registered: ${raw.agentId}`);
+            return;
+          }
+
+          const msg = raw as BrokerMessage;
+          msg.from = registeredAgentId;
+          await this.handleIncomingMessage(msg);
+        } catch (error) {
+          log.error("Agent socket message handling failed", error);
+          socket.close(1002, "Invalid agent socket message");
+        }
+      })();
+    };
+
+    socket.onclose = () => {
+      if (registeredAgentId) {
+        const current = this.connectedAgents.get(registeredAgentId);
+        if (current?.ws === socket) {
+          this.connectedAgents.delete(registeredAgentId);
+        }
+        log.info(`Agent socket disconnected: ${registeredAgentId}`);
+      }
+    };
+
+    return response;
+  }
+
   private async handleTunnelUpgrade(req: Request): Promise<Response> {
     const upgrade = req.headers.get("upgrade") || "";
     if (upgrade.toLowerCase() !== "websocket") {
@@ -1915,6 +2145,12 @@ export class BrokerServer {
    * Prefer an active WebSocket tunnel; otherwise fall back to the local KV Queue transport.
    */
   private async sendReply(reply: BrokerMessage): Promise<void> {
+    const connectedAgent = this.connectedAgents.get(reply.to);
+    if (connectedAgent) {
+      this.routeToTunnel(connectedAgent.ws, reply);
+      return;
+    }
+
     const tunnel = this.findTunnelByAgentId(reply.to);
     if (tunnel) {
       this.routeToTunnel(tunnel, reply);
@@ -1980,6 +2216,14 @@ export class BrokerServer {
 
   async stop(): Promise<void> {
     if (this.httpServer) await this.httpServer.shutdown();
+    for (const [agentId, entry] of this.connectedAgents) {
+      try {
+        entry.ws.close(1001, "Broker shutting down");
+      } catch (e) {
+        log.warn(`Failed to close agent socket ${agentId} cleanly`, e);
+      }
+    }
+    this.connectedAgents.clear();
     for (const [tunnelId, t] of this.tunnels) {
       try {
         t.ws.close(1001, "Broker shutting down");

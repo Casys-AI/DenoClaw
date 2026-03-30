@@ -32,7 +32,6 @@ import { createAgent, deleteAgent, listAgents } from "./src/cli/agents.ts";
 import { ask, confirm } from "./src/cli/prompt.ts";
 import { initCliFlags } from "./src/cli/output.ts";
 import { log } from "./src/shared/log.ts";
-import { createDashboardHandler } from "./web/mod.ts";
 
 const args = parseArgs(Deno.args, {
   string: [
@@ -47,6 +46,7 @@ const args = parseArgs(Deno.args, {
     "accept-from",
     "org",
     "app",
+    "region",
   ],
   boolean: ["force", "json", "yes", "prod"],
   alias: { m: "message", s: "session", a: "agent", y: "yes" },
@@ -212,6 +212,7 @@ async function gateway(config: Config): Promise<void> {
   const channels = new ChannelManager(bus);
   const dashboardBasePath = Deno.env.get("DENOCLAW_DASHBOARD_BASE_PATH") ||
     "/ui";
+  const { createDashboardHandler } = await import("./web/mod.ts");
   const freshHandler = createDashboardHandler(dashboardBasePath);
   const gw = new Gateway(config, {
     bus,
@@ -374,7 +375,9 @@ Options:
 try {
   switch (command) {
     case "setup":
-      console.log("⚠ 'denoclaw setup' is deprecated. Use 'denoclaw init' instead.\n");
+      console.log(
+        "⚠ 'denoclaw setup' is deprecated. Use 'denoclaw init' instead.\n",
+      );
       switch (subcommand) {
         case "provider":
           await setupProvider();
@@ -402,6 +405,7 @@ try {
         await deployBroker({
           org: args.org as string | undefined,
           app: args.app as string | undefined,
+          region: args.region as string | undefined,
           prod: args.prod as boolean,
         });
       }
@@ -466,10 +470,10 @@ try {
     }
 
     case undefined: {
-      // On Deno Deploy: auto-start gateway
+      // On Deno Deploy: auto-start the distributed broker
       if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
         const config = await getConfigOrDefault();
-        await gateway(config);
+        await broker(config);
         break;
       }
 
@@ -479,15 +483,19 @@ try {
     }
 
     case "gateway": {
-      console.log("⚠ 'denoclaw gateway' is deprecated. Use 'denoclaw dev' instead.\n");
+      console.log(
+        "⚠ 'denoclaw gateway' is deprecated. Use 'denoclaw dev' instead.\n",
+      );
       const config = await getConfig();
       await gateway(config);
       break;
     }
 
     case "broker": {
-      console.log("⚠ 'denoclaw broker' is deprecated. Use 'denoclaw deploy' for production.\n");
-      const config = await getConfig();
+      console.log(
+        "⚠ 'denoclaw broker' is deprecated. Use 'denoclaw deploy' for production.\n",
+      );
+      const config = await getConfigOrDefault();
       await broker(config);
       break;
     }

@@ -52,7 +52,9 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
+  "unstable": ["kv", "cron"],
   "deploy": {
-    "org": "casys"
+    "org": "casys",
+    "app": "alice"
   }
 }

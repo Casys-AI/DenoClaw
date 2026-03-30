@@ -10,16 +10,16 @@ The architecture has three layers, each with a distinct role (ADR-001):
 
 - **Broker** (Deno Deploy) = central orchestrator (LLM proxy, cron, message
   routing, agent lifecycle). The only truly long-running component.
-- **Subhosting** = the agent (warm-cached V8 isolates, KV-backed state and
-  memory). It wakes on Broker HTTP and goes back to sleep when idle.
-  **No `Deno.cron()`, no `listenQueue()`.**
+- **Agent app** (Deno Deploy) = the reactive agent runtime (warm-cached V8
+  isolate, KV-backed state and memory). It wakes on Broker HTTP and goes back to
+  sleep when idle. **No `Deno.cron()`, no `listenQueue()`.**
 - **Sandbox** = execution (ephemeral, hardened permissions, user
   skills/tools/LLM-generated code)
 
-No code runs directly inside Subhosting. Everything goes through Sandbox with
-locked-down permissions.
+No code runs directly inside the deployed agent app runtime. Everything goes
+through Sandbox with locked-down permissions.
 
-> **Subhosting API:** use **v2** (`api.deno.com/v2`). v1 is deprecated and
+> **Deno Deploy API:** use **v2** (`api.deno.com/v2`). v1 is deprecated and
 > sunsets in July 2026.
 
 ## Overview
@@ -36,7 +36,7 @@ locked-down permissions.
 │                         │                                   │
 │  ┌──────────────────────┴──────────────────────────┐       │
 │  │               Message Router                     │       │
-│  │  HTTP POST → Subhosting agents                   │       │
+│  │  HTTP POST → agent apps                   │       │
 │  │  KV Queues = broker-internal durability          │       │
 │  │  KV Watch = real-time observation                │       │
 │  │  WebSocket hub = tunnel mesh                     │       │
@@ -79,27 +79,28 @@ plane. It is responsible for:
   broker optimization detail. The Broker also enforces A2A permissions.
 - **Tunnel Hub** — Tailscale-like network mesh. Maintains WebSocket connections
   to nodes (machines, VPS, GPU hosts) and other Brokers (federation). Each
-  tunnel declares its **capabilities** (tools, auth). The broker routes based
-  on those declarations.
-- **Cron Dispatcher** — one static `Deno.cron()` that reads agent schedules
-  from KV and dispatches them over HTTP POST.
-- **Agent Lifecycle** — creates, destroys, and monitors agents via the
-  Subhosting **v2** API (Apps/Revisions) and Sandbox executions
-  (ephemeral instances).
-- **Auth** — `@deno/oidc` for Subhosting agents and tunnels. Credentials
+  tunnel declares its **capabilities** (tools, auth). The broker routes based on
+  those declarations.
+- **Cron Dispatcher** — one static `Deno.cron()` that reads agent schedules from
+  KV and dispatches them over HTTP POST.
+- **Agent Lifecycle** — creates, destroys, and monitors agents via the Deno
+  Deploy **v2** API (Apps/Revisions) and Sandbox executions (ephemeral
+  instances).
+- **Auth** — `@deno/oidc` for agent apps and tunnels. Credentials
   materialization for Sandboxes (ADR-003). The target is zero static secrets.
 
-### 2. Agents (Deno Subhosting + Sandbox)
+### 2. Agents (Deno Deploy agent apps + Sandbox)
 
-Each agent is one Subhosting deployment (warm-cached V8 isolate with bound KV).
-Actual code execution happens inside ephemeral Sandboxes.
+Each agent is one Deploy agent app deployment (warm-cached V8 isolate with bound
+KV). Actual code execution happens inside ephemeral Sandboxes.
 
-**Subhosting (reactive stateful endpoint):**
+**Agent app runtime (reactive stateful endpoint):**
 
 - Wakes on Broker HTTP POST and goes idle again afterward
-- Has bound KV for memory and sessions, which persists independently of the isolate
-- Receives messages from the Broker over HTTP, not KV Queues
-  (`listenQueue` does not work in Subhosting)
+- Has bound KV for memory and sessions, which persists independently of the
+  isolate
+- Receives messages from the Broker over HTTP, not KV Queues (`listenQueue` does
+  not work in deployed agent apps)
 - Requests LLM completions from the broker
 - Dispatches code execution to Sandboxes
 - Persists results in KV
@@ -110,13 +111,13 @@ Actual code execution happens inside ephemeral Sandboxes.
 
 - Ephemeral (30-minute max), created on demand
 - Hardened permissions, broker-only network allowlist
-- No secrets visible to the executed code
-  (credentials materialization for broker auth, ADR-003)
+- No secrets visible to the executed code (credentials materialization for
+  broker auth, ADR-003)
 - Executes user skills, tools, and LLM-generated code
 - Returns the result and exits
 
 ```typescript
-// Subhosting side — reactive agent runtime driven by Broker HTTP
+// Agent app side — reactive runtime driven by Broker HTTP
 class AgentRuntime {
   private broker: BrokerClient;
   private kv: Deno.Kv; // Bound KV, persistent memory survives isolate restarts
@@ -161,11 +162,11 @@ network across machines.
 
 #### Three connection types
 
-| Type               | Connects                 | Usage                                                     |
-| ------------------ | ------------------------ | --------------------------------------------------------- |
-| **Node → Broker**  | Machine/VPS/GPU → Broker | Remote tools (shell, FS, GPU), browser-based OAuth auth   |
-| **Broker → Broker** | Instance A ↔ Instance B | Cross-instance A2A federation                             |
-| **Local → Broker** | Dev machine → Broker     | Local tools, auth flow, tests                             |
+| Type                | Connects                 | Usage                                                   |
+| ------------------- | ------------------------ | ------------------------------------------------------- |
+| **Node → Broker**   | Machine/VPS/GPU → Broker | Remote tools (shell, FS, GPU), browser-based OAuth auth |
+| **Broker → Broker** | Instance A ↔ Instance B  | Cross-instance A2A federation                           |
+| **Local → Broker**  | Dev machine → Broker     | Local tools, auth flow, tests                           |
 
 Agents are never directly attached to tunnels. They always go through their
 Broker over HTTP.
@@ -246,7 +247,7 @@ declared capabilities.
 3. Broker sends the message to the agent over HTTP POST
            │  POST https://<agent>.deno.dev/ { type: "user_message", content: "..." }
            │
-4. Subhosting agent wakes up (or is already warm) and processes the message
+4. deployed agent wakes up (or is already warm) and processes the message
            │
 5. Agent requests an LLM completion from the broker (HTTP fetch)
            │  POST https://<broker>/llm { model: "...", messages: [...] }
@@ -303,11 +304,12 @@ When the Broker uses OAuth mode, similar to Claude CLI or Codex CLI, it needs a
 browser for the initial authentication flow. The tunnel routes that URL to a
 local machine:
 
-1. Broker initiates an OAuth/device-code flow with the LLM provider
-   (Anthropic, etc.)
+1. Broker initiates an OAuth/device-code flow with the LLM provider (Anthropic,
+   etc.)
 2. It emits
    `{ type: "auth_request", url: "https://auth.anthropic.com/...", code: "ABCD-1234" }`
-3. The tunnel routes the request to a local machine explicitly allowed for that flow
+3. The tunnel routes the request to a local machine explicitly allowed for that
+   flow
 4. The local machine opens the browser with the URL
 5. The user authenticates
 6. The OAuth token travels back: tunnel → Broker
@@ -344,7 +346,8 @@ The broker checks **permissions**: is Agent A allowed to talk to Agent B?
 
 ## State observation (KV Watch)
 
-The broker exposes agent state through KV. Any authorized component can watch it:
+The broker exposes agent state through KV. Any authorized component can watch
+it:
 
 ```typescript
 // Dashboard or another agent watches state
@@ -362,16 +365,16 @@ for await (
 
 Principle: **zero static secrets.** Everywhere.
 
-| Boundary                          | Mechanism                                             | Static secret?                    |
-| --------------------------------- | ----------------------------------------------------- | --------------------------------- |
-| Sandbox isolation                 | Linux microVM, network allowlist                      | N/A                               |
-| Agent (Subhosting) → Broker       | `@deno/oidc` (preferred), fallback Layers/invite      | No                                |
-| Sandbox → Broker                  | Credentials materialization (token invisible to code) | No                                |
-| Broker → Subhosting + Sandbox API | `@deno/oidc` (ephemeral token)                        | No                                |
-| Tunnel → Broker                   | Ephemeral OIDC / one-time invite token                | No                                |
-| Broker → LLM API                  | API key or OAuth token (one-shot browser flow)        | No (GCP Secret Manager, ADR-004)  |
-| Inter-agents                      | Broker validates every message (`allowedPeers`)       | N/A                               |
-| Transport                         | TLS (`wss://`) for all WebSocket links                | N/A                               |
+| Boundary                                 | Mechanism                                             | Static secret?                   |
+| ---------------------------------------- | ----------------------------------------------------- | -------------------------------- |
+| Sandbox isolation                        | Linux microVM, network allowlist                      | N/A                              |
+| Agent (Deploy app) → Broker              | `@deno/oidc` (preferred), fallback Layers/invite      | No                               |
+| Sandbox → Broker                         | Credentials materialization (token invisible to code) | No                               |
+| Broker → Deploy agent apps + Sandbox API | `@deno/oidc` (ephemeral token)                        | No                               |
+| Tunnel → Broker                          | Ephemeral OIDC / one-time invite token                | No                               |
+| Broker → LLM API                         | API key or OAuth token (one-shot browser flow)        | No (GCP Secret Manager, ADR-004) |
+| Inter-agents                             | Broker validates every message (`allowedPeers`)       | N/A                              |
+| Transport                                | TLS (`wss://`) for all WebSocket links                | N/A                              |
 
 ## Advantages of the centralized LLM proxy
 
@@ -388,24 +391,25 @@ Sending **all** LLM calls through the broker gives:
 
 DenoClaw runs in both modes. The code is the same; only the environment changes.
 
-|                           | Local mode                                             | Deploy mode                                       |
-| ------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
-| Broker / Main             | Main **Deno process**                                  | Deno Deploy                                       |
-| Agent runtime             | **Worker** (one per agent)                             | Subhosting (warm-cached V8 isolate)               |
-| Code execution            | **Subprocess** (`Deno.Command`)                        | Sandbox (microVM)                                 |
-| Broker → Agent transport  | `postMessage` / `onmessage`                            | HTTP POST                                         |
-| Agent → Sandbox transport | `Deno.Command` (spawn + stdin/stdout)                  | Sandbox API (HTTP)                                |
-| KV                        | SQLite per agent (`Deno.openKv("./data/<agent>.db")`)  | FoundationDB (KV bound through API v2)            |
-| Cron / Heartbeat          | Main process `Deno.cron()` → `postMessage` to Worker   | Broker `Deno.cron()` → HTTP POST to Subhosting    |
-| LLM                       | Direct `fetch()` (local keys)                          | Through broker (LLM proxy)                        |
-| Tunnels                   | Not required (everything local)                        | WebSocket to remote machines                      |
-| Auth                      | Not required                                           | OIDC + credentials materialization                |
+|                           | Local mode                                            | Deploy mode                                    |
+| ------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
+| Broker / Main             | Main **Deno process**                                 | Deno Deploy                                    |
+| Agent runtime             | **Worker** (one per agent)                            | Deploy agent app (warm-cached V8 isolate)      |
+| Code execution            | **Subprocess** (`Deno.Command`)                       | Sandbox (microVM)                              |
+| Broker → Agent transport  | `postMessage` / `onmessage`                           | HTTP POST                                      |
+| Agent → Sandbox transport | `Deno.Command` (spawn + stdin/stdout)                 | Sandbox API (HTTP)                             |
+| KV                        | SQLite per agent (`Deno.openKv("./data/<agent>.db")`) | FoundationDB (KV bound through API v2)         |
+| Cron / Heartbeat          | Main process `Deno.cron()` → `postMessage` to Worker  | Broker `Deno.cron()` → HTTP POST to agent apps |
+| LLM                       | Direct `fetch()` (local keys)                         | Through broker (LLM proxy)                     |
+| Tunnels                   | Not required (everything local)                       | WebSocket to remote machines                   |
+| Auth                      | Not required                                          | OIDC + credentials materialization             |
 
 **Three isolation levels locally — Process / Worker / Subprocess:**
 
-- **Process** (main) = the Broker. Owns cron, routes messages, handles lifecycle.
-- **Worker** = one agent. Same constraints as Subhosting:
-  no `Deno.cron()`, no shared memory, message-based communication.
+- **Process** (main) = the Broker. Owns cron, routes messages, handles
+  lifecycle.
+- **Worker** = one agent. Same constraints as deployed agent apps: no
+  `Deno.cron()`, no shared memory, message-based communication.
 - **Subprocess** (`Deno.Command`) = isolated code execution. Local equivalent of
   Sandbox in deploy mode. Ephemeral process with controlled permissions.
 
@@ -413,7 +417,7 @@ The agent code stays identical across both modes. Only transport changes
 (`postMessage` vs HTTP, `Deno.Command` vs Sandbox API).
 
 Locally, the main process owns cron (`Deno.cron()`) and dispatches to workers.
-On Deploy, the Broker does the same over HTTP to Subhosting agents.
+On Deploy, the Broker does the same over HTTP to agent apps.
 
 ## Heartbeat
 
@@ -445,7 +449,7 @@ Deno.cron("agent-cron-dispatcher", "* * * * *", async () => {
   }
 });
 
-// Agent side (Subhosting) — receives HTTP, no local cron
+// Agent side (Deploy app) — receives HTTP, no local cron
 async handleCron(req: Request): Promise<Response> {
   // Check whether there is pending scheduled work
   return Response.json({ status: "ok" });
@@ -476,22 +480,26 @@ That is why the single-dispatcher pattern exists.
 ## Implementation order
 
 1. **Minimal Broker** — LLM proxy (API key + OAuth) + HTTP router on Deploy
-2. **Agent runtime** — reactive HTTP handler + HTTP `BrokerClient` (OIDC) + KV state
+2. **Agent runtime** — reactive HTTP handler + HTTP `BrokerClient` (OIDC) + KV
+   state
 3. **Local workers** — local multi-agent mode (Process / Worker / Subprocess)
 4. **Sandbox executor** — hardened code execution
 5. **Tunnel mesh** — nodes, broker federation, local machines
 6. **Cron dispatcher** — KV-backed scheduler + HTTP dispatch
 7. **Inter-agent A2A** — HTTP routing + SSE streaming (long tasks)
-8. **Agent lifecycle** — Subhosting API v2 (Apps/Revisions)
+8. **Agent lifecycle** — Deno Deploy API v2 (Apps/Revisions)
 9. **Dashboard** — state observation through KV Watch (Broker KV)
-
 
 ## Canonical task naming glossary
 
-- **canonical task message**: the domain-level A2A message that represents user intent or continuation input, independent from transport wrappers
-- **taskMessage**: preferred payload field for `task_submit` broker/runtime envelopes
-- **continuationMessage**: preferred payload field for `task_continue` broker/runtime envelopes
-- **initialMessage**: preferred field used to create the first canonical task history entry
+- **canonical task message**: the domain-level A2A message that represents user
+  intent or continuation input, independent from transport wrappers
+- **taskMessage**: preferred payload field for `task_submit` broker/runtime
+  envelopes
+- **continuationMessage**: preferred payload field for `task_continue`
+  broker/runtime envelopes
+- **initialMessage**: preferred field used to create the first canonical task
+  history entry
 - **statusMessage**: preferred field attached to a task state transition
-- **message**: temporary compatibility alias kept during migration; not the long-term preferred field name
-
+- **message**: temporary compatibility alias kept during migration; not the
+  long-term preferred field name

@@ -4,10 +4,10 @@
 
 ## Context
 
-Agents run in Subhosting (ADR-001). They call the Broker over HTTP for
-everything: LLM, tools, A2A. Sandboxes (code execution) have access to no
-secret. LLMs require authentication, whether via API keys (Anthropic, OpenAI)
-or OAuth tokens (browser flow, like Claude CLI / Codex CLI).
+Agents run as dedicated Deploy apps (ADR-001). They call the Broker over HTTP
+for everything: LLM, tools, A2A. Sandboxes (code execution) have access to no
+secret. LLMs require authentication, whether via API keys (Anthropic, OpenAI) or
+OAuth tokens (browser flow, like Claude CLI / Codex CLI).
 
 Agents never talk to each other directly (no public URL). Everything flows
 through the Broker. The tunnel is DenoClaw's network mesh: it connects brokers,
@@ -16,8 +16,8 @@ nodes, and machines, similar to Tailscale.
 ## Decision
 
 **The Broker (Deno Deploy) is the central router for EVERYTHING leaving an
-agent**: LLM calls, tool execution, and inter-agent communication. The
-WebSocket tunnel is a first-class primitive.
+agent**: LLM calls, tool execution, and inter-agent communication. The WebSocket
+tunnel is a first-class primitive.
 
 ### Two LLM Authentication Modes
 
@@ -27,8 +27,7 @@ method changes.
 **API Key Mode** — for providers with static keys (Anthropic, OpenAI, DeepSeek,
 etc.)
 
-- The broker holds the API keys (Deploy env vars or GCP Secret Manager,
-  ADR-004)
+- The broker holds the API keys (Deploy env vars or GCP Secret Manager, ADR-004)
 - The agent requests a completion, and the broker performs the `fetch()` with
   the key
 
@@ -41,13 +40,13 @@ etc.)
 - Subsequent LLM calls use `fetch()` with the OAuth token, just like API key
   mode
 
-Both modes are transparent to the agent through the uniform
-`broker.complete()` interface.
+Both modes are transparent to the agent through the uniform `broker.complete()`
+interface.
 
 ## Flow — LLM Call (identical for both auth modes)
 
 ```
-Agent (Subhosting)               Broker (Deploy)              LLM API
+Agent (Deploy app)               Broker (Deploy)              LLM API
      │                                │                          │
      │  POST /llm { messages, model } │                          │
      ├──── HTTP (OIDC auth) ─────────►│                          │
@@ -89,7 +88,7 @@ flow used by CLIs.
 ## Flow — Inter-Agent Communication (A2A)
 
 ```
-Agent A (Subhosting)             Broker (Deploy)              Agent B (Subhosting)
+Agent A (Deploy app)            Broker (Deploy)              Agent B (Deploy app)
      │                                │                          │
      │  POST /agent { to:"b", ... }   │                          │
      ├──── HTTP (OIDC) ─────────────►│                          │
@@ -108,11 +107,11 @@ network between machines.
 
 **Three tunnel connection types:**
 
-| Type                | Connects                 | Usage                                                   |
-| ------------------- | ------------------------ | ------------------------------------------------------- |
-| **Node → Broker**   | Machine/VPS/GPU → Broker | Remote tools (shell, FS, GPU), browser OAuth auth       |
-| **Broker → Broker** | Instance A ↔ Instance B  | Cross-instance A2A federation, inter-agent routing      |
-| **Local → Broker**  | Dev machine → Broker     | Local tools, auth flow, tests                           |
+| Type                | Connects                 | Usage                                              |
+| ------------------- | ------------------------ | -------------------------------------------------- |
+| **Node → Broker**   | Machine/VPS/GPU → Broker | Remote tools (shell, FS, GPU), browser OAuth auth  |
+| **Broker → Broker** | Instance A ↔ Instance B  | Cross-instance A2A federation, inter-agent routing |
+| **Local → Broker**  | Dev machine → Broker     | Local tools, auth flow, tests                      |
 
 **Agents** are never directly on the tunnel — they go through their Broker over
 HTTP. The tunnel connects **infrastructure components** to each other.
@@ -175,5 +174,5 @@ Each tunnel declares its capabilities:
 - The broker stores OAuth tokens in KV (or Secret Manager), enabling automatic
   rotation
 - Agents have a single interface: `broker.complete()` for LLM,
-  `broker.toolExec()` for tools, `broker.submitTask()` /
-  `broker.sendTextTask()` for inter-agent communication
+  `broker.toolExec()` for tools, `broker.submitTask()` / `broker.sendTextTask()`
+  for inter-agent communication

@@ -1497,6 +1497,74 @@ Deno.test(
       );
       assertEquals(missingReplayResponse.status, 404);
 
+      const remoteTunnelMessages: BrokerMessage[] = [];
+      const localTunnelMessages: BrokerMessage[] = [];
+      const fakeRemoteTunnel = {
+        readyState: WebSocket.OPEN,
+        bufferedAmount: 0,
+        send(raw: string) {
+          remoteTunnelMessages.push(JSON.parse(raw) as BrokerMessage);
+        },
+        close() {},
+      } as unknown as WebSocket;
+      const fakeLocalTunnel = {
+        readyState: WebSocket.OPEN,
+        bufferedAmount: 0,
+        send(raw: string) {
+          localTunnelMessages.push(JSON.parse(raw) as BrokerMessage);
+        },
+        close() {},
+      } as unknown as WebSocket;
+      (
+        broker as unknown as {
+          tunnels: Map<string, {
+            ws: WebSocket;
+            capabilities: {
+              tunnelId: string;
+              type: "instance" | "local";
+              tools: string[];
+              agents?: string[];
+              allowedAgents: string[];
+            };
+            registered: boolean;
+          }>;
+        }
+      ).tunnels.set("broker-remote", {
+        ws: fakeRemoteTunnel,
+        registered: true,
+        capabilities: {
+          tunnelId: "broker-remote",
+          type: "instance",
+          tools: [],
+          agents: ["agent-remote"],
+          allowedAgents: [],
+        },
+      });
+      (
+        broker as unknown as {
+          tunnels: Map<string, {
+            ws: WebSocket;
+            capabilities: {
+              tunnelId: string;
+              type: "instance" | "local";
+              tools: string[];
+              agents?: string[];
+              allowedAgents: string[];
+            };
+            registered: boolean;
+          }>;
+        }
+      ).tunnels.set("shadow-local", {
+        ws: fakeLocalTunnel,
+        registered: true,
+        capabilities: {
+          tunnelId: "shadow-local",
+          type: "local",
+          tools: [],
+          allowedAgents: ["agent-remote"],
+        },
+      });
+
       const replayResponse = await handleHttp(
         new Request("http://localhost/federation/dead-letter/replay", {
           method: "POST",
@@ -1512,11 +1580,18 @@ Deno.test(
       const replayBody = await replayResponse.json();
       assertEquals(replayBody.ok, true);
       assertEquals(replayBody.result.status, "forwarded");
-      const replayedTask = await waitForCollectedMessage(
-        queuedMessages,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-remote",
-      ) as Extract<BrokerMessage, { type: "task_submit" }>;
+      assertEquals(localTunnelMessages.length, 0);
+      assertEquals(
+        queuedMessages.some((message) =>
+          message.type === "task_submit" && message.to === "agent-remote"
+        ),
+        false,
+      );
+      assertEquals(remoteTunnelMessages.length, 1);
+      const replayedTask = remoteTunnelMessages[0] as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
       assertEquals(replayedTask.from, "broker-local");
       assertEquals(replayedTask.payload.taskId, "task-stats");
       assertEquals(replayedTask.payload.contextId, "ctx-stats");

@@ -391,14 +391,57 @@ export class KvFederationAdapter
     return entry.value ?? null;
   }
 
+  async claimDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<FederationDeadLetter | null> {
+    const key: Deno.KvKey = [
+      "federation",
+      "dead-letter",
+      remoteBrokerId,
+      deadLetterId,
+    ];
+    const globalSummaryKey = this.summaryKey();
+    const remoteSummaryKey = this.summaryKey(remoteBrokerId);
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
+        await Promise.all([
+          this.kv.get<FederationDeadLetter>(key),
+          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
+          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
+        ]);
+      if (!deadLetterEntry.value) return null;
+      const nextGlobal = this.decrementDeadLetterBacklog(
+        globalSummaryEntry.value,
+      );
+      const nextRemote = this.decrementDeadLetterBacklog(
+        remoteSummaryEntry.value,
+      );
+      const committed = await this.kv
+        .atomic()
+        .check({ key, versionstamp: deadLetterEntry.versionstamp })
+        .check({
+          key: globalSummaryKey,
+          versionstamp: globalSummaryEntry.versionstamp,
+        })
+        .check({
+          key: remoteSummaryKey,
+          versionstamp: remoteSummaryEntry.versionstamp,
+        })
+        .delete(key)
+        .set(globalSummaryKey, nextGlobal)
+        .set(remoteSummaryKey, nextRemote)
+        .commit();
+      if (committed.ok) return deadLetterEntry.value;
+    }
+    throw new Error("Failed to claim federation dead-letter aggregate");
+  }
+
   async deleteDeadLetter(
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<void> {
-    await this.removeDeadLetterEntry(
-      ["federation", "dead-letter", remoteBrokerId, deadLetterId],
-      remoteBrokerId,
-    );
+    await this.claimDeadLetter(remoteBrokerId, deadLetterId);
   }
 
   async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
@@ -739,46 +782,6 @@ export class KvFederationAdapter
       if (committed.ok) return;
     }
     throw new Error("Failed to persist federation dead-letter aggregate");
-  }
-
-  private async removeDeadLetterEntry(
-    key: Deno.KvKey,
-    remoteBrokerId: string,
-  ): Promise<void> {
-    const globalSummaryKey = this.summaryKey();
-    const remoteSummaryKey = this.summaryKey(remoteBrokerId);
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
-        await Promise.all([
-          this.kv.get<FederationDeadLetter>(key),
-          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
-          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
-        ]);
-      if (!deadLetterEntry.value) return;
-      const nextGlobal = this.decrementDeadLetterBacklog(
-        globalSummaryEntry.value,
-      );
-      const nextRemote = this.decrementDeadLetterBacklog(
-        remoteSummaryEntry.value,
-      );
-      const committed = await this.kv
-        .atomic()
-        .check({ key, versionstamp: deadLetterEntry.versionstamp })
-        .check({
-          key: globalSummaryKey,
-          versionstamp: globalSummaryEntry.versionstamp,
-        })
-        .check({
-          key: remoteSummaryKey,
-          versionstamp: remoteSummaryEntry.versionstamp,
-        })
-        .delete(key)
-        .set(globalSummaryKey, nextGlobal)
-        .set(remoteSummaryKey, nextRemote)
-        .commit();
-      if (committed.ok) return;
-    }
-    throw new Error("Failed to delete federation dead-letter aggregate");
   }
 
   private async readAggregatedFederationStats(

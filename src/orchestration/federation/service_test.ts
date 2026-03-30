@@ -798,6 +798,98 @@ Deno.test(
 );
 
 Deno.test(
+  "FederationService.replayDeadLetter allows only one concurrent claim",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      let calls = 0;
+      const routing: FederationRoutingPort = {
+        resolveTarget(
+          _task: BrokerTaskSubmitPayload,
+          _policy: FederatedRoutePolicy,
+          _correlation: FederationCorrelationContext,
+        ) {
+          return Promise.resolve({
+            kind: "remote" as const,
+            remoteBrokerId: "broker-b",
+            reason: "test",
+          });
+        },
+        async forwardTask(): Promise<void> {
+          calls += 1;
+          if (calls === 1) {
+            throw new Error("temporary_network_error");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        },
+      };
+      const service = new FederationService(
+        adapter,
+        adapter,
+        adapter,
+        adapter,
+        routing,
+        adapter,
+      );
+
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
+        targetAgent: "agent-race",
+        taskId: "task-race",
+        contextId: "ctx-race",
+        taskMessage: {
+          messageId: "msg-race",
+          role: "user",
+          parts: [{ kind: "text", text: "race me" }],
+        },
+      };
+
+      const initial = await service.forwardTaskIdempotent({
+        remoteBrokerId: "broker-b",
+        task,
+        maxAttempts: 1,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-race-1",
+      });
+      assertEquals(initial.status, "dead_letter");
+
+      const [deadLetter] = await adapter.listDeadLetters("broker-b");
+      const [first, second] = await Promise.allSettled([
+        service.replayDeadLetter({
+          remoteBrokerId: "broker-b",
+          deadLetterId: deadLetter.deadLetterId,
+          traceId: "trace-race-2",
+          maxAttempts: 1,
+        }),
+        service.replayDeadLetter({
+          remoteBrokerId: "broker-b",
+          deadLetterId: deadLetter.deadLetterId,
+          traceId: "trace-race-3",
+          maxAttempts: 1,
+        }),
+      ]);
+
+      assertEquals(first.status === "fulfilled" || second.status === "fulfilled", true);
+      assertEquals(first.status === "rejected" || second.status === "rejected", true);
+      const rejected = first.status === "rejected"
+        ? first.reason
+        : second.status === "rejected"
+        ? second.reason
+        : null;
+      assertEquals(rejected instanceof Error, true);
+      assertEquals(rejected?.name, "FederationDeadLetterNotFoundError");
+      assertEquals(calls, 2);
+      assertEquals((await adapter.listDeadLetters("broker-b")).length, 0);
+      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 0);
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "FederationService.forwardTaskIdempotent deduplicates concurrent submissions",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });

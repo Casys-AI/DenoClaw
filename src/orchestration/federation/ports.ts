@@ -147,6 +147,10 @@ export interface FederationDeliveryPort {
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<FederationDeadLetter | null>;
+  claimDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<FederationDeadLetter | null>;
   deleteDeadLetter(
     remoteBrokerId: string,
     deadLetterId: string,

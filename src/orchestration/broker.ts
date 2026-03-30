@@ -937,16 +937,52 @@ export class BrokerServer {
   private createFederationRoutingPort(): FederationRoutingPort {
     if (this.federationRoutingPort) return this.federationRoutingPort;
     this.federationRoutingPort = {
-      resolveTarget: async (_task, _policy, correlation) => ({
-        kind: "remote",
-        remoteBrokerId: correlation.remoteBrokerId,
-        reason: "federation_task_submit",
-      }),
+      resolveTarget: async (task, _policy, correlation) => {
+        const tunnel = this.findTunnelForRemoteBroker(correlation.remoteBrokerId);
+        const advertisedAgents = tunnel?.capabilities.agents ?? [];
+        if (!tunnel) {
+          return {
+            kind: "remote",
+            remoteBrokerId: correlation.remoteBrokerId,
+            reason: "remote_broker_unavailable",
+          };
+        }
+        if (
+          advertisedAgents.length > 0 &&
+          !advertisedAgents.includes(task.targetAgent)
+        ) {
+          return {
+            kind: "remote",
+            remoteBrokerId: correlation.remoteBrokerId,
+            reason: "target_not_advertised_by_remote_broker",
+          };
+        }
+        return {
+          kind: "remote",
+          remoteBrokerId: correlation.remoteBrokerId,
+          reason: "federation_task_submit",
+        };
+      },
       forwardTask: async (task, remoteBrokerId, correlation) => {
         const taskMessage = extractBrokerSubmitTaskMessage(task);
         const localBrokerId = correlation.linkId.split(":")[0] || "broker";
+        const remoteTunnel = this.findTunnelForRemoteBroker(remoteBrokerId);
+        if (!remoteTunnel) {
+          throw new Error(
+            `federation_forward_failed:${remoteBrokerId}:remote_broker_unavailable`,
+          );
+        }
+        const advertisedAgents = remoteTunnel.capabilities.agents ?? [];
+        if (
+          advertisedAgents.length > 0 &&
+          !advertisedAgents.includes(task.targetAgent)
+        ) {
+          throw new Error(
+            `federation_forward_failed:${remoteBrokerId}:target_not_advertised`,
+          );
+        }
         try {
-          await this.routeBrokerMessageToAgent(task.targetAgent, {
+          this.routeToTunnel(remoteTunnel.ws, {
             id: generateId(),
             from: localBrokerId,
             to: task.targetAgent,
@@ -1225,6 +1261,19 @@ export class BrokerServer {
       ) {
         return t.ws;
       }
+    }
+    return null;
+  }
+
+  private findTunnelForRemoteBroker(
+    remoteBrokerId: string,
+  ): TunnelConnection | null {
+    const entry = this.tunnels.get(remoteBrokerId);
+    if (
+      entry?.registered &&
+      entry.capabilities.type === "instance"
+    ) {
+      return entry;
     }
     return null;
   }

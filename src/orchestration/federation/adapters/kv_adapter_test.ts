@@ -225,7 +225,9 @@ Deno.test(
       assertEquals(deadLetters[0].attempts, 1);
       const fetched = await adapter.getDeadLetter("broker-b", "dead-1");
       assertEquals(fetched?.task.taskId, "task-1");
-      await adapter.deleteDeadLetter("broker-b", "dead-1");
+      const claimed = await adapter.claimDeadLetter("broker-b", "dead-1");
+      assertEquals(claimed?.deadLetterId, "dead-1");
+      assertEquals(await adapter.claimDeadLetter("broker-b", "dead-1"), null);
       assertEquals(await adapter.getDeadLetter("broker-b", "dead-1"), null);
       const statsAfterDelete = await adapter.getFederationStats("broker-b");
       assertEquals(statsAfterDelete.deadLetterBacklog, 0);

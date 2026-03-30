@@ -254,7 +254,7 @@ export class FederationService {
       );
     }
 
-    const deadLetter = await this.delivery.getDeadLetter(
+    const deadLetter = await this.delivery.claimDeadLetter(
       input.remoteBrokerId,
       input.deadLetterId,
     );
@@ -273,10 +273,6 @@ export class FederationService {
       traceId: input.traceId,
     });
 
-    await this.delivery.deleteDeadLetter(
-      deadLetter.remoteBrokerId,
-      deadLetter.deadLetterId,
-    );
     await this.delivery.deleteSubmissionRecord(
       deadLetter.idempotencyKey,
       correlation,

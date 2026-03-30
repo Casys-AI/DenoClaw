@@ -71,32 +71,57 @@ Hard rules:
 
 ## Build, Test & Development Commands
 
-| Command                 | Purpose                         |
-| ----------------------- | ------------------------------- |
-| `deno task dev`         | Dev with watch                  |
-| `deno task start`       | Run agent CLI                   |
-| `deno task gateway`     | Run gateway server              |
-| `deno task test`        | Run all tests                   |
-| `deno task check`       | Type-check `main.ts` + `mod.ts` |
-| `deno task lint`        | Lint                            |
-| `deno task fmt`         | Format                          |
-| `deno task dashboard`   | Vite dashboard dev              |
-| `deno task sync-agents` | Sync agent configs to Deploy    |
+| Command              | Purpose                         |
+| -------------------- | ------------------------------- |
+| `deno task dev`      | Dev with watch (gateway + agents + dashboard) |
+| `deno task start`    | Run in dev mode (alias for dev) |
+| `deno task deploy`   | Deploy broker to Deno Deploy    |
+| `deno task publish`  | Push agents to remote broker    |
+| `deno task test`     | Run all tests                   |
+| `deno task check`    | Type-check `main.ts` + `mod.ts` |
+| `deno task lint`     | Lint                            |
+| `deno task fmt`      | Format                          |
+| `deno task dashboard`| Vite dashboard dev              |
 
 All commands require `--unstable-kv --unstable-cron`. Already configured in
 `deno.json` tasks.
+
+**Deprecated** (still work with a warning): `gateway` → use `dev`, `broker` →
+use `deploy`, `setup` → use `init`, `sync-agents` → use `publish`.
+
+## CLI Commands
+
+```
+denoclaw init                 Guided setup (provider + channel + agent)
+denoclaw dev                  Work locally (gateway + agents + dashboard)
+denoclaw dev --agent <id>     REPL with a specific agent
+denoclaw deploy               Deploy/update the broker on Deno Deploy
+denoclaw publish [agent]      Push agent(s) to the remote broker
+denoclaw status               Show local + remote status
+denoclaw logs                 Stream broker logs
+denoclaw agent list           List all agents
+denoclaw agent create <name>  Create an agent
+denoclaw agent delete <name>  Delete an agent
+denoclaw tunnel [url]         Connect a local tunnel to the broker
+```
 
 ## CLI Flags / Config
 
 | Flag / Var                     | Purpose                                         |
 | ------------------------------ | ----------------------------------------------- |
-| `-m, --message`                | Send a single message                           |
+| `-m, --message`                | Send a single message (with `dev --agent`)      |
 | `-s, --session`                | Session ID (default: "default")                 |
+| `-a, --agent`                  | Target agent                                    |
 | `--model`                      | Override LLM model                              |
+| `--org`                        | Deno Deploy organization                        |
+| `--app`                        | Deno Deploy app name                            |
+| `--json`                       | Structured JSON output (AX mode)                |
+| `--yes, -y`                    | Skip all confirmations                          |
+| `--prod`                       | Deploy to production (default: true)            |
 | `ANTHROPIC_API_KEY`            | Anthropic API key                               |
 | `OPENAI_API_KEY`               | OpenAI API key                                  |
 | `OLLAMA_API_KEY`               | Ollama Cloud API key                            |
-| `DENOCLAW_API_TOKEN`           | Gateway auth token                              |
+| `DENOCLAW_API_TOKEN`           | Gateway/broker auth token                       |
 | `LOG_LEVEL`                    | Logger level: debug, info, warn, error          |
 | `OTEL_DENO`                    | Enable OpenTelemetry (`1` to activate)          |
 | `GITHUB_CLIENT_ID`             | GitHub OAuth app client ID (dashboard auth)     |

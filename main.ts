@@ -271,11 +271,11 @@ async function init(): Promise<void> {
   console.log(`
 ✓ Setup complete!
 
-To start:
-  denoclaw agent              Interactive chat
-  denoclaw agent -m "Hello"   One-off message
-  denoclaw gateway            Multi-channel gateway
-  denoclaw status             Show system status
+Next steps:
+  denoclaw dev                  Work locally (gateway + agents + dashboard)
+  denoclaw dev --agent <name>   Interactive chat with an agent
+  denoclaw deploy               Deploy the broker to Deno Deploy
+  denoclaw status               Show system status
 `);
 }
 

@@ -64,3 +64,76 @@ Deno.test("DenoSandboxBackend security=deny blocks shell before init", async () 
   assertEquals(result.error?.code, "EXEC_DENIED");
   await backend.close();
 });
+
+Deno.test(
+  "DenoSandboxBackend can trust broker-granted permissions in broker mode",
+  async () => {
+    const sandbox: SandboxConfig = {
+      backend: "cloud",
+      allowedPermissions: [],
+      maxDurationSec: 5,
+    };
+    const backend = new DenoSandboxBackend(sandbox, "fake-token", {
+      trustGrantedPermissions: true,
+    });
+    // deno-lint-ignore no-explicit-any
+    (backend as any).sandbox = {
+      spawn: async () => ({
+        output: async () => ({
+          status: { success: true, code: 0 },
+          stdoutText: JSON.stringify({ success: true, output: "ok" }),
+          stderrText: "",
+        }),
+      }),
+    };
+    // deno-lint-ignore no-explicit-any
+    (backend as any).ensureInitialized = async () => {};
+
+    const result = await backend.execute({
+      tool: "web_fetch",
+      args: { url: "https://example.com" },
+      permissions: ["net"],
+      execPolicy: basePolicy,
+    });
+
+    assertEquals(result.success, true);
+    assertEquals(result.output, "ok");
+    await backend.close();
+  },
+);
+
+Deno.test(
+  "DenoSandboxBackend preserves tool JSON output on non-zero executor exit",
+  async () => {
+    const sandbox: SandboxConfig = {
+      backend: "cloud",
+      allowedPermissions: [],
+      maxDurationSec: 5,
+    };
+    const backend = new DenoSandboxBackend(sandbox, "fake-token", {
+      trustGrantedPermissions: true,
+    });
+    // deno-lint-ignore no-explicit-any
+    (backend as any).sandbox = {
+      spawn: async () => ({
+        output: async () => ({
+          status: { success: false, code: 1 },
+          stdoutText: JSON.stringify({
+            success: false,
+            output: "",
+            error: { code: "COMMAND_EXEC_ERROR" },
+          }),
+          stderrText: "boom",
+        }),
+      }),
+    };
+    // deno-lint-ignore no-explicit-any
+    (backend as any).ensureInitialized = async () => {};
+
+    const result = await backend.execute(shellReq("deno --version"));
+
+    assertEquals(result.success, false);
+    assertEquals(result.error?.code, "COMMAND_EXEC_ERROR");
+    await backend.close();
+  },
+);

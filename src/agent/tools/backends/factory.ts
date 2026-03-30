@@ -23,8 +23,8 @@ export function createSandboxBackend(
     if (!token) {
       throw new ToolError(
         "SANDBOX_UNAVAILABLE",
-        { backend: "cloud", reason: "DENO_DEPLOY_ORG_TOKEN not set" },
-        "Set DENO_DEPLOY_ORG_TOKEN or use backend: 'local'",
+        { backend: "cloud", reason: "sandbox token not set" },
+        "Set DENOCLAW_SANDBOX_API_TOKEN or use backend: 'local'",
       );
     }
     return new DenoSandboxBackend(sandboxConfig, token);

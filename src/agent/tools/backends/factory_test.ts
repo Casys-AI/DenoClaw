@@ -19,10 +19,12 @@ Deno.test("createSandboxBackend returns local when backend=local", () => {
 });
 
 Deno.test("createSandboxBackend fail-closed — cloud without token throws ToolError", () => {
+  const originalProjectSandbox = Deno.env.get("DENOCLAW_SANDBOX_API_TOKEN");
   const originalOrg = Deno.env.get("DENO_DEPLOY_ORG_TOKEN");
   const originalLegacy = Deno.env.get("DENO_DEPLOY_TOKEN");
   const originalSandbox = Deno.env.get("DENO_SANDBOX_API_TOKEN");
   try {
+    Deno.env.delete("DENOCLAW_SANDBOX_API_TOKEN");
     Deno.env.delete("DENO_DEPLOY_ORG_TOKEN");
     Deno.env.delete("DENO_DEPLOY_TOKEN");
     Deno.env.delete("DENO_SANDBOX_API_TOKEN");
@@ -32,6 +34,9 @@ Deno.test("createSandboxBackend fail-closed — cloud without token throws ToolE
       "SANDBOX_UNAVAILABLE",
     );
   } finally {
+    if (originalProjectSandbox) {
+      Deno.env.set("DENOCLAW_SANDBOX_API_TOKEN", originalProjectSandbox);
+    }
     if (originalOrg) Deno.env.set("DENO_DEPLOY_ORG_TOKEN", originalOrg);
     if (originalLegacy) Deno.env.set("DENO_DEPLOY_TOKEN", originalLegacy);
     if (originalSandbox) {
@@ -40,18 +45,25 @@ Deno.test("createSandboxBackend fail-closed — cloud without token throws ToolE
   }
 });
 
-Deno.test("createSandboxBackend accepts DENO_DEPLOY_ORG_TOKEN", () => {
+Deno.test("createSandboxBackend accepts DENOCLAW_SANDBOX_API_TOKEN", () => {
+  const originalProjectSandbox = Deno.env.get("DENOCLAW_SANDBOX_API_TOKEN");
   const originalOrg = Deno.env.get("DENO_DEPLOY_ORG_TOKEN");
   const originalLegacy = Deno.env.get("DENO_DEPLOY_TOKEN");
   const originalSandbox = Deno.env.get("DENO_SANDBOX_API_TOKEN");
   try {
-    Deno.env.set("DENO_DEPLOY_ORG_TOKEN", "ddo_test");
+    Deno.env.set("DENOCLAW_SANDBOX_API_TOKEN", "ddo_test");
     Deno.env.delete("DENO_DEPLOY_TOKEN");
+    Deno.env.delete("DENO_DEPLOY_ORG_TOKEN");
     Deno.env.delete("DENO_SANDBOX_API_TOKEN");
 
     const backend = createSandboxBackend({ ...baseSandbox, backend: "cloud" });
     assertEquals(backend.kind, "cloud");
   } finally {
+    if (originalProjectSandbox) {
+      Deno.env.set("DENOCLAW_SANDBOX_API_TOKEN", originalProjectSandbox);
+    } else {
+      Deno.env.delete("DENOCLAW_SANDBOX_API_TOKEN");
+    }
     if (originalOrg) Deno.env.set("DENO_DEPLOY_ORG_TOKEN", originalOrg);
     else Deno.env.delete("DENO_DEPLOY_ORG_TOKEN");
     if (originalLegacy) Deno.env.set("DENO_DEPLOY_TOKEN", originalLegacy);

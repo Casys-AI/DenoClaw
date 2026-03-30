@@ -126,7 +126,8 @@ export class BrokerToolDispatcher {
       this.deps.replyDispatcher.sendStructuredError(msg.from, msg.id, {
         code: "SANDBOX_EXEC_FAILED",
         context: { tool: req.tool, message: (error as Error).message },
-        recovery: "Check DENO_SANDBOX_API_TOKEN and Sandbox API availability",
+        recovery:
+          "Check DENOCLAW_SANDBOX_API_TOKEN and Sandbox API availability",
       });
     }
   }

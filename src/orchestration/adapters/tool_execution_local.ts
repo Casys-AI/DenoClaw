@@ -82,7 +82,7 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
           code: "NO_SANDBOX_BACKEND",
           context: { tool: request.tool },
           recovery:
-            "Set DENO_SANDBOX_API_TOKEN or connect a relay for local tool execution",
+            "Set DENOCLAW_SANDBOX_API_TOKEN or connect a relay for local tool execution",
         },
       });
     }

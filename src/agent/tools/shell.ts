@@ -23,6 +23,23 @@ const EVAL_FLAGS = new Set(["-c", "-e", "eval"]);
 
 /** Default env prefixes always stripped from subprocess env. */
 const DEFAULT_DENIED_ENV_PREFIXES = ["LD_", "DYLD_"];
+export const DEFAULT_PASSTHROUGH_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "USER",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "NO_COLOR",
+  "COLORTERM",
+  "LOG_LEVEL",
+  "DENOCLAW_EXEC",
+] as const;
 
 export interface ExecPolicyCheck {
   allowed: boolean;
@@ -84,13 +101,32 @@ export function checkExecPolicy(
 export function filterEnv(extra?: string[]): Record<string, string> {
   const env: Record<string, string> = {};
   const prefixes = [...DEFAULT_DENIED_ENV_PREFIXES, ...(extra ?? [])];
-  for (const [k, v] of Object.entries(Deno.env.toObject())) {
+  for (const [k, v] of Object.entries(readAvailableEnv())) {
     if (!prefixes.some((p) => k.startsWith(p))) {
       env[k] = v;
     }
   }
   env["DENOCLAW_EXEC"] = "1";
   return env;
+}
+
+function readAvailableEnv(): Record<string, string> {
+  try {
+    return Deno.env.toObject();
+  } catch {
+    const env: Record<string, string> = {};
+    for (const key of DEFAULT_PASSTHROUGH_ENV_KEYS) {
+      try {
+        const value = Deno.env.get(key);
+        if (value !== undefined) {
+          env[key] = value;
+        }
+      } catch {
+        // Ignore variables that are not readable under current Deno permissions.
+      }
+    }
+    return env;
+  }
 }
 
 /** Parse a command string into binary + args for direct execution (no sh -c). */

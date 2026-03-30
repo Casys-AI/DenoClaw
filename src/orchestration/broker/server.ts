@@ -212,7 +212,9 @@ export class BrokerServer {
       allowedPermissions: [],
     };
     const sandbox = sandboxToken
-      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken)
+      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken, {
+        trustGrantedPermissions: true,
+      })
       : null;
     return new LocalToolExecutionAdapter({
       sandbox,

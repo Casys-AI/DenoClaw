@@ -21,14 +21,27 @@ import type {
 } from "../../../shared/types.ts";
 import { log } from "../../../shared/log.ts";
 import { permissionToFlag } from "./permission_flags.ts";
+import { DEFAULT_PASSTHROUGH_ENV_KEYS } from "../shell.ts";
 import {
   computePermissionIntersection,
   createPermissionDeniedResult,
 } from "./sandbox_permissions.ts";
 
-const TOOLS_LOCAL_PATH = new URL("../", import.meta.url).pathname;
-const TOOLS_SANDBOX_PATH = "/app/tools/";
-const EXECUTOR_SANDBOX_PATH = `${TOOLS_SANDBOX_PATH}tool_executor.ts`;
+const SANDBOX_AGENT_LOCAL_PATH = new URL("../../", import.meta.url).pathname;
+const SANDBOX_SHARED_LOCAL_PATH = new URL("../../../shared/", import.meta.url)
+  .pathname;
+const SANDBOX_DENO_JSON_PATH = new URL("./sandbox_deno.json", import.meta.url)
+  .pathname;
+const EXECUTOR_SANDBOX_PATH = "src/agent/tools/tool_executor.ts";
+
+interface SandboxCommandResult {
+  status: {
+    success: boolean;
+    code: number;
+  };
+  stdoutText: string | null;
+  stderrText: string | null;
+}
 
 export class DenoSandboxBackend implements SandboxBackend {
   readonly kind = "cloud" as const;
@@ -36,20 +49,28 @@ export class DenoSandboxBackend implements SandboxBackend {
 
   private sandboxConfig: SandboxConfig;
   private token: string;
+  private trustGrantedPermissions: boolean;
   // deno-lint-ignore no-explicit-any
   private sandbox: any = null;
   private initPromise: Promise<void> | null = null;
 
-  constructor(sandboxConfig: SandboxConfig, token: string) {
+  constructor(
+    sandboxConfig: SandboxConfig,
+    token: string,
+    options?: { trustGrantedPermissions?: boolean },
+  ) {
     this.sandboxConfig = sandboxConfig;
     this.token = token;
+    this.trustGrantedPermissions = options?.trustGrantedPermissions ?? false;
   }
 
   async execute(req: SandboxExecRequest): Promise<ToolResult> {
-    const { granted, denied } = computePermissionIntersection(
-      req.permissions,
-      this.sandboxConfig.allowedPermissions,
-    );
+    const { granted, denied } = this.trustGrantedPermissions
+      ? { granted: [...req.permissions], denied: [] }
+      : computePermissionIntersection(
+        req.permissions,
+        this.sandboxConfig.allowedPermissions,
+      );
 
     if (denied.length > 0) {
       return createPermissionDeniedResult(req, this.sandboxConfig, denied);
@@ -82,7 +103,7 @@ export class DenoSandboxBackend implements SandboxBackend {
     // Design 5: apply permission flags for parity with local backend
     const flags = [
       ...granted.map((perm) => permissionToFlag(perm, req.networkAllow)),
-      "--allow-env=LOG_LEVEL,DENOCLAW_EXEC",
+      `--allow-env=${DEFAULT_PASSTHROUGH_ENV_KEYS.join(",")}`,
     ];
 
     log.debug(
@@ -92,19 +113,27 @@ export class DenoSandboxBackend implements SandboxBackend {
     );
 
     try {
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
+        timeoutHandle = setTimeout(
           () => reject(new Error(`sandbox_timeout_${timeoutSec}s`)),
           timeoutSec * 1000,
         )
       );
 
-      const flagStr = flags.join(" ");
+      const child = await this.sandbox.spawn("deno", {
+        args: ["run", ...flags, EXECUTOR_SANDBOX_PATH, input],
+        stdout: "piped",
+        stderr: "piped",
+      });
       const result = await Promise.race([
-        this.sandbox.sh`deno run ${flagStr} ${EXECUTOR_SANDBOX_PATH} ${input}`,
+        child.output(),
         timeoutPromise,
-      ]);
-      const out = await result.text();
+      ]).finally(() => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }) as SandboxCommandResult;
+      const out = result.stdoutText ?? "";
+      const stderr = result.stderrText ?? "";
 
       try {
         return JSON.parse(out.trim()) as ToolResult;
@@ -113,9 +142,18 @@ export class DenoSandboxBackend implements SandboxBackend {
           success: false,
           output: "",
           error: {
-            code: "SANDBOX_PARSE_ERROR",
-            context: { tool: req.tool, stdout: out.slice(0, 500) },
-            recovery: "Tool executor returned invalid JSON",
+            code: result.status.success
+              ? "SANDBOX_PARSE_ERROR"
+              : "SANDBOX_EXEC_ERROR",
+            context: {
+              tool: req.tool,
+              exitCode: result.status.code,
+              stdout: out.slice(0, 500),
+              stderr: stderr.slice(0, 500),
+            },
+            recovery: result.status.success
+              ? "Tool executor returned invalid JSON"
+              : "Check tool_executor stderr/stdout for the failing command",
           },
         };
       }
@@ -127,7 +165,8 @@ export class DenoSandboxBackend implements SandboxBackend {
         error: {
           code: "SANDBOX_EXEC_ERROR",
           context: { tool: req.tool, message: msg },
-          recovery: "Check sandbox connectivity and DENO_DEPLOY_ORG_TOKEN",
+          recovery:
+            "Check sandbox connectivity and DENOCLAW_SANDBOX_API_TOKEN",
         },
       };
     }
@@ -183,7 +222,10 @@ export class DenoSandboxBackend implements SandboxBackend {
 
     // Upload tools — kill VM on failure to avoid orphaned VMs
     try {
-      await sandbox.fs.upload(TOOLS_LOCAL_PATH, TOOLS_SANDBOX_PATH);
+      await sandbox.fs.mkdir("src", { recursive: true });
+      await sandbox.fs.upload(SANDBOX_DENO_JSON_PATH, "./deno.json");
+      await sandbox.fs.upload(SANDBOX_AGENT_LOCAL_PATH, "./src");
+      await sandbox.fs.upload(SANDBOX_SHARED_LOCAL_PATH, "./src");
     } catch (e) {
       log.error(
         `CloudSandbox: upload failed, killing VM — ${(e as Error).message}`,

@@ -4,7 +4,8 @@ export function getDeployOrgToken(): string | undefined {
 }
 
 export function getSandboxAccessToken(): string | undefined {
-  return Deno.env.get("DENO_DEPLOY_ORG_TOKEN") ??
+  return Deno.env.get("DENOCLAW_SANDBOX_API_TOKEN") ??
+    Deno.env.get("DENO_DEPLOY_ORG_TOKEN") ??
     Deno.env.get("DENO_SANDBOX_API_TOKEN") ??
     Deno.env.get("DENO_DEPLOY_TOKEN");
 }

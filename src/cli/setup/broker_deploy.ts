@@ -283,6 +283,9 @@ export async function deployBroker(opts?: {
   print("Setting DENOCLAW_API_TOKEN...");
   await upsertDeployEnvVar("DENOCLAW_API_TOKEN", apiToken);
 
+  print("Setting DENOCLAW_SANDBOX_API_TOKEN...");
+  await upsertDeployEnvVar("DENOCLAW_SANDBOX_API_TOKEN", deployToken);
+
   print("\nDeploying...");
   const deployArgs = ["deploy", repoRoot, "--org", org, "--app", app];
   if (opts?.prod !== false) deployArgs.push("--prod");

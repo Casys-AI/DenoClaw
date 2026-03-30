@@ -21,6 +21,7 @@ Deno.test("resolveBrokerAuthToken falls back to OIDC when no static token exists
   const token = await resolveBrokerAuthToken({
     brokerUrl: "https://broker.example",
     oidcAudience: "https://broker.example",
+    staticToken: null,
     supportsOidc: () => true,
     issueIdToken: () => Promise.resolve("oidc-token"),
   });
@@ -34,6 +35,7 @@ Deno.test("resolveBrokerAuthToken fails when no auth path is available", async (
       resolveBrokerAuthToken({
         brokerUrl: "https://broker.example",
         oidcAudience: "https://broker.example",
+        staticToken: null,
         supportsOidc: () => false,
       }),
     Error,

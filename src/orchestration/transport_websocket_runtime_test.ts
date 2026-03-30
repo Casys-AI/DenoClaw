@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { WebSocketBrokerConnectionRuntime } from "./transport_websocket_runtime.ts";
 
 class FakeSocket {
-  readyState = WebSocket.CONNECTING;
+  readyState: number = WebSocket.CONNECTING;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;

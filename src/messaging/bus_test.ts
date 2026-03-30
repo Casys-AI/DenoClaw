@@ -12,6 +12,10 @@ function makeMsg(channelType = "test"): ChannelMessage {
     content: "hello",
     channelType,
     timestamp: new Date().toISOString(),
+    address: {
+      channelType,
+      userId: "u1",
+    },
   };
 }
 

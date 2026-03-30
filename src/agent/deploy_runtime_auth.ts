@@ -5,7 +5,7 @@ import { log } from "../shared/log.ts";
 export interface ResolveBrokerAuthTokenInput {
   brokerUrl: string;
   oidcAudience: string;
-  staticToken?: string;
+  staticToken?: string | null;
   supportsOidc?: () => boolean;
   issueIdToken?: (audience: string) => Promise<string>;
 }
@@ -13,9 +13,10 @@ export interface ResolveBrokerAuthTokenInput {
 export async function resolveBrokerAuthToken(
   input: ResolveBrokerAuthTokenInput,
 ): Promise<string> {
-  const staticToken = input.staticToken ??
-    Deno.env.get("DENOCLAW_BROKER_TOKEN") ??
-    Deno.env.get("DENOCLAW_API_TOKEN");
+  const staticToken = input.staticToken === undefined
+    ? Deno.env.get("DENOCLAW_BROKER_TOKEN") ??
+      Deno.env.get("DENOCLAW_API_TOKEN")
+    : input.staticToken ?? undefined;
   if (staticToken) {
     return staticToken;
   }

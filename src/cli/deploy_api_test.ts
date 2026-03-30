@@ -12,7 +12,10 @@ import {
 } from "./deploy_api.ts";
 
 Deno.test("deriveDeployAppSlug normalizes agent ids", () => {
-  assertEquals(deriveDeployAppSlug(" Alice / Builder "), "alice-builder");
+  assertEquals(
+    deriveDeployAppSlug(" Alice / Builder "),
+    "denoclaw-agent-alice-builder",
+  );
 });
 
 Deno.test("resolveBrokerUrl prefers env over config", () => {
@@ -33,8 +36,13 @@ Deno.test("resolveBrokerUrl falls back to deploy app hostname", () => {
   const original = Deno.env.get("DENOCLAW_BROKER_URL");
   try {
     Deno.env.delete("DENOCLAW_BROKER_URL");
-    const config = { deploy: { app: "denoclaw", org: "casys" } } as Config;
-    assertEquals(resolveBrokerUrl(config), "https://denoclaw.casys.deno.net");
+    const config = {
+      deploy: { app: "denoclaw-broker", org: "casys" },
+    } as Config;
+    assertEquals(
+      resolveBrokerUrl(config),
+      "https://denoclaw-broker.casys.deno.net",
+    );
   } finally {
     if (original) Deno.env.set("DENOCLAW_BROKER_URL", original);
   }
@@ -56,12 +64,15 @@ Deno.test("createDeployEnvVars filters undefined values", () => {
 
 Deno.test("getDeployAppEndpoint returns the app hostname", () => {
   assertEquals(
-    getDeployAppEndpoint({ id: "app_123", slug: "agent-alice" }, "casys"),
-    "https://agent-alice.casys.deno.net",
+    getDeployAppEndpoint(
+      { id: "app_123", slug: "denoclaw-agent-alice" },
+      "casys",
+    ),
+    "https://denoclaw-agent-alice.casys.deno.net",
   );
   assertEquals(
-    getDeployAppEndpoint({ id: "app_123", slug: "agent-alice" }),
-    "https://agent-alice.deno.dev",
+    getDeployAppEndpoint({ id: "app_123", slug: "denoclaw-agent-alice" }),
+    "https://denoclaw-agent-alice.deno.dev",
   );
 });
 
@@ -74,7 +85,7 @@ Deno.test("ensureDeployApp reuses an existing app", async () => {
       new Response(
         JSON.stringify({
           id: "app_123",
-          slug: "agent-alice",
+          slug: "denoclaw-agent-alice",
           labels: { "custom.denoclaw.agent_id": "alice" },
         }),
       ),
@@ -83,8 +94,11 @@ Deno.test("ensureDeployApp reuses an existing app", async () => {
 
   try {
     const app = await ensureDeployApp("alice", createDeployApiHeaders("ddo"));
-    assertEquals(app, { id: "app_123", slug: "agent-alice" });
-    assertEquals(requestedUrl, "https://api.deno.com/v2/apps/alice");
+    assertEquals(app, { id: "app_123", slug: "denoclaw-agent-alice" });
+    assertEquals(
+      requestedUrl,
+      "https://api.deno.com/v2/apps/denoclaw-agent-alice",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -108,7 +122,7 @@ Deno.test("ensureDeployApp creates a new app after a 404 lookup", async () => {
       new Response(
         JSON.stringify({
           id: "app_456",
-          slug: "alice",
+          slug: "denoclaw-agent-alice",
         }),
         { status: 201 },
       ),
@@ -117,11 +131,17 @@ Deno.test("ensureDeployApp creates a new app after a 404 lookup", async () => {
 
   try {
     const app = await ensureDeployApp("alice", createDeployApiHeaders("ddo"));
-    assertEquals(app, { id: "app_456", slug: "alice" });
-    assertEquals(calls[0]?.url, "https://api.deno.com/v2/apps/alice");
+    assertEquals(app, { id: "app_456", slug: "denoclaw-agent-alice" });
+    assertEquals(
+      calls[0]?.url,
+      "https://api.deno.com/v2/apps/denoclaw-agent-alice",
+    );
     assertEquals(calls[1]?.url, "https://api.deno.com/v2/apps");
     assertEquals(calls[1]?.method, "POST");
-    assertStringIncludes(calls[1]?.body ?? "", '"slug":"alice"');
+    assertStringIncludes(
+      calls[1]?.body ?? "",
+      '"slug":"denoclaw-agent-alice"',
+    );
     assertStringIncludes(
       calls[1]?.body ?? "",
       '"custom.denoclaw.agent_id":"alice"',
@@ -144,7 +164,7 @@ Deno.test(
         new Response(
           JSON.stringify({
             id: "app_789",
-            slug: "alice",
+            slug: "denoclaw-agent-alice",
             labels: { "custom.denoclaw.agent_id": "bob" },
           }),
         ),
@@ -180,7 +200,7 @@ Deno.test(
 
     try {
       const revision = await deployAppRevision({
-        app: { id: "app_123", slug: "alice" },
+        app: { id: "app_123", slug: "denoclaw-agent-alice" },
         assets: {
           "main.ts": {
             kind: "file",
@@ -193,7 +213,10 @@ Deno.test(
       });
 
       assertEquals(revision, { id: "rev_123" });
-      assertEquals(capturedUrl, "https://api.deno.com/v2/apps/alice/deploy");
+      assertEquals(
+        capturedUrl,
+        "https://api.deno.com/v2/apps/denoclaw-agent-alice/deploy",
+      );
       assertStringIncludes(capturedBody, '"production":true');
       assertStringIncludes(capturedBody, '"DENOCLAW_AGENT_ID"');
       assertStringIncludes(capturedBody, '"main.ts"');

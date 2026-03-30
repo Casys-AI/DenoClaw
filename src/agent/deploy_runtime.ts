@@ -1,4 +1,3 @@
-import { getIdToken, supportsIssuingIdTokens } from "@deno/oidc";
 import type { AgentEntry, BrokerEnvelope } from "../shared/types.ts";
 import type { AgentConfig } from "./types.ts";
 import { AgentRuntime } from "./runtime.ts";
@@ -6,6 +5,11 @@ import { BrokerClient } from "../orchestration/client.ts";
 import { WebSocketBrokerTransport } from "../orchestration/transport.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
+import {
+  getRequiredBrokerUrl,
+  isAuthorizedBrokerWakeUp,
+  resolveBrokerAuthToken,
+} from "./deploy_runtime_auth.ts";
 
 export interface DeployedAgentRuntimeOptions {
   agentId: string;
@@ -123,54 +127,4 @@ async function handleDeployedAgentRequest(
   }
 
   return new Response("Not Found", { status: 404 });
-}
-
-async function resolveBrokerAuthToken(input: {
-  brokerUrl: string;
-  oidcAudience: string;
-}): Promise<string> {
-  if (supportsIssuingIdTokens()) {
-    try {
-      return await getIdToken(input.oidcAudience);
-    } catch (error) {
-      log.warn("OIDC token issuance failed, falling back to static token", {
-        brokerUrl: input.brokerUrl,
-        cause: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  const staticToken = Deno.env.get("DENOCLAW_BROKER_TOKEN") ||
-    Deno.env.get("DENOCLAW_API_TOKEN");
-  if (staticToken) {
-    return staticToken;
-  }
-
-  throw new DenoClawError(
-    "BROKER_AUTH_MISSING",
-    { brokerUrl: input.brokerUrl },
-    "Set DENOCLAW_BROKER_TOKEN or DENOCLAW_API_TOKEN, or enable OIDC",
-  );
-}
-
-function getRequiredBrokerUrl(): string {
-  const brokerUrl = Deno.env.get("DENOCLAW_BROKER_URL");
-  if (!brokerUrl) {
-    throw new DenoClawError(
-      "BROKER_URL_MISSING",
-      {},
-      "Set DENOCLAW_BROKER_URL in the deployed agent environment",
-    );
-  }
-  return brokerUrl;
-}
-
-function isAuthorizedBrokerWakeUp(req: Request): boolean {
-  const configuredToken = Deno.env.get("DENOCLAW_API_TOKEN");
-  if (!configuredToken) {
-    return true;
-  }
-
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${configuredToken}`;
 }

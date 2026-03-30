@@ -1,11 +1,12 @@
 import { getConfigOrDefault, saveConfig } from "../../config/mod.ts";
 import { getDeployOrgToken } from "../../shared/deploy_credentials.ts";
-import { deriveBrokerKvName } from "../../shared/naming.ts";
+import { deriveBrokerAppName } from "../../shared/naming.ts";
 import { ask, error, print, success } from "../prompt.ts";
 import {
   createDeployApiHeaders,
   updateDeployAppConfig,
 } from "../deploy_api.ts";
+import { resolveBrokerDeployNaming } from "./broker_deploy_naming.ts";
 
 export async function deployBroker(opts?: {
   org?: string;
@@ -16,17 +17,38 @@ export async function deployBroker(opts?: {
   const config = await getConfigOrDefault();
   const deployToken = getDeployOrgToken() ??
     await ask("Deno Deploy organization access token");
+  const canonicalBrokerApp = deriveBrokerAppName();
 
   const org = opts?.org || config.deploy?.org ||
     await ask("Deploy org", config.deploy?.org || "casys");
-  const app = opts?.app || config.deploy?.app ||
-    await ask("Deploy app name", config.deploy?.app || "denoclaw");
+  const storedApp = config.deploy?.app;
+  const storedNaming = resolveBrokerDeployNaming({
+    storedApp,
+    storedKvDatabase: config.deploy?.kvDatabase,
+    canonicalBrokerApp,
+  });
+  const app = opts?.app ??
+    (storedApp
+      ? storedNaming.app
+      : await ask("Deploy app name", canonicalBrokerApp));
+  const resolvedNaming = (opts?.app === undefined && storedApp)
+    ? storedNaming
+    : resolveBrokerDeployNaming({
+      requestedApp: app,
+      storedApp,
+      storedKvDatabase: config.deploy?.kvDatabase,
+      canonicalBrokerApp,
+    });
   const region = opts?.region || config.deploy?.region || "global";
-  const kvDatabase = config.deploy?.kvDatabase || deriveBrokerKvName(app);
+  const kvDatabase = resolvedNaming.kvDatabase;
 
   if (!org || !app) {
     error("Organization and app name are required. Use --org and --app.");
     return;
+  }
+
+  for (const notice of resolvedNaming.migrationNotices) {
+    print(notice);
   }
 
   if (!deployToken) {

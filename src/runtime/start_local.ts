@@ -1,4 +1,5 @@
 import type { Config } from "../config/types.ts";
+import { getResolvedAgentRegistry } from "../agent/registry.ts";
 import { WorkerPool } from "../agent/worker_pool.ts";
 import { Gateway } from "../orchestration/gateway/server.ts";
 import { MessageBus } from "../messaging/bus.ts";
@@ -13,7 +14,7 @@ import { log } from "../shared/log.ts";
 import { createDashboardHandler } from "../../web/mod.ts";
 
 export async function startLocalGateway(config: Config): Promise<void> {
-  const agentIds = Object.keys(config.agents?.registry ?? {});
+  const agentIds = Object.keys(getResolvedAgentRegistry(config));
   if (agentIds.length === 0) {
     log.info("No agents configured — starting the gateway in empty mode.");
   }

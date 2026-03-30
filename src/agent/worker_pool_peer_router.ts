@@ -1,5 +1,6 @@
 import { generateId } from "../shared/helpers.ts";
 import { log } from "../shared/log.ts";
+import { getResolvedAgentEntry, getResolvedAgentRegistry } from "./registry.ts";
 import type {
   WorkerConfig,
   WorkerPeerResponseRequest,
@@ -48,10 +49,10 @@ export class WorkerPoolPeerRouter {
     fromAgent: string,
     msg: WorkerPeerSendMessage,
   ): void {
-    const registry = this.deps.config.agents.registry;
-    if (registry) {
-      const sender = registry[fromAgent];
-      const target = registry[msg.toAgent];
+    const registry = getResolvedAgentRegistry(this.deps.config);
+    if (Object.keys(registry).length > 0) {
+      const sender = getResolvedAgentEntry(this.deps.config, fromAgent);
+      const target = getResolvedAgentEntry(this.deps.config, msg.toAgent);
       const senderPeers = sender?.peers ?? [];
       if (!senderPeers.includes(msg.toAgent) && !senderPeers.includes("*")) {
         this.rejectAgentRequest(

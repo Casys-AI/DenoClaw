@@ -106,6 +106,8 @@ Current migration state:
   cleans matching legacy config entries instead of creating new registry state
 - `denoclaw agent delete` now removes both workspace state and matching legacy
   config residue when present
+- runtime-facing code is starting to read agent declarations through a resolved
+  registry helper instead of reaching straight into `config.agents.registry`
 
 Remaining work in Track 2:
 

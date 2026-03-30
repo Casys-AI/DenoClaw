@@ -1,5 +1,6 @@
 import type { Config } from "../config/types.ts";
 import type { CliArgs } from "../cli/args.ts";
+import { getResolvedAgentRegistry } from "../agent/registry.ts";
 import { WorkerPool } from "../agent/worker_pool.ts";
 import { ConsoleChannel } from "../messaging/channels/console.ts";
 import { ChannelManager } from "../messaging/channels/manager.ts";
@@ -12,9 +13,9 @@ export async function startAgentRuntime(
   args: CliArgs,
 ): Promise<void> {
   const agentId = args.agent;
-  const registry = config.agents?.registry;
+  const registry = getResolvedAgentRegistry(config);
 
-  if (!registry || Object.keys(registry).length === 0) {
+  if (Object.keys(registry).length === 0) {
     console.log("No agents configured. Create one first:\n");
     console.log("  denoclaw agent create <name>\n");
     return;

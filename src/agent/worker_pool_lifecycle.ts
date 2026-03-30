@@ -6,6 +6,10 @@ import {
 } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
+import {
+  ensureResolvedAgentRegistry,
+  getResolvedAgentRegistry,
+} from "./registry.ts";
 import type {
   WorkerConfig,
   WorkerKvPaths,
@@ -65,10 +69,7 @@ export class WorkerPoolLifecycle {
     }
     // Keep the resolved in-memory registry aligned for hot-added workers.
     // This is runtime-only state, not canonical persisted agent storage.
-    if (!this.deps.config.agents.registry) {
-      this.deps.config.agents.registry = {};
-    }
-    this.deps.config.agents.registry[agentId] = entry;
+    ensureResolvedAgentRegistry(this.deps.config)[agentId] = entry;
 
     await this.prepareSharedStorage();
     await this.prepareAgentStorage(agentId);
@@ -84,10 +85,11 @@ export class WorkerPoolLifecycle {
       log.debug(`Worker ${agentId} already terminated`);
     }
     this.agents.delete(agentId);
-    if (this.deps.config.agents.registry) {
+    const registry = getResolvedAgentRegistry(this.deps.config);
+    if (registry[agentId]) {
       // Remove from the in-memory resolved registry used by already-running
       // workers and peer routing.
-      delete this.deps.config.agents.registry[agentId];
+      delete registry[agentId];
     }
     this.deps.callbacks.onWorkerStopped?.(agentId);
     return true;

@@ -21,6 +21,7 @@ import type {
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
+import { getResolvedAgentEntry } from "./registry.ts";
 import { getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
@@ -215,8 +216,9 @@ function createAgentLoop(
   }
 
   const memory = new KvdexMemory(agentId, sessionId, 100, kvPrivatePath);
-  const peers = config.agents.registry?.[agentId]?.peers ?? [];
-  const sandboxConfig = config.agents.registry?.[agentId]?.sandbox ??
+  const entry = getResolvedAgentEntry(config, agentId);
+  const peers = entry?.peers ?? [];
+  const sandboxConfig = entry?.sandbox ??
     config.agents.defaults?.sandbox;
   const workspaceDir = getAgentDefDir(agentId);
   return new AgentLoop(

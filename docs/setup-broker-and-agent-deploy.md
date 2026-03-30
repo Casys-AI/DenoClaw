@@ -6,25 +6,36 @@ It separates the broker path from the agent path on purpose:
 - Broker = Deno Deploy app
 - Agents = Deno Deploy v2 apps and revisions
 
+Canonical deploy naming is defined separately in:
+
+- `docs/adr-015-deploy-resource-naming.md`
+
+Important:
+
+- the current live deploys may still use older legacy names
+- those names should not be treated as the long-term canonical convention
+
 ## Current status
 
 As of 2026-03-30, these statements are true:
 
-- The broker deployment path is source-controlled and should target
+- The broker deployment path is source-controlled and targets
   `main.ts broker` on Deno Deploy.
 - Agent publication should use the public Deno Deploy REST API at
   `https://api.deno.com/v2`.
 - The public `v2` contract is `apps` + `revisions`, authenticated by an
   organization access token in the `Authorization: Bearer ...` header.
-- Distributed agent-to-broker transport is wired in the repo; what remains is
-  validation against real Deploy credentials and any follow-up hardening.
+- The live broker deploy path is working.
+- The live agent deploy path has been validated with `alice`.
+- The current deployed agent WebSocket auth path is stable with a static broker
+  token first and OIDC as a fallback.
 
 That means:
 
 - You can deploy and verify the broker today.
 - You can create and update per-agent Deploy apps today.
-- You should still validate the live broker <-> agent cycle before treating the
-  deploy path as production-proven.
+- You can validate a real broker <-> agent cycle today.
+- There is still follow-up hardening to do before calling the auth model final.
 
 ## 1. Broker setup
 
@@ -35,29 +46,45 @@ That means:
 - A local Deno Deploy CLI login
 - Provider API keys for any LLMs the broker must proxy
 
-### Why the broker config lives in `deno.json`
+### Why `deno.json` must stay broker-oriented
 
 This repository contains a dashboard under `web/` and a Vite/Fresh config under
 `vite.config.ts`. If Deno Deploy is left to auto-detect the app shape, it can
 pick the dashboard preset instead of the broker runtime.
 
-To avoid that, the broker runtime is pinned in `deno.json`:
+`deno.json` must not point at an agent app.
+
+For the current live setup, it should stay broker-oriented.
+For the canonical long-term naming convention, the broker app slug should be
+`denoclaw-broker`.
+
+Current broker-oriented example:
 
 ```json
 {
   "deploy": {
-    "runtime": {
-      "type": "dynamic",
-      "entrypoint": "main.ts",
-      "args": ["broker"]
-    }
+    "org": "casys",
+    "app": "denoclaw-broker"
   }
 }
 ```
 
-That forces Deno Deploy to boot the distributed broker entrypoint instead of
-inferring a framework preset from the dashboard files or falling back to the
-local gateway code path.
+The broker runtime itself is configured by the deploy flow through the Deno
+Deploy API and CLI:
+
+- dynamic runtime
+- entrypoint `./main.ts`
+- args `["broker"]`
+- working directory `.`
+
+That separation is intentional:
+
+- `deno.json` stays broker-oriented at the repo level
+- broker app runtime is configured explicitly during deploy
+- agent apps are configured per app/revision through the `v2` API, not through
+  `deno.json`
+- stronger naming should be migrated intentionally, not by accident during a
+  later deploy
 
 ### Deploy the broker
 
@@ -71,9 +98,11 @@ deno task deploy
 What `deno task deploy` does:
 
 - ensures the Deno Deploy app exists
-- creates it with an explicit dynamic runtime when needed
+- creates or normalizes the app with an explicit dynamic runtime when needed
+- provisions and assigns the shared broker KV database
+- syncs `DENOCLAW_API_TOKEN` and provider env vars to the broker app
 - uploads the current repo root
-- relies on the source-controlled deploy config in `deno.json`
+- saves the deployed broker URL and KV database name into local config
 
 ### Verify the broker
 
@@ -83,11 +112,17 @@ List env vars:
 deno deploy env list --org <org> --app <app>
 ```
 
-Check health:
+Check public health:
+
+```bash
+curl <broker-url>/health
+```
+
+Check an authenticated endpoint:
 
 ```bash
 curl -H "Authorization: Bearer <DENOCLAW_API_TOKEN>" \
-  <broker-url>/health
+  <broker-url>/stats
 ```
 
 Read logs:
@@ -125,7 +160,9 @@ Notes:
 - `DENOCLAW_BROKER_OIDC_AUDIENCE` defaults to `DENOCLAW_BROKER_URL` when
   omitted.
 - `DENOCLAW_API_TOKEN` is currently used for broker-authenticated `POST /tasks`
-  wake-up and as the static fallback when OIDC is unavailable.
+  wake-up and as the primary auth path for the deployed agent WebSocket.
+- OIDC is still supported, but currently treated as a fallback for the agent
+  WebSocket path until the handshake design is hardened.
 
 ### Publish one agent
 
@@ -147,6 +184,17 @@ The publish flow:
 - creates a new revision through `POST /v2/apps/{app}/deploy`
 - registers `agentId -> endpoint/config` back with the broker
 
+Canonical target naming for future cleanup:
+
+- broker app: `denoclaw-broker`
+- agent app: `denoclaw-agent-<agent-id>`
+- broker KV: `denoclaw-broker-kv`
+- agent KV: `denoclaw-agent-<agent-id>-kv`
+- sandbox instance: `denoclaw-agent-<agent-id>-sandbox`
+
+Some currently live resources still use legacy names such as `denoclaw`,
+`alice`, or `alice-kv`.
+
 ## 3. Current runtime status
 
 The distributed agent Deploy path is now wired in the repo.
@@ -157,7 +205,10 @@ Current behavior:
 - the broker stores agent config and public endpoint via `/agents/register`
 - cold agents are woken by broker `POST /tasks`
 - awake agents connect back to the broker over `/agent/socket`
-- agent -> broker auth prefers OIDC and falls back to a static bearer token
+- the WebSocket transport first wakes the broker over HTTP, then retries the WS
+  connect path briefly
+- agent -> broker WebSocket auth currently prefers the shared static broker
+  token and only falls back to OIDC if no static token is configured
 - broker -> agent wake-up currently uses the shared static bearer token
 
 Files involved:
@@ -171,9 +222,10 @@ Files involved:
 
 What remains:
 
-- real-condition validation against live Deno Deploy credentials
 - deciding whether broker -> agent wake-up should stay on static bearer auth or
   move to a stronger broker identity flow
+- redesigning the agent WebSocket auth handshake if we want OIDC to become the
+  preferred secure path again
 - longer-running streaming behavior once the first live cycle is verified
 
 ## 4. Recommended operator workflow
@@ -194,11 +246,14 @@ If someone on the project needs to set things up today, use this order:
 
 If the broker deploy boots the dashboard instead of the broker:
 
-- confirm `deno.json` still contains `deploy.runtime.entrypoint = "main.ts"`
-- confirm `deno.json` still contains `deploy.runtime.args = ["broker"]`
+- confirm `deno.json` still points to the broker app, not an agent app
+- confirm the broker app runtime was normalized by `deno task deploy`
 - re-run `deno task deploy`
-- inspect the latest build in Deno Deploy and confirm the runtime config came
-  from source code, not auto-detection
+- inspect the app config in Deno Deploy and confirm it is:
+  - dynamic runtime
+  - entrypoint `./main.ts`
+  - args `["broker"]`
+  - working directory `.`
 
 If `deno task publish` fails immediately:
 
@@ -210,3 +265,10 @@ If agent publication succeeds but remote execution does not:
 
 - inspect broker registration, `POST /tasks`, and `/agent/socket` first
 - do not assume the old KV transport is involved anymore
+
+If an agent revision fails during warm-up:
+
+- inspect the revision directly through `GET /v2/revisions/{revision}`
+- confirm the revision contains the expected `env_vars`
+- inspect `GET /v2/revisions/{revision}/progress`
+- compare agent logs and broker logs over the same timestamp window

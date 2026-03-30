@@ -45,7 +45,7 @@ live visualization.
 KV is provisioned on Deploy via:
 
 ```bash
-deno deploy database provision denoclaw-kv --kind denokv --org casys
+deno deploy database provision denoclaw-broker-kv --kind denokv --org casys
 ```
 
 Accessible from local via KV Connect:

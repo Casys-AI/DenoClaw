@@ -9,20 +9,93 @@ import type {
   FederationControlEnvelope,
   FederationControlHandlerMap,
   FederationRoutingPort,
-  FederationService,
 } from "../federation/mod.ts";
-import { isFederationControlMethod } from "../federation/mod.ts";
+import {
+  createFederationControlRouter,
+  FederationService,
+  isFederationControlMethod,
+  KvFederationAdapter,
+} from "../federation/mod.ts";
 import type { TunnelConnection } from "./tunnel_registry.ts";
 
-export interface BrokerFederationRuntimeDeps {
+interface BrokerFederationMessagingDeps {
   findRemoteBrokerConnection(remoteBrokerId: string): TunnelConnection | null;
   routeToTunnel(ws: WebSocket, msg: BrokerMessage): void;
   getFederationService(): Promise<FederationService>;
   sendReply(reply: BrokerMessage): Promise<void>;
 }
 
+export interface BrokerFederationRuntimeDeps {
+  getKv(): Promise<Deno.Kv>;
+  findRemoteBrokerConnection(remoteBrokerId: string): TunnelConnection | null;
+  routeToTunnel(ws: WebSocket, msg: BrokerMessage): void;
+  sendReply(reply: BrokerMessage): Promise<void>;
+}
+
+export class BrokerFederationRuntime {
+  private adapter: KvFederationAdapter | null = null;
+  private routingPort: FederationRoutingPort | null = null;
+  private service: FederationService | null = null;
+  private controlRouter:
+    | ReturnType<typeof createFederationControlRouter>
+    | null = null;
+
+  constructor(private readonly deps: BrokerFederationRuntimeDeps) {}
+
+  async getAdapter(): Promise<KvFederationAdapter> {
+    if (this.adapter) return this.adapter;
+    this.adapter = new KvFederationAdapter(await this.deps.getKv());
+    return this.adapter;
+  }
+
+  async getService(): Promise<FederationService> {
+    if (this.service) return this.service;
+    const adapter = await this.getAdapter();
+    this.service = new FederationService(
+      adapter,
+      adapter,
+      adapter,
+      adapter,
+      this.getRoutingPort(),
+      adapter,
+      adapter,
+    );
+    return this.service;
+  }
+
+  async handleControlMessage(msg: BrokerFederationMessage): Promise<void> {
+    await handleBrokerFederationControlMessage(this.getControlRouter(), msg);
+  }
+
+  private getRoutingPort(): FederationRoutingPort {
+    if (this.routingPort) return this.routingPort;
+    this.routingPort = createBrokerFederationRoutingPort({
+      findRemoteBrokerConnection: (remoteBrokerId) =>
+        this.deps.findRemoteBrokerConnection(remoteBrokerId),
+      routeToTunnel: (ws, msg) => this.deps.routeToTunnel(ws, msg),
+      getFederationService: () => this.getService(),
+      sendReply: (reply) => this.deps.sendReply(reply),
+    });
+    return this.routingPort;
+  }
+
+  private getControlRouter(): ReturnType<typeof createFederationControlRouter> {
+    if (this.controlRouter) return this.controlRouter;
+    this.controlRouter = createFederationControlRouter(
+      createBrokerFederationControlHandlers({
+        findRemoteBrokerConnection: (remoteBrokerId) =>
+          this.deps.findRemoteBrokerConnection(remoteBrokerId),
+        routeToTunnel: (ws, msg) => this.deps.routeToTunnel(ws, msg),
+        getFederationService: () => this.getService(),
+        sendReply: (reply) => this.deps.sendReply(reply),
+      }),
+    );
+    return this.controlRouter;
+  }
+}
+
 export function createBrokerFederationRoutingPort(
-  deps: BrokerFederationRuntimeDeps,
+  deps: BrokerFederationMessagingDeps,
 ): FederationRoutingPort {
   return {
     resolveTarget: (task, _policy, correlation) => {
@@ -58,18 +131,22 @@ export function createBrokerFederationRoutingPort(
       const localBrokerId = correlation.linkId.split(":")[0] || "broker";
       const remoteTunnel = deps.findRemoteBrokerConnection(remoteBrokerId);
       if (!remoteTunnel) {
-        return Promise.reject(new Error(
-          `federation_forward_failed:${remoteBrokerId}:remote_broker_unavailable`,
-        ));
+        return Promise.reject(
+          new Error(
+            `federation_forward_failed:${remoteBrokerId}:remote_broker_unavailable`,
+          ),
+        );
       }
       const advertisedAgents = remoteTunnel.capabilities.agents ?? [];
       if (
         advertisedAgents.length > 0 &&
         !advertisedAgents.includes(task.targetAgent)
       ) {
-        return Promise.reject(new Error(
-          `federation_forward_failed:${remoteBrokerId}:target_not_advertised`,
-        ));
+        return Promise.reject(
+          new Error(
+            `federation_forward_failed:${remoteBrokerId}:target_not_advertised`,
+          ),
+        );
       }
       try {
         deps.routeToTunnel(remoteTunnel.ws, {
@@ -86,11 +163,13 @@ export function createBrokerFederationRoutingPort(
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
-        return Promise.reject(new Error(
-          `federation_forward_failed:${remoteBrokerId}:${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ));
+        return Promise.reject(
+          new Error(
+            `federation_forward_failed:${remoteBrokerId}:${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        );
       }
 
       return Promise.resolve();
@@ -99,7 +178,7 @@ export function createBrokerFederationRoutingPort(
 }
 
 export function createBrokerFederationControlHandlers(
-  deps: BrokerFederationRuntimeDeps,
+  deps: BrokerFederationMessagingDeps,
 ): FederationControlHandlerMap {
   const requireNonEmptyString = (
     value: unknown,

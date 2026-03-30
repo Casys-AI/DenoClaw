@@ -246,8 +246,10 @@ After landing the refactor into the local checkpoint branch:
   extracting:
   - `src/orchestration/broker/llm_proxy.ts`
   - `src/orchestration/broker/agent_message_router.ts`
+  - slimmer federation wiring in
+    `src/orchestration/broker/federation_runtime.ts`
 - current broker/federation/agent runtime file sizes are now:
-  - `src/orchestration/broker/server.ts`: 589 lines
+  - `src/orchestration/broker/server.ts`: 544 lines
   - `src/orchestration/federation/service.ts`: 293 lines
   - `src/agent/worker_entrypoint.ts`: 473 lines
   - `src/agent/worker_pool.ts`: 393 lines
@@ -372,7 +374,7 @@ polish and should be treated as a separate track.
 ### Priority B — reduce remaining large files
 
 - if desired, continue shrinking `src/orchestration/broker/server.ts` around
-  federation service wiring and lifecycle helpers
+  lifecycle helpers
 - split `src/orchestration/federation/service.ts`
 - split `src/agent/worker_entrypoint.ts`
 - split `src/agent/worker_pool.ts`

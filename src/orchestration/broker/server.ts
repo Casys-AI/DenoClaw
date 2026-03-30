@@ -16,17 +16,11 @@ import { ConfigError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 import { TaskStore } from "../../messaging/a2a/tasks.ts";
 import type { Task } from "../../messaging/a2a/types.ts";
-import {
-  createFederationControlRouter,
-  type FederationRoutingPort,
+import type {
   FederationService,
   KvFederationAdapter,
 } from "../federation/mod.ts";
-import {
-  createBrokerFederationControlHandlers,
-  createBrokerFederationRoutingPort,
-  handleBrokerFederationControlMessage,
-} from "./federation_runtime.ts";
+import { BrokerFederationRuntime } from "./federation_runtime.ts";
 import {
   sendBrokerMessageOverTunnel,
   type TunnelConnection,
@@ -87,12 +81,7 @@ export class BrokerServer {
   private replyDispatcher: BrokerReplyDispatcher;
   private taskDispatcher: BrokerTaskDispatcher;
   private toolDispatcher: BrokerToolDispatcher;
-  private federationAdapter: KvFederationAdapter | null = null;
-  private federationRoutingPort: FederationRoutingPort | null = null;
-  private federationService: FederationService | null = null;
-  private federationControlRouter!: ReturnType<
-    typeof createFederationControlRouter
-  >;
+  private federationRuntime: BrokerFederationRuntime;
   private httpServer?: Deno.HttpServer;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
@@ -125,6 +114,13 @@ export class BrokerServer {
       findReplySocket: (agentId) => this.findAgentSocket(agentId),
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
     });
+    this.federationRuntime = new BrokerFederationRuntime({
+      getKv: () => this.getKv(),
+      findRemoteBrokerConnection: (remoteBrokerId) =>
+        this.findTunnelForRemoteBroker(remoteBrokerId),
+      routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
+      sendReply: (reply) => this.replyDispatcher.sendReply(reply),
+    });
     this.taskDispatcher = new BrokerTaskDispatcher({
       taskStore: this.taskStore,
       persistence: this.taskPersistence,
@@ -148,9 +144,6 @@ export class BrokerServer {
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
       sendReply: (reply) => this.sendReply(reply),
     });
-    this.federationControlRouter = createFederationControlRouter(
-      this.getFederationControlHandlers(),
-    );
   }
 
   private createDefaultToolExecutionAdapter(): ToolExecutionPort {
@@ -393,55 +386,17 @@ export class BrokerServer {
   // ── Federation control-plane ───────────────────────────
 
   private async getFederationAdapter(): Promise<KvFederationAdapter> {
-    if (this.federationAdapter) return this.federationAdapter;
-    this.federationAdapter = new KvFederationAdapter(await this.getKv());
-    return this.federationAdapter;
+    return await this.federationRuntime.getAdapter();
   }
 
   private async getFederationService(): Promise<FederationService> {
-    if (this.federationService) return this.federationService;
-    const adapter = await this.getFederationAdapter();
-    this.federationService = new FederationService(
-      adapter,
-      adapter,
-      adapter,
-      adapter,
-      this.createFederationRoutingPort(),
-      adapter,
-      adapter,
-    );
-    return this.federationService;
-  }
-
-  private createFederationRoutingPort(): FederationRoutingPort {
-    if (this.federationRoutingPort) return this.federationRoutingPort;
-    this.federationRoutingPort = createBrokerFederationRoutingPort({
-      findRemoteBrokerConnection: (remoteBrokerId) =>
-        this.findTunnelForRemoteBroker(remoteBrokerId),
-      routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
-      getFederationService: () => this.getFederationService(),
-      sendReply: (reply) => this.replyDispatcher.sendReply(reply),
-    });
-    return this.federationRoutingPort;
-  }
-
-  private getFederationControlHandlers() {
-    return createBrokerFederationControlHandlers({
-      findRemoteBrokerConnection: (remoteBrokerId) =>
-        this.findTunnelForRemoteBroker(remoteBrokerId),
-      routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
-      getFederationService: () => this.getFederationService(),
-      sendReply: (reply) => this.replyDispatcher.sendReply(reply),
-    });
+    return await this.federationRuntime.getService();
   }
 
   private async handleFederationControlMessage(
     msg: BrokerFederationMessage,
   ): Promise<void> {
-    await handleBrokerFederationControlMessage(
-      this.federationControlRouter,
-      msg,
-    );
+    await this.federationRuntime.handleControlMessage(msg);
   }
 
   // ── Tunnel management ───────────────────────────────

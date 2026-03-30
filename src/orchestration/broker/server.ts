@@ -29,6 +29,7 @@ import {
 import { BrokerAgentRegistry } from "./agent_registry.ts";
 import { BrokerAgentMessageRouter } from "./agent_message_router.ts";
 import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
+import { BrokerLifecycleRuntime } from "./lifecycle_runtime.ts";
 import { BrokerLlmProxy } from "./llm_proxy.ts";
 import { BrokerHttpRuntime } from "./http_runtime.ts";
 import { BrokerTaskPersistence } from "./persistence.ts";
@@ -81,7 +82,7 @@ export class BrokerServer {
   private toolDispatcher: BrokerToolDispatcher;
   private federationRuntime: BrokerFederationRuntime;
   private httpRuntime: BrokerHttpRuntime;
-  private httpServer?: Deno.HttpServer;
+  private lifecycleRuntime: BrokerLifecycleRuntime;
 
   constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
@@ -132,6 +133,19 @@ export class BrokerServer {
       handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
       handleTunnelMessage: (tunnelId, data) =>
         this.handleTunnelMessage(tunnelId, data),
+    });
+    this.lifecycleRuntime = new BrokerLifecycleRuntime({
+      connectedAgents: this.connectedAgents,
+      tunnelRegistry: this.tunnelRegistry,
+      taskStore: this.taskStore,
+      getAuth: () => this.getAuth(),
+      handleHttp: (req) => this.handleHttp(req),
+      closeOwnedKv: () => {
+        if (this.kv && this.ownsKv) {
+          this.kv.close();
+          this.kv = null;
+        }
+      },
     });
     this.taskDispatcher = new BrokerTaskDispatcher({
       taskStore: this.taskStore,
@@ -202,19 +216,7 @@ export class BrokerServer {
   }
 
   async start(port = 3000): Promise<void> {
-    // Warn if no token is configured (ADR-003)
-    if (!Deno.env.get("DENOCLAW_API_TOKEN")) {
-      log.warn(
-        "DENOCLAW_API_TOKEN not set — broker running in unauthenticated mode. Do not use in production.",
-      );
-    }
-
-    await this.getAuth();
-
-    // HTTP + WebSocket server — all messages arrive via HTTP or WebSocket
-    this.httpServer = Deno.serve({ port }, (req) => this.handleHttp(req));
-
-    log.info(`Broker started on port ${port}`);
+    await this.lifecycleRuntime.start(port);
   }
 
   /**
@@ -492,26 +494,6 @@ export class BrokerServer {
   }
 
   async stop(): Promise<void> {
-    if (this.httpServer) await this.httpServer.shutdown();
-    this.connectedAgents.closeAll(
-      1001,
-      "Broker shutting down",
-      (agentId, e) =>
-        log.warn(`Failed to close agent socket ${agentId} cleanly`, e),
-    );
-    for (const [tunnelId, t] of this.tunnelRegistry.entries()) {
-      try {
-        t.ws.close(1001, "Broker shutting down");
-      } catch (e) {
-        log.warn(`Failed to close tunnel ${tunnelId} cleanly`, e);
-      }
-    }
-    this.tunnelRegistry.clear();
-    this.taskStore.close();
-    if (this.kv && this.ownsKv) {
-      this.kv.close();
-      this.kv = null;
-    }
-    log.info("Broker stopped");
+    await this.lifecycleRuntime.stop();
   }
 }

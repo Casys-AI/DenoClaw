@@ -12,4 +12,8 @@ export interface Config {
   tools: ToolsConfig;
   channels: ChannelsConfig;
   gateway?: { port: number };
+  deploy?: {
+    org?: string;
+    app?: string;
+  };
 }

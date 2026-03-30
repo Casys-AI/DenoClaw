@@ -249,6 +249,11 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/deploy_runtime_auth.ts`
 - broker deploy naming migration is now isolated in:
   - `src/cli/setup/broker_deploy_naming.ts`
+- broker auth is now decomposed into:
+  - `src/orchestration/auth.ts`
+  - `src/orchestration/auth_token_store.ts`
+  - `src/orchestration/auth_request.ts`
+  - `src/orchestration/auth_types.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -270,6 +275,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/broker/federation_runtime.ts`: 110 lines
   - `src/orchestration/broker/federation_routing_port.ts`: 98 lines
   - `src/orchestration/broker/federation_control_handlers.ts`: 211 lines
+  - `src/orchestration/auth.ts`: 140 lines
+  - `src/orchestration/auth_token_store.ts`: 173 lines
+  - `src/orchestration/auth_request.ts`: 60 lines
+  - `src/orchestration/auth_types.ts`: 33 lines
   - `src/orchestration/federation/service.ts`: 268 lines
   - `src/orchestration/federation/identity_manager.ts`: 82 lines
   - `src/agent/runtime.ts`: 261 lines

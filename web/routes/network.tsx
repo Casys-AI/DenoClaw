@@ -9,6 +9,7 @@ import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { StatusDot } from "../components/StatusBadge.tsx";
 import type { AgentStatusEntry, HealthResponse } from "../lib/types.ts";
 import NetworkGraph from "../islands/NetworkGraph.tsx";
+import { formatCompact, formatLatency } from "../lib/format.ts";
 
 interface NetworkData {
   instances: InstanceData[];
@@ -16,6 +17,10 @@ interface NetworkData {
   health: HealthResponse | null;
   selectedInstance: string;
   brokerUrl: string;
+  federationSuccess: number;
+  federationErrors: number;
+  federationP95LatencyMs: number;
+  federationDeadLetters: number;
 }
 
 export const handler = {
@@ -41,6 +46,24 @@ export const handler = {
       tunnels,
       tunnelCount: tunnels.length,
     };
+    const federationSuccess = filteredInstances.reduce(
+      (sum, instance) => sum + (instance.federation?.successCount ?? 0),
+      0,
+    );
+    const federationErrors = filteredInstances.reduce(
+      (sum, instance) => sum + (instance.federation?.errorCount ?? 0),
+      0,
+    );
+    const federationDeadLetters = filteredInstances.reduce(
+      (sum, instance) => sum + (instance.federation?.deadLetterBacklog ?? 0),
+      0,
+    );
+    const federationP95LatencyMs = Math.max(
+      0,
+      ...filteredInstances.flatMap((instance) =>
+        instance.federation?.links.map((link) => link.p95LatencyMs) ?? []
+      ),
+    );
 
     return page({
       instances,
@@ -48,12 +71,26 @@ export const handler = {
       health: mergedHealth,
       selectedInstance,
       brokerUrl: instances[0]?.instance.url ?? dashboard.brokerUrl,
+      federationSuccess,
+      federationErrors,
+      federationP95LatencyMs,
+      federationDeadLetters,
     } as NetworkData);
   },
 };
 
 export default function Network({ data }: { data: NetworkData }) {
-  const { instances, agents, health, selectedInstance, brokerUrl } = data;
+  const {
+    instances,
+    agents,
+    health,
+    selectedInstance,
+    brokerUrl,
+    federationSuccess,
+    federationErrors,
+    federationP95LatencyMs,
+    federationDeadLetters,
+  } = data;
   const tunnels = health?.tunnels ?? [];
 
   return (
@@ -88,6 +125,22 @@ export default function Network({ data }: { data: NetworkData }) {
             <div class="stat">
               <div class="stat-title">Tunnels</div>
               <div class="stat-value font-data text-lg">{tunnels.length}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Federation Success</div>
+              <div class="stat-value text-success font-data text-lg">
+                {formatCompact(federationSuccess)}
+              </div>
+              <div class="stat-desc">{formatCompact(federationErrors)} errors</div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Federation P95</div>
+              <div class="stat-value font-data text-lg">
+                {formatLatency(federationP95LatencyMs)}
+              </div>
+              <div class="stat-desc">
+                dead-letter: {formatCompact(federationDeadLetters)}
+              </div>
             </div>
           </div>
           <div class="card bg-base-200">

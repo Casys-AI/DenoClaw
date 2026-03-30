@@ -1,16 +1,22 @@
 import type {
   BrokerIdentity,
+  FederationDeadLetter,
+  FederationSessionToken,
   FederatedRoutePolicy,
+  FederatedSubmissionRecord,
   FederationLink,
   FederationLinkState,
+  FederationStatsSnapshot,
   RemoteAgentCatalogEntry,
 } from "../types.ts";
 import type {
   CrossBrokerHopEvent,
   EstablishFederationLinkInput,
   FederationControlPort,
+  FederationDeliveryPort,
   FederationDiscoveryPort,
   FederationIdentityPort,
+  FederationMetricsPort,
   FederationObservabilityPort,
   FederationPolicyPort,
 } from "../ports.ts";
@@ -21,7 +27,14 @@ export class KvFederationAdapter
     FederationDiscoveryPort,
     FederationPolicyPort,
     FederationIdentityPort,
-    FederationObservabilityPort {
+    FederationObservabilityPort,
+    FederationDeliveryPort,
+    FederationMetricsPort {
+  private readonly federationEventSubscribers = new Map<
+    string,
+    (event: CrossBrokerHopEvent) => void
+  >();
+
   constructor(private readonly kv: Deno.Kv) {}
 
   async establishLink(
@@ -56,6 +69,30 @@ export class KvFederationAdapter
       if (entry.value) links.push(entry.value);
     }
     return links;
+  }
+
+  async rotateLinkSession(
+    linkId: string,
+    ttlSeconds = 900,
+  ): Promise<FederationSessionToken> {
+    const link = await this.kv.get<FederationLink>(["federation", "links", linkId]);
+    if (!link.value) {
+      throw new Error(`Federation link not found: ${linkId}`);
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    const session: FederationSessionToken = {
+      sessionId: crypto.randomUUID(),
+      linkId,
+      remoteBrokerId: link.value.remoteBrokerId,
+      issuedAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      status: "active",
+    };
+
+    await this.kv.set(["federation", "sessions", linkId, session.sessionId], session);
+    return session;
   }
 
   async refreshTrust(remoteBrokerId: string): Promise<BrokerIdentity> {
@@ -126,6 +163,31 @@ export class KvFederationAdapter
     await this.upsertIdentity({ ...existing, status: "revoked" });
   }
 
+  async rotateIdentityKey(
+    brokerId: string,
+    nextPublicKey: string,
+  ): Promise<BrokerIdentity> {
+    const now = new Date().toISOString();
+    const existing = await this.getIdentity(brokerId);
+    const updated: BrokerIdentity = existing
+      ? {
+        ...existing,
+        publicKeys: [nextPublicKey, ...existing.publicKeys.filter((key) => key !== nextPublicKey)],
+        activeKeyId: nextPublicKey,
+        rotatedAt: now,
+      }
+      : {
+        brokerId,
+        instanceUrl: "",
+        publicKeys: [nextPublicKey],
+        activeKeyId: nextPublicKey,
+        rotatedAt: now,
+        status: "pending",
+      };
+    await this.upsertIdentity(updated);
+    return updated;
+  }
+
   async setRoutePolicy(
     brokerId: string,
     policy: FederatedRoutePolicy,
@@ -165,11 +227,121 @@ export class KvFederationAdapter
       event.taskId,
       crypto.randomUUID(),
     ], event);
+
+    for (const subscriber of this.federationEventSubscribers.values()) {
+      subscriber(event);
+    }
   }
 
   async streamFederationEvents(
-    _onEvent: (event: CrossBrokerHopEvent) => void,
+    onEvent: (event: CrossBrokerHopEvent) => void,
   ): Promise<() => void> {
-    return () => {};
+    const subscriberId = crypto.randomUUID();
+    this.federationEventSubscribers.set(subscriberId, onEvent);
+    return () => {
+      this.federationEventSubscribers.delete(subscriberId);
+    };
+  }
+
+  async getSubmissionRecord(
+    idempotencyKey: string,
+  ): Promise<FederatedSubmissionRecord | null> {
+    const entry = await this.kv.get<FederatedSubmissionRecord>([
+      "federation",
+      "submissions",
+      idempotencyKey,
+    ]);
+    return entry.value ?? null;
+  }
+
+  async upsertSubmissionRecord(record: FederatedSubmissionRecord): Promise<void> {
+    await this.kv.set([
+      "federation",
+      "submissions",
+      record.idempotencyKey,
+    ], record);
+  }
+
+  async moveToDeadLetter(entry: FederationDeadLetter): Promise<void> {
+    await this.kv.set([
+      "federation",
+      "dead-letter",
+      entry.remoteBrokerId,
+      entry.deadLetterId,
+    ], entry);
+  }
+
+  async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
+    const prefix: Deno.KvKey = remoteBrokerId
+      ? ["federation", "dead-letter", remoteBrokerId]
+      : ["federation", "dead-letter"];
+    const entries: FederationDeadLetter[] = [];
+    for await (const entry of this.kv.list<FederationDeadLetter>({ prefix })) {
+      if (entry.value) entries.push(entry.value);
+    }
+    return entries;
+  }
+
+  async getFederationStats(
+    remoteBrokerId?: string,
+  ): Promise<FederationStatsSnapshot> {
+    const eventPrefix: Deno.KvKey = ["federation", "events"];
+    const byLink = new Map<string, {
+      linkId: string;
+      remoteBrokerId: string;
+      successCount: number;
+      errorCount: number;
+      latencies: number[];
+    }>();
+    let successCount = 0;
+    let errorCount = 0;
+
+    for await (const entry of this.kv.list<CrossBrokerHopEvent>({ prefix: eventPrefix })) {
+      const event = entry.value;
+      if (!event) continue;
+      if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
+
+      const link = byLink.get(event.linkId) ?? {
+        linkId: event.linkId,
+        remoteBrokerId: event.remoteBrokerId,
+        successCount: 0,
+        errorCount: 0,
+        latencies: [],
+      };
+      link.latencies.push(event.latencyMs);
+      if (event.success) {
+        link.successCount += 1;
+        successCount += 1;
+      } else {
+        link.errorCount += 1;
+        errorCount += 1;
+      }
+      byLink.set(event.linkId, link);
+    }
+
+    const deadLetters = await this.listDeadLetters(remoteBrokerId);
+    const links = [...byLink.values()].map((entry) => ({
+      linkId: entry.linkId,
+      remoteBrokerId: entry.remoteBrokerId,
+      successCount: entry.successCount,
+      errorCount: entry.errorCount,
+      p50LatencyMs: this.percentile(entry.latencies, 50),
+      p95LatencyMs: this.percentile(entry.latencies, 95),
+    }));
+
+    return {
+      links,
+      successCount,
+      errorCount,
+      deadLetterBacklog: deadLetters.length,
+    };
+  }
+
+  private percentile(values: number[], pct: number): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const rank = Math.ceil((pct / 100) * sorted.length) - 1;
+    const index = Math.min(Math.max(rank, 0), sorted.length - 1);
+    return sorted[index];
   }
 }

@@ -910,6 +910,9 @@ export class BrokerServer {
       adapter,
       adapter,
       adapter,
+      undefined,
+      adapter,
+      adapter,
     );
     return this.federationService;
   }
@@ -1192,6 +1195,12 @@ export class BrokerServer {
       return Response.json(await adapter.listRemoteAgents(remoteBrokerId));
     }
 
+    if (req.method === "GET" && url.pathname === "/federation/stats") {
+      const remoteBrokerId = url.searchParams.get("remoteBrokerId") ?? undefined;
+      const adapter = await this.getFederationAdapter();
+      return Response.json(await adapter.getFederationStats(remoteBrokerId));
+    }
+
     if (req.method === "GET" && url.pathname === "/federation/policy") {
       const brokerId = url.searchParams.get("brokerId");
       if (!brokerId) {
@@ -1274,6 +1283,52 @@ export class BrokerServer {
       const service = await this.getFederationService();
       await service.revokeIdentity(brokerId);
       return Response.json({ ok: true, brokerId });
+    }
+
+    if (req.method === "POST" && url.pathname === "/federation/identity/rotate") {
+      const body = await req.json().catch(() => null) as {
+        brokerId?: string;
+        nextPublicKey?: string;
+      } | null;
+      if (
+        !body || typeof body.brokerId !== "string" || body.brokerId.length === 0 ||
+        typeof body.nextPublicKey !== "string" || body.nextPublicKey.length === 0
+      ) {
+        return Response.json({
+          error: {
+            code: "INVALID_ROTATE_IDENTITY_REQUEST",
+            recovery: "Provide { brokerId, nextPublicKey }",
+          },
+        }, { status: 400 });
+      }
+
+      const service = await this.getFederationService();
+      const identity = await service.rotateIdentityKey(
+        body.brokerId,
+        body.nextPublicKey,
+      );
+      return Response.json({ ok: true, identity });
+    }
+
+    if (req.method === "POST" && url.pathname === "/federation/session/rotate") {
+      const body = await req.json().catch(() => null) as {
+        linkId?: string;
+        ttlSeconds?: number;
+      } | null;
+      if (!body || typeof body.linkId !== "string" || body.linkId.length === 0) {
+        return Response.json({
+          error: {
+            code: "INVALID_ROTATE_SESSION_REQUEST",
+            recovery: "Provide { linkId, ttlSeconds? }",
+          },
+        }, { status: 400 });
+      }
+      const service = await this.getFederationService();
+      const session = await service.rotateLinkSession(
+        body.linkId,
+        typeof body.ttlSeconds === "number" ? body.ttlSeconds : undefined,
+      );
+      return Response.json({ ok: true, session });
     }
 
     return new Response("Not Found", { status: 404 });

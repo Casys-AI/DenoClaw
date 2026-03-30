@@ -30,6 +30,10 @@ interface OverviewData {
   tasks: TaskObservationEntry[];
   selectedInstance: string;
   tunnelCount: number;
+  federationSuccess: number;
+  federationErrors: number;
+  federationDeadLetters: number;
+  federationP95LatencyMs: number;
 }
 
 export const handler = {
@@ -52,6 +56,24 @@ export const handler = {
       (s, i) => s + (i.health?.tunnelCount ?? 0),
       0,
     );
+    const federationSuccess = filtered.reduce(
+      (s, i) => s + (i.federation?.successCount ?? 0),
+      0,
+    );
+    const federationErrors = filtered.reduce(
+      (s, i) => s + (i.federation?.errorCount ?? 0),
+      0,
+    );
+    const federationDeadLetters = filtered.reduce(
+      (s, i) => s + (i.federation?.deadLetterBacklog ?? 0),
+      0,
+    );
+    const linkP95s = filtered
+      .flatMap((i) => i.federation?.links ?? [])
+      .map((link) => link.p95LatencyMs);
+    const federationP95LatencyMs = linkP95s.length > 0
+      ? Math.max(...linkP95s)
+      : 0;
 
     // Fetch per-agent metrics
     const metrics: AgentMetrics[] = [];
@@ -89,6 +111,10 @@ export const handler = {
         tasks,
         selectedInstance,
         tunnelCount,
+        federationSuccess,
+        federationErrors,
+        federationDeadLetters,
+        federationP95LatencyMs,
       } as OverviewData,
     );
   },
@@ -103,6 +129,10 @@ export default function Overview({ data }: { data: OverviewData }) {
     tasks,
     selectedInstance,
     tunnelCount,
+    federationSuccess,
+    federationErrors,
+    federationDeadLetters,
+    federationP95LatencyMs,
   } = data;
   const running =
     agents.filter((a) => a.status === "running" || a.status === "alive").length;
@@ -179,6 +209,24 @@ export default function Overview({ data }: { data: OverviewData }) {
             {instances.filter((i) => i.reachable).length} online · {tunnelCount}
             {" "}
             tunnels
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Federation Success</div>
+          <div class="stat-value text-success font-data">
+            {formatCompact(federationSuccess)}
+          </div>
+          <div class="stat-desc">
+            {formatCompact(federationErrors)} errors
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Federation P95</div>
+          <div class="stat-value font-data">
+            {formatLatency(federationP95LatencyMs)}
+          </div>
+          <div class="stat-desc">
+            dead-letter: {formatCompact(federationDeadLetters)}
           </div>
         </div>
       </div>

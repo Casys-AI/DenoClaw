@@ -208,3 +208,181 @@ Sans ça, la fédération devient impossible à opérer.
 En une phrase:
 
 > A2A reste le contrat des tâches, le tunnel devient l’adapter de transport, et la fédération ajoute un control-plane explicite (entités, ports, méthodes) autour.
+
+---
+
+## 10) Reprise détaillée à partir de l’item 11
+
+Ci-dessous, une reprise opérationnelle en gardant la cohérence demandée: **entités de domaine stables**, **ports applicatifs explicites**, **méthodes control-plane dédiées**, et **adapters infra isolés**.
+
+### Item 11 — Signature du catalogue agent
+
+**Objectif architecture**
+- Garantir l’intégrité + authenticité de `RemoteAgentCatalogEntry` sans coupler le domaine au transport tunnel.
+
+**Entités concernées**
+- `BrokerIdentity` (clé publique active, version de clé).
+- `RemoteAgentCatalogEntry` (payload fonctionnel, sans détail crypto infra).
+- Nouvelle value object proposée: `SignedCatalogEnvelope` (message signé côté adapter/control-plane, jamais exposé aux use-cases métier purs).
+
+**Ports / méthodes**
+- `FederationDiscoveryPort.syncRemoteAgents()` reçoit un envelope signé, vérifie puis retourne des entrées de domaine validées.
+- `FederationControlPort.refreshTrust()` recharge les clés du broker distant.
+- Méthodes control-plane impliquées: `federation_catalog_sync`.
+
+**Implémentation recommandée**
+1. Canonicaliser le payload catalogue (ordre stable des champs + version schema).
+2. Signer côté émetteur avec clé privée broker.
+3. Vérifier côté récepteur avec clé publique issue de `BrokerIdentity`.
+4. Rejeter explicitement si signature absente/invalide/clé inconnue.
+
+**DoD renforcé**
+- Aucun catalogue non signé n’alimente `RemoteAgentCatalog`.
+- Traces avec motifs de rejet (`invalid_signature`, `unknown_key`, `stale_key`).
+
+### Item 12 — Policy bilatérale `allowedAgents`
+
+**Objectif architecture**
+- Ne jamais décider le routage fédéré uniquement côté local: validation **locale + distante** obligatoire.
+
+**Entités concernées**
+- `FederatedRoutePolicy` (règles locales).
+- `RemoteAgentCatalogEntry.visibility` / claims distants.
+- Nouvelle value object proposée: `FederationAuthorizationDecision`.
+
+**Ports / méthodes**
+- `FederationRoutingPort.resolveTarget(task)` applique policy locale en premier.
+- `FederationControlPort` déclenche un `federation_route_probe` pour vérifier l’acceptation distante avant forward final.
+
+**Implémentation recommandée**
+1. Évaluer allow/deny local (fail-fast).
+2. Probe distant (agent visible + autorisé remote).
+3. Construire une décision explicite: `ALLOW | DENY_LOCAL | DENY_REMOTE`.
+4. Exposer motif normalisé pour observabilité.
+
+**DoD renforcé**
+- Refus tracé des deux côtés (corrélés par `taskId/contextId`).
+- Aucun fallback implicite en cas de `DENY_REMOTE`.
+
+### Item 13 — Idempotency cross-broker (`task_submit`)
+
+**Objectif architecture**
+- Éviter toute double exécution quand tunnel reconnecte, retry, ou duplicate delivery.
+
+**Entités concernées**
+- Nouvelle entité proposée: `FederatedSubmissionRecord`
+  - `idempotencyKey`, `remoteBrokerId`, `taskId`, `payloadHash`, `status`, `resultRef`, `createdAt`.
+
+**Ports / méthodes**
+- `FederationRoutingPort.forwardTask(task, remoteBrokerId)` devient idempotent.
+- Méthodes A2A inchangées (`task_submit`) avec métadonnée d’idempotence ajoutée dans le contexte fédération.
+
+**Implémentation recommandée**
+1. Calcul clé: (`remoteBrokerId`, `taskId`, `hash(payload canonique)`).
+2. Upsert atomique KV avant envoi.
+3. Si clé déjà `COMPLETED`/`IN_FLIGHT`, retourner résultat/référence existant.
+
+**DoD renforcé**
+- Rejeu de même `task_submit` => 0 exécution supplémentaire.
+- Test de concurrence (2 envois simultanés même clé).
+
+### Item 14 — Retry borné + backoff + dead-letter
+
+**Objectif architecture**
+- Rendre l’échec explicite et récupérable, sans boucle infinie ni perte silencieuse.
+
+**Entités concernées**
+- Nouvelle entité: `FederationRetryState`
+  - `attempt`, `nextAttemptAt`, `lastErrorCode`, `lastErrorAt`.
+- Nouvelle entité: `FederationDeadLetter`
+  - `messageId`, `taskId`, `remoteBrokerId`, `reason`, `payloadRef`.
+
+**Ports / méthodes**
+- `FederationRoutingPort.forwardTask(...)` délègue la stratégie retry à un composant applicatif.
+- `FederationObservabilityPort.recordCrossBrokerHop()` inclut état retry/dead-letter.
+
+**Implémentation recommandée**
+1. Retry sur erreurs transitoires uniquement (timeout, 5xx, disconnect).
+2. Backoff exponentiel borné + jitter.
+3. Passage en dead-letter après seuil max configurable.
+4. Exposer une commande de replay manuel contrôlé.
+
+**DoD renforcé**
+- Backlog dead-letter visible + comptable.
+- Reprise manuelle sans corruption d’idempotence.
+
+### Item 15 — Corrélation stricte bout-en-bout
+
+**Objectif architecture**
+- Pouvoir reconstituer un hop fédéré de façon déterministe depuis logs + métriques + traces.
+
+**Entités concernées**
+- Pas de nouvelle entité métier; standardiser un `CorrelationContext` transverse:
+  - `taskId`, `contextId`, `remoteBrokerId`, `linkId`, `traceId`.
+
+**Ports / méthodes**
+- Tous les ports fédération prennent/retournent le `CorrelationContext`.
+- `FederationObservabilityPort.streamFederationEvents()` publie ces dimensions systématiquement.
+
+**DoD renforcé**
+- 100% des événements control-plane et task-plane fédérés possèdent les champs de corrélation.
+
+### Item 16 — Exposer métriques fédération
+
+**Objectif architecture**
+- Mesurer la santé des liens et l’efficacité du routage fédéré en continu.
+
+**Métriques minimales**
+- `federation_link_success_total{linkId,remoteBrokerId}`
+- `federation_link_error_total{linkId,errorType}`
+- `federation_hop_latency_ms_bucket`
+- `federation_retry_backlog`
+- `federation_dead_letter_backlog`
+
+**Ports / méthodes**
+- `FederationObservabilityPort.recordCrossBrokerHop()` devient la source de vérité métrique.
+
+**DoD renforcé**
+- Export consommable par dashboard existant sans duplication de pipeline.
+
+### Item 17 — Étendre le dashboard existant
+
+**Objectif architecture**
+- Rester dans l’UI actuelle (`overview`, `network`, `tunnels`, `activity`) et éviter un silo observabilité.
+
+**Plan UI**
+1. `overview`: tuiles succès/erreur, P95, backlog retry/dead-letter.
+2. `network`: état de chaque `FederationLink` + latence.
+3. `tunnels`: détail session, reconnect, auth/policy failures.
+4. `activity`: timeline corrélée par `taskId/contextId`.
+
+**DoD renforcé**
+- Un opérateur détecte, qualifie et priorise un incident de lien en moins d’1 minute.
+
+### Item 18 — Tests chaos
+
+**Objectif architecture**
+- Vérifier que les invariants métier (idempotence, policy, corrélation) tiennent sous stress transport.
+
+**Scénarios minimaux**
+1. Drop WS en milieu de `task_submit` fédéré.
+2. Latence injectée + jitter extrême.
+3. Expiration token/session pendant sync catalogue.
+4. Broker distant indisponible prolongé.
+
+**Invariants attendus**
+- Pas de double exécution.
+- Pas de bypass policy.
+- Passage explicite en retry puis dead-letter.
+- Traces corrélées exploitables.
+
+---
+
+### Séquencement proposé (reprise immédiate)
+
+1. **Sécurité d’abord**: 11 → 12.
+2. **Fiabilité d’exécution**: 13 → 14 → 15.
+3. **Opérations**: 16 → 17.
+4. **Validation de robustesse**: 18.
+
+En pratique, cela garde la discipline: **entités stables**, **ports applicatifs**, **méthodes control-plane**, **adapters tunnel remplaçables**.

@@ -33,10 +33,10 @@ import {
   TunnelRegistry,
 } from "./tunnel_registry.ts";
 import {
-  DENOCLAW_AGENT_PROTOCOL,
-  isAgentSocketRegisterMessage,
-} from "../agent_socket_protocol.ts";
+  handleBrokerAgentSocketUpgrade,
+} from "./agent_socket_upgrade.ts";
 import { BrokerAgentRegistry } from "./agent_registry.ts";
+import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
 import { type BrokerHttpContext, handleBrokerHttp } from "./http_router.ts";
 import { BrokerTaskPersistence } from "./persistence.ts";
 import { BrokerReplyDispatcher } from "./reply_dispatch.ts";
@@ -46,14 +46,7 @@ import { BrokerToolDispatcher } from "./tool_dispatch.ts";
 import type { ToolExecutionPort } from "../tool_execution_port.ts";
 import { LocalToolExecutionAdapter } from "../adapters/tool_execution_local.ts";
 import { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
-import { TUNNEL_IDLE_TIMEOUT_SECONDS } from "../tunnel_protocol.ts";
 import { getSandboxAccessToken } from "../../shared/deploy_credentials.ts";
-
-interface ConnectedAgentSocket {
-  ws: WebSocket;
-  connectedAt: string;
-  authIdentity: string;
-}
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -86,7 +79,7 @@ export class BrokerServer {
   private ownsKv: boolean;
   private taskStore: TaskStore;
   private tunnelRegistry: TunnelRegistry;
-  private connectedAgents = new Map<string, ConnectedAgentSocket>();
+  private connectedAgents: BrokerAgentSocketRegistry;
   private agentRegistry: BrokerAgentRegistry;
   private taskPersistence: BrokerTaskPersistence;
   private replyDispatcher: BrokerReplyDispatcher;
@@ -110,6 +103,7 @@ export class BrokerServer {
     this.ownsKv = !deps?.kv;
     this.taskStore = deps?.taskStore ?? new TaskStore(deps?.kv);
     this.tunnelRegistry = deps?.tunnelRegistry ?? new TunnelRegistry();
+    this.connectedAgents = new BrokerAgentSocketRegistry();
     this.agentRegistry = new BrokerAgentRegistry({
       getKv: () => this.getKv(),
     });
@@ -437,9 +431,9 @@ export class BrokerServer {
   ): Promise<void> {
     await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
-    const connectedAgent = this.connectedAgents.get(targetAgentId);
-    if (connectedAgent) {
-      this.routeToTunnel(connectedAgent.ws, message);
+    const connectedSocket = this.connectedAgents.getSocket(targetAgentId);
+    if (connectedSocket) {
+      this.routeToTunnel(connectedSocket, message);
       log.info(
         `A2A routed via agent socket: ${message.from} → ${targetAgentId} (${message.type})`,
       );
@@ -613,110 +607,15 @@ export class BrokerServer {
   }
 
   private async handleAgentSocketUpgrade(req: Request): Promise<Response> {
-    const upgrade = req.headers.get("upgrade") || "";
-    if (upgrade.toLowerCase() !== "websocket") {
-      return new Response("Expected WebSocket", { status: 426 });
-    }
-
-    const requestedProtocols = (req.headers.get("sec-websocket-protocol") || "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (!requestedProtocols.includes(DENOCLAW_AGENT_PROTOCOL)) {
-      return new Response(
-        `Expected WebSocket subprotocol: ${DENOCLAW_AGENT_PROTOCOL}`,
-        { status: 426 },
-      );
-    }
-
-    const auth = await this.getAuth();
-    const authResult = await auth.checkRequest(req);
-    if (!authResult.ok) {
-      return Response.json(
-        { error: { code: authResult.code, recovery: authResult.recovery } },
-        { status: 401 },
-      );
-    }
-
-    const { socket, response } = Deno.upgradeWebSocket(req, {
-      protocol: DENOCLAW_AGENT_PROTOCOL,
-      idleTimeout: TUNNEL_IDLE_TIMEOUT_SECONDS,
-    });
-
-    let registeredAgentId: string | null = null;
-
-    socket.onmessage = (event) => {
-      void (async () => {
-        try {
-          if (typeof event.data !== "string") {
-            socket.close(1003, "Agent WebSocket frames must be text JSON");
-            return;
-          }
-
-          const raw = JSON.parse(event.data);
-          if (!registeredAgentId) {
-            if (!isAgentSocketRegisterMessage(raw)) {
-              socket.close(1002, "Expected register_agent as first message");
-              return;
-            }
-
-            registeredAgentId = raw.agentId;
-            const previous = this.connectedAgents.get(raw.agentId);
-            if (previous && previous.ws !== socket) {
-              try {
-                previous.ws.close(1000, "Replaced by a newer agent socket");
-              } catch {
-                // ignore close errors
-              }
-            }
-
-            this.connectedAgents.set(raw.agentId, {
-              ws: socket,
-              connectedAt: new Date().toISOString(),
-              authIdentity: authResult.identity,
-            });
-
-            if (raw.config) {
-              await this.agentRegistry.saveAgentConfig(raw.agentId, raw.config);
-            }
-            if (raw.endpoint) {
-              await this.agentRegistry.saveAgentEndpoint(
-                raw.agentId,
-                raw.endpoint,
-              );
-            }
-
-            socket.send(
-              JSON.stringify({
-                type: "registered_agent",
-                agentId: raw.agentId,
-              }),
-            );
-            log.info(`Agent socket registered: ${raw.agentId}`);
-            return;
-          }
-
-          const msg = raw as BrokerMessage;
-          msg.from = registeredAgentId;
-          await this.handleIncomingMessage(msg);
-        } catch (error) {
-          log.error("Agent socket message handling failed", error);
-          socket.close(1002, "Invalid agent socket message");
-        }
-      })();
-    };
-
-    socket.onclose = () => {
-      if (registeredAgentId) {
-        const current = this.connectedAgents.get(registeredAgentId);
-        if (current?.ws === socket) {
-          this.connectedAgents.delete(registeredAgentId);
-        }
-        log.info(`Agent socket disconnected: ${registeredAgentId}`);
-      }
-    };
-
-    return response;
+    return await handleBrokerAgentSocketUpgrade(
+      {
+        connectedAgents: this.connectedAgents,
+        agentRegistry: this.agentRegistry,
+        getAuth: () => this.getAuth(),
+        handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
+      },
+      req,
+    );
   }
 
   private async handleTunnelUpgrade(req: Request): Promise<Response> {
@@ -757,8 +656,8 @@ export class BrokerServer {
   }
 
   private findAgentSocket(agentId: string): WebSocket | null {
-    const connectedAgent = this.connectedAgents.get(agentId);
-    if (connectedAgent) return connectedAgent.ws;
+    const connectedAgentSocket = this.connectedAgents.getSocket(agentId);
+    if (connectedAgentSocket) return connectedAgentSocket;
     return this.tunnelRegistry.findReplySocket(agentId);
   }
 
@@ -776,14 +675,9 @@ export class BrokerServer {
 
   async stop(): Promise<void> {
     if (this.httpServer) await this.httpServer.shutdown();
-    for (const [agentId, entry] of this.connectedAgents) {
-      try {
-        entry.ws.close(1001, "Broker shutting down");
-      } catch (e) {
-        log.warn(`Failed to close agent socket ${agentId} cleanly`, e);
-      }
-    }
-    this.connectedAgents.clear();
+    this.connectedAgents.closeAll(1001, "Broker shutting down", (agentId, e) =>
+      log.warn(`Failed to close agent socket ${agentId} cleanly`, e)
+    );
     for (const [tunnelId, t] of this.tunnelRegistry.entries()) {
       try {
         t.ws.close(1001, "Broker shutting down");

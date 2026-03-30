@@ -1,4 +1,4 @@
-import { setupAgent, setupChannel, setupProvider } from "./setup.ts";
+import { setupAgent, setupChannel, setupProvider } from "./setup/mod.ts";
 import { requireInteractive } from "./output.ts";
 import { confirm } from "./prompt.ts";
 

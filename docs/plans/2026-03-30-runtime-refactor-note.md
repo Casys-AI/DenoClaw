@@ -231,6 +231,15 @@ Result:
 - merge review can focus more on intentional overlap and less on accidental
   feature rollback
 
+## Post-merge polish
+
+After landing the refactor into the local checkpoint branch:
+
+- internal CLI imports now use the canonical `src/cli/setup/mod.ts` module
+- top-level orchestration exports now point at canonical server modules
+- compatibility wrappers remain in place, but internal code no longer depends
+  on them by default
+
 ## Priority order
 
 ### Phase 1

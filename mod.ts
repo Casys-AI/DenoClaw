@@ -85,11 +85,11 @@ export type {
   SessionToken,
 } from "./src/orchestration/auth.ts";
 export { BrokerClient } from "./src/orchestration/client.ts";
-export { BrokerServer } from "./src/orchestration/broker.ts";
-export type { BrokerServerDeps } from "./src/orchestration/broker.ts";
+export { BrokerServer } from "./src/orchestration/broker/server.ts";
+export type { BrokerServerDeps } from "./src/orchestration/broker/server.ts";
 export { LocalRelay } from "./src/orchestration/relay.ts";
-export { Gateway } from "./src/orchestration/gateway.ts";
-export type { GatewayDeps } from "./src/orchestration/gateway.ts";
+export { Gateway } from "./src/orchestration/gateway/server.ts";
+export type { GatewayDeps } from "./src/orchestration/gateway/server.ts";
 export {
   KvQueueTransport,
   resolveAgentSocketUrl,

@@ -6,7 +6,7 @@ import { getDeployOrgToken } from "../shared/deploy_credentials.ts";
 import { deriveAgentKvName } from "../shared/naming.ts";
 import { ask, confirm, error, print, success } from "./prompt.ts";
 import { cliFlags, output, outputError } from "./output.ts";
-import { generateAgentEntrypoint } from "./setup.ts";
+import { generateAgentEntrypoint } from "./setup/mod.ts";
 import {
   buildDeployAssets,
   createDeployApiHeaders,

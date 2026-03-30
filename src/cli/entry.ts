@@ -11,7 +11,7 @@ import {
   setupChannel,
   setupProvider,
   showStatus,
-} from "./setup.ts";
+} from "./setup/mod.ts";
 import type { Config } from "../config/types.ts";
 
 export interface CliCommandDeps {

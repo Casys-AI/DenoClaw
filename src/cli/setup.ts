@@ -1,6 +1,7 @@
 import type { Config } from "../config/types.ts";
 import { getConfigOrDefault, saveConfig } from "../config/mod.ts";
 import { ask, choose, confirm, error, print, success } from "./prompt.ts";
+import { output } from "./output.ts";
 
 // ── setup provider ──────────────────────────────────────
 
@@ -544,5 +545,41 @@ export async function showStatus(config: Config): Promise<void> {
     print(`Sessions     : KV unavailable`);
   }
 
+  // Remote broker status
+  const deploy = config.deploy;
+  if (deploy?.app) {
+    const brokerUrl = `https://${deploy.app}.deno.dev`;
+    const token = Deno.env.get("DENOCLAW_API_TOKEN");
+    print(`\n── Remote Broker ──\n`);
+    print(`URL          : ${brokerUrl}`);
+
+    if (token) {
+      try {
+        const res = await fetch(`${brokerUrl}/health`, {
+          headers: { "Authorization": `Bearer ${token}` },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const health = await res.json() as { tunnelCount?: number };
+          print(`Status       : online`);
+          print(`Tunnels      : ${health.tunnelCount ?? 0}`);
+        } else {
+          print(`Status       : error (${res.status})`);
+        }
+      } catch {
+        print(`Status       : unreachable`);
+      }
+    } else {
+      print(`Status       : no token (set DENOCLAW_API_TOKEN)`);
+    }
+  }
+
   print("");
+
+  output({
+    providers,
+    model: config.agents.defaults.model,
+    channels,
+    deploy: deploy ?? null,
+  });
 }

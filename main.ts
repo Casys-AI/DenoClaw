@@ -503,6 +503,24 @@ try {
       break;
     }
 
+    case "logs": {
+      const config = await getConfigOrDefault();
+      const deploy = config.deploy;
+      if (!deploy?.org || !deploy?.app) {
+        console.log("No broker deployed. Run 'denoclaw deploy' first.");
+        break;
+      }
+      const logsCmd = new Deno.Command("deno", {
+        args: ["deploy", "logs", "--org", deploy.org, "--app", deploy.app],
+        stdout: "inherit",
+        stderr: "inherit",
+        stdin: "inherit",
+      });
+      const { success: ok } = await logsCmd.output();
+      if (!ok) console.error("Failed to stream logs.");
+      break;
+    }
+
     case "help":
     default:
       help();

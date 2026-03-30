@@ -254,6 +254,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/auth_token_store.ts`
   - `src/orchestration/auth_request.ts`
   - `src/orchestration/auth_types.ts`
+- local agent loop execution is now split between:
+  - `src/agent/loop.ts`
+  - `src/agent/loop_process.ts`
+  - `src/agent/loop_workspace.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -281,6 +285,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/auth_types.ts`: 33 lines
   - `src/orchestration/federation/service.ts`: 268 lines
   - `src/orchestration/federation/identity_manager.ts`: 82 lines
+  - `src/agent/loop.ts`: 202 lines
+  - `src/agent/loop_process.ts`: 224 lines
+  - `src/agent/loop_workspace.ts`: 16 lines
   - `src/agent/runtime.ts`: 261 lines
   - `src/agent/runtime_conversation.ts`: 154 lines
   - `src/agent/runtime_message_mapping.ts`: 47 lines

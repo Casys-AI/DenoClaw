@@ -23,14 +23,13 @@ import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 import type { WorkspaceContext } from "./tools/file.ts";
-import { join } from "@std/path";
 import { WebFetchTool } from "./tools/web.ts";
 import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
-import { log } from "../shared/log.ts";
-import { spanAgentLoop, spanToolCall } from "../telemetry/mod.ts";
-import type { TraceCorrelationIds, TraceWriter } from "../telemetry/traces.ts";
+import type { TraceWriter } from "../telemetry/traces.ts";
+import { processAgentLoopMessage } from "./loop_process.ts";
+import { listAgentMemoryFiles } from "./loop_workspace.ts";
 
 import type { ApprovalRequest, ApprovalResponse } from "./sandbox_types.ts";
 
@@ -65,19 +64,6 @@ export interface AgentLoopDeps {
   agentId?: string;
   workspaceDir?: string;
   workspaceKv?: Deno.Kv;
-}
-
-async function listMemoryFiles(workspaceDir: string): Promise<string[]> {
-  const memoriesDir = join(workspaceDir, "memories");
-  try {
-    const files: string[] = [];
-    for await (const entry of Deno.readDir(memoriesDir)) {
-      if (entry.isFile && entry.name.endsWith(".md")) files.push(entry.name);
-    }
-    return files.sort();
-  } catch {
-    return [];
-  }
 }
 
 export class AgentLoop implements AgentLoopLike {
@@ -175,209 +161,30 @@ export class AgentLoop implements AgentLoopLike {
     await this.skills.loadSkills();
     this.memoryTopics = await this.memory.listTopics();
     if (this.workspaceDir) {
-      this.memoryFiles = await listMemoryFiles(this.workspaceDir);
+      this.memoryFiles = await listAgentMemoryFiles(this.workspaceDir);
     }
   }
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
     await this.initialize();
-    await this.memory.addMessage({ role: "user", content: userMessage });
-
-    // Start KV trace if writer available
-    const tw = this.traceWriter;
-    let traceId = this.traceId;
-    const correlationIds: TraceCorrelationIds = {
-      ...(this.taskId ? { taskId: this.taskId } : {}),
-      ...(this.contextId ? { contextId: this.contextId } : {}),
-    };
-    if (tw && !traceId) {
-      traceId = await tw.startTrace(
-        this.agentId,
-        this.sessionId,
-        correlationIds,
-      );
-    }
-
-    let iteration = 0;
-    let finalStatus: "completed" | "failed" = "completed";
-
-    try {
-      while (iteration < this.maxIterations) {
-        iteration++;
-
-        // KV trace: iteration span
-        const iterSpanId = tw && traceId
-          ? await tw.writeIterationSpan(
-            traceId,
-            this.agentId,
-            iteration,
-            undefined,
-            correlationIds,
-          )
-          : null;
-        const iterStart = performance.now();
-
-        // OTEL span (parallel, independent)
-        const iterResult = await spanAgentLoop(
-          this.sessionId,
-          iteration,
-          async () => {
-            log.debug(
-              `Agent loop iteration ${iteration}/${this.maxIterations}`,
-            );
-
-            const skillsList = this.skills.getSkills();
-            const toolDefs = this.tools.getDefinitions();
-            const raw = this.context.buildContextMessages(
-              this.memory.getMessages(),
-              skillsList,
-              toolDefs,
-              this.memoryTopics,
-              this.memoryFiles,
-            );
-
-            const CHARS_PER_TOKEN = 4;
-            const CONTEXT_RATIO = 4;
-            const maxChars = (this.config.maxTokens || 4096) * CHARS_PER_TOKEN *
-              CONTEXT_RATIO;
-            const contextMessages = this.context.truncateContext(raw, maxChars);
-
-            // LLM call with timing
-            const llmStart = performance.now();
-            const response = await this.providers.complete(
-              contextMessages,
-              this.config.model,
-              this.config.temperature,
-              this.config.maxTokens,
-              toolDefs,
-            );
-            const llmLatency = performance.now() - llmStart;
-
-            // KV trace: LLM span
-            if (tw && traceId && iterSpanId) {
-              const provider = this.config.model.includes("/")
-                ? this.config.model.split("/")[0]
-                : this.config.model;
-              await tw.writeLLMSpan(
-                traceId,
-                this.agentId,
-                iterSpanId,
-                this.config.model,
-                provider,
-                {
-                  prompt: response.usage?.promptTokens ?? 0,
-                  completion: response.usage?.completionTokens ?? 0,
-                },
-                llmLatency,
-                correlationIds,
-              );
-            }
-
-            log.debug(
-              `LLM: content=${!!response.content} tools=${
-                response.toolCalls?.length ?? 0
-              }`,
-            );
-
-            if (response.toolCalls?.length) {
-              await this.memory.addMessage({
-                role: "assistant",
-                content: response.content || "",
-                tool_calls: response.toolCalls,
-              });
-
-              for (const tc of response.toolCalls) {
-                let args: Record<string, unknown>;
-                try {
-                  args = JSON.parse(tc.function.arguments);
-                } catch {
-                  log.warn(`Invalid JSON for tool ${tc.function.name}`);
-                  await this.memory.addMessage({
-                    role: "tool",
-                    content:
-                      `Error: Invalid JSON arguments for ${tc.function.name}`,
-                    name: tc.function.name,
-                    tool_call_id: tc.id,
-                  });
-                  continue;
-                }
-
-                log.info(`Tool: ${tc.function.name}`);
-                const toolStart = performance.now();
-                const result = await spanToolCall(
-                  tc.function.name,
-                  () => this.tools.execute(tc.function.name, args),
-                );
-                const toolLatency = performance.now() - toolStart;
-
-                // KV trace: tool span
-                if (tw && traceId && iterSpanId) {
-                  await tw.writeToolSpan(
-                    traceId,
-                    this.agentId,
-                    iterSpanId,
-                    tc.function.name,
-                    result.success,
-                    toolLatency,
-                    args,
-                    correlationIds,
-                  );
-                }
-
-                await this.memory.addMessage({
-                  role: "tool",
-                  content: result.success
-                    ? result.output
-                    : `Error [${result.error?.code}]: ${
-                      JSON.stringify(result.error?.context)
-                    }\nRecovery: ${result.error?.recovery ?? "none"}`,
-                  name: tc.function.name,
-                  tool_call_id: tc.id,
-                });
-              }
-
-              return null; // continue loop
-            }
-
-            // Final text response
-            await this.memory.addMessage({
-              role: "assistant",
-              content: response.content,
-            });
-            return {
-              content: response.content,
-              finishReason: response.finishReason,
-            } as AgentResponse;
-          },
-        );
-
-        // KV trace: end iteration span
-        if (tw && traceId && iterSpanId) {
-          await tw.endSpan(traceId, iterSpanId, performance.now() - iterStart);
-        }
-
-        if (iterResult !== null) return iterResult;
-      }
-
-      log.warn(`Max iterations reached (${this.maxIterations})`);
-      finalStatus = "completed";
-      const last = this.memory.getMessages().findLast((m) =>
-        m.role === "assistant"
-      );
-      return {
-        content: last?.content ||
-          "Max iterations reached without a final response.",
-        finishReason: "max_iterations",
-      };
-    } catch (e) {
-      finalStatus = "failed";
-      throw e;
-    } finally {
-      // KV trace: end trace
-      if (tw && traceId) {
-        await tw.endTrace(traceId, finalStatus, iteration).catch(() => {});
-      }
-    }
+    return await processAgentLoopMessage({
+      userMessage,
+      config: this.config,
+      providers: this.providers,
+      memory: this.memory,
+      context: this.context,
+      skills: this.skills,
+      tools: this.tools,
+      memoryTopics: this.memoryTopics,
+      memoryFiles: this.memoryFiles,
+      maxIterations: this.maxIterations,
+      traceWriter: this.traceWriter,
+      traceId: this.traceId,
+      taskId: this.taskId,
+      contextId: this.contextId,
+      agentId: this.agentId,
+      sessionId: this.sessionId,
+    });
   }
 
   getMemory(): MemoryPort {

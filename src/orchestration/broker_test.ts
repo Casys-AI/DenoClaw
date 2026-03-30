@@ -4,8 +4,10 @@ import {
   assertRejects,
   assertThrows,
 } from "@std/assert";
-import { BrokerServer } from "./broker.ts";
+import { DENOCLAW_AGENT_PROTOCOL } from "./agent_socket_protocol.ts";
+import { BrokerServer } from "./broker/server.ts";
 import { AuthManager } from "./auth.ts";
+import { TunnelRegistry } from "./broker/tunnel_registry.ts";
 import {
   DENOCLAW_TUNNEL_PROTOCOL,
   getAcceptedTunnelProtocol,
@@ -1067,6 +1069,223 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer rejects agent socket upgrades without the canonical subprotocol",
+  async () => {
+    const broker = new BrokerServer(createConfig(), {
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    try {
+      const res = await (
+        broker as unknown as {
+          handleAgentSocketUpgrade(req: Request): Promise<Response>;
+        }
+      ).handleAgentSocketUpgrade(
+        new Request("http://localhost/agent/socket", {
+          headers: {
+            upgrade: "websocket",
+          },
+        }),
+      );
+
+      assertEquals(res.status, 426);
+      assertEquals(
+        await res.text(),
+        `Expected WebSocket subprotocol: ${DENOCLAW_AGENT_PROTOCOL}`,
+      );
+    } finally {
+      await broker.stop();
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer rejects agent socket upgrades without Authorization when broker auth is configured",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "static-token");
+
+    try {
+      const res = await (
+        broker as unknown as {
+          handleAgentSocketUpgrade(req: Request): Promise<Response>;
+        }
+      ).handleAgentSocketUpgrade(
+        new Request("http://localhost/agent/socket", {
+          headers: {
+            upgrade: "websocket",
+            "sec-websocket-protocol": DENOCLAW_AGENT_PROTOCOL,
+          },
+        }),
+      );
+
+      assertEquals(res.status, 401);
+      assertEquals(await res.json(), {
+        error: {
+          code: "UNAUTHORIZED",
+          recovery: "Add Authorization: Bearer <token> header",
+        },
+      });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer /agents/register persists endpoint and config",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "register-secret");
+
+    try {
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/agents/register", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer register-secret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            agentId: "agent-beta",
+            endpoint: "https://agent-beta.example",
+            config: {
+              model: "test/model",
+              peers: ["agent-alpha"],
+              acceptFrom: ["agent-alpha"],
+            },
+          }),
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), { ok: true, agentId: "agent-beta" });
+
+      const endpoint = await kv.get<string>([
+        "agents",
+        "agent-beta",
+        "endpoint",
+      ]);
+      assertEquals(endpoint.value, "https://agent-beta.example");
+
+      const agentConfig = await kv.get<{ model?: string; peers?: string[] }>([
+        "agents",
+        "agent-beta",
+        "config",
+      ]);
+      assertEquals(agentConfig.value?.model, "test/model");
+      assertEquals(agentConfig.value?.peers, ["agent-alpha"]);
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer.submitAgentTask posts to registered agent endpoint before KV fallback",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "wake-secret");
+    const originalFetch = globalThis.fetch;
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = ((
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = input instanceof Request ? input.url : String(input);
+      fetchCalls.push({ url, init });
+      return Promise.resolve(Response.json({ ok: true }, { status: 202 }));
+    }) as typeof fetch;
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(
+        ["agents", "agent-beta", "endpoint"],
+        "https://agent-beta.example",
+      );
+
+      const task = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-http",
+        contextId: "ctx-http",
+        taskMessage: createMessage("Wake up and summarize this"),
+      });
+
+      assertEquals(task.id, "task-http");
+      assertEquals(fetchCalls.length, 1);
+      assertEquals(fetchCalls[0].url, "https://agent-beta.example/tasks");
+      assertEquals(fetchCalls[0].init?.headers, {
+        "content-type": "application/json",
+        authorization: "Bearer wake-secret",
+      });
+
+      const body = JSON.parse(
+        String(fetchCalls[0].init?.body),
+      ) as Extract<BrokerMessage, { type: "task_submit" }>;
+      assertEquals(body.type, "task_submit");
+      assertEquals(body.to, "agent-beta");
+      if (body.type !== "task_submit") {
+        throw new Error(`Unexpected broker message type: ${body.type}`);
+      }
+      assertEquals(body.payload.taskId, "task-http");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer rejects tunnel upgrades without the canonical subprotocol",
   async () => {
     const broker = new BrokerServer(createConfig(), {
@@ -1311,8 +1530,10 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      const tunnelRegistry = new TunnelRegistry();
       const broker = new BrokerServer(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
@@ -1515,54 +1736,18 @@ Deno.test(
         },
         close() {},
       } as unknown as WebSocket;
-      (
-        broker as unknown as {
-          tunnels: Map<string, {
-            ws: WebSocket;
-            capabilities: {
-              tunnelId: string;
-              type: "instance" | "local";
-              tools: string[];
-              agents?: string[];
-              allowedAgents: string[];
-            };
-            registered: boolean;
-          }>;
-        }
-      ).tunnels.set("broker-remote", {
-        ws: fakeRemoteTunnel,
-        registered: true,
-        capabilities: {
-          tunnelId: "broker-remote",
-          type: "instance",
-          tools: [],
-          agents: ["agent-remote"],
-          allowedAgents: [],
-        },
+      tunnelRegistry.register("broker-remote", fakeRemoteTunnel, {
+        tunnelId: "broker-remote",
+        type: "instance",
+        tools: [],
+        agents: ["agent-remote"],
+        allowedAgents: [],
       });
-      (
-        broker as unknown as {
-          tunnels: Map<string, {
-            ws: WebSocket;
-            capabilities: {
-              tunnelId: string;
-              type: "instance" | "local";
-              tools: string[];
-              agents?: string[];
-              allowedAgents: string[];
-            };
-            registered: boolean;
-          }>;
-        }
-      ).tunnels.set("shadow-local", {
-        ws: fakeLocalTunnel,
-        registered: true,
-        capabilities: {
-          tunnelId: "shadow-local",
-          type: "local",
-          tools: [],
-          allowedAgents: ["agent-remote"],
-        },
+      tunnelRegistry.register("shadow-local", fakeLocalTunnel, {
+        tunnelId: "shadow-local",
+        type: "local",
+        tools: [],
+        allowedAgents: ["agent-remote"],
       });
 
       const replayResponse = await handleHttp(
@@ -1603,7 +1788,8 @@ Deno.test(
         ),
       );
       assertEquals(deadLettersAfterReplayResponse.status, 200);
-      const deadLettersAfterReplay = await deadLettersAfterReplayResponse.json();
+      const deadLettersAfterReplay = await deadLettersAfterReplayResponse
+        .json();
       assertEquals(deadLettersAfterReplay, []);
 
       const statsAfterReplayResponse = await handleHttp(

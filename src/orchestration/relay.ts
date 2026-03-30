@@ -88,7 +88,8 @@ function createRelaySocket(
 /**
  * LocalRelay — runs on your machine, connects to the broker via WebSocket.
  *
- * Exposes local tools (shell, fs, CLI providers) to agents running in Subhosting.
+ * Exposes local tools (shell, fs, CLI providers) to agents running in deployed
+ * agent apps.
  * Each tool call comes through the broker → relay executes locally → sends result back.
  */
 export class LocalRelay {

@@ -35,7 +35,7 @@ import {
 } from "./runtime_transport.ts";
 
 /**
- * AgentRuntime — runs inside a Deno Subhosting deployment or local worker.
+ * AgentRuntime — runs inside a deployed agent app or local worker.
  *
  * HTTP-reactive, task-oriented runtime:
  * - Receives work via handleIncomingMessage() (transport-agnostic)
@@ -43,7 +43,7 @@ import {
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
  * - Persists state via MemoryPort (KvdexMemory by default)
  *
- * Transport is decided by the caller: HTTP handler in Subhosting,
+ * Transport is decided by the caller: HTTP handler in a deployed agent app,
  * KV Queue listener in local mode. The runtime does not assume any
  * specific transport mechanism.
  */
@@ -118,7 +118,8 @@ export class AgentRuntime {
 
   /**
    * Start receiving work via KV Queue (local mode convenience).
-   * In Subhosting, call handleIncomingMessage() from the HTTP handler instead.
+   * In a deployed agent app, call handleIncomingMessage() from the HTTP
+   * handler instead.
    */
   async startKvQueueIntake(): Promise<void> {
     const kv = await this.getKv();
@@ -133,7 +134,8 @@ export class AgentRuntime {
 
   /**
    * Handle an incoming broker message (transport-agnostic).
-   * Called by KV Queue listener locally, or HTTP handler in Subhosting.
+   * Called by KV Queue listener locally, or HTTP handler in a deployed agent
+   * app.
    */
   async handleIncomingMessage(msg: BrokerEnvelope): Promise<void> {
     assertRuntimeTaskMessage(msg);
@@ -212,7 +214,9 @@ export class AgentRuntime {
 
     const inputText = this.extractTextFromMessage(continuationMessage);
     log.info(
-      `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
+      `Canonical continuation received from ${msg.from}: ${
+        inputText.slice(0, 100)
+      }`,
     );
 
     await this.executeConversation({

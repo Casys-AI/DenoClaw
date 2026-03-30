@@ -15,5 +15,9 @@ export interface Config {
   deploy?: {
     org?: string;
     app?: string;
+    region?: string;
+    kvDatabase?: string;
+    url?: string;
+    oidcAudience?: string;
   };
 }

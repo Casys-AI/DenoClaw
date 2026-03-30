@@ -8,6 +8,7 @@
 
 import type { SandboxConfig } from "../../../shared/types.ts";
 import type { SandboxBackend } from "../../sandbox_types.ts";
+import { getSandboxAccessToken } from "../../../shared/deploy_credentials.ts";
 import { ToolError } from "../../../shared/errors.ts";
 import { LocalProcessBackend } from "./local.ts";
 import { DenoSandboxBackend } from "./cloud.ts";
@@ -18,12 +19,12 @@ export function createSandboxBackend(
   const backend = sandboxConfig.backend ?? "local";
 
   if (backend === "cloud") {
-    const token = Deno.env.get("DENO_DEPLOY_TOKEN");
+    const token = getSandboxAccessToken();
     if (!token) {
       throw new ToolError(
         "SANDBOX_UNAVAILABLE",
-        { backend: "cloud", reason: "DENO_DEPLOY_TOKEN not set" },
-        "Set DENO_DEPLOY_TOKEN or use backend: 'local'",
+        { backend: "cloud", reason: "DENO_DEPLOY_ORG_TOKEN not set" },
+        "Set DENO_DEPLOY_ORG_TOKEN or use backend: 'local'",
       );
     }
     return new DenoSandboxBackend(sandboxConfig, token);

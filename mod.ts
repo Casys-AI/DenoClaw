@@ -8,6 +8,7 @@
 // ── Agent domain ─────────────────────────────────────────
 export { AgentLoop } from "./src/agent/loop.ts";
 export { AgentRuntime } from "./src/agent/runtime.ts";
+export { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
 export { Memory } from "./src/agent/memory.ts";
 export { KvdexMemory } from "./src/agent/memory_kvdex.ts";
 export type { LongTermFact, MemoryPort } from "./src/agent/memory_port.ts";
@@ -89,9 +90,14 @@ export type { BrokerServerDeps } from "./src/orchestration/broker.ts";
 export { LocalRelay } from "./src/orchestration/relay.ts";
 export { Gateway } from "./src/orchestration/gateway.ts";
 export type { GatewayDeps } from "./src/orchestration/gateway.ts";
+export {
+  KvQueueTransport,
+  resolveAgentSocketUrl,
+  WebSocketBrokerTransport,
+} from "./src/orchestration/transport.ts";
+export { DENOCLAW_AGENT_PROTOCOL } from "./src/orchestration/agent_socket_protocol.ts";
 
 export * from "./src/orchestration/federation/mod.ts";
-
 
 // ── LLM domain ───────────────────────────────────────────
 export {

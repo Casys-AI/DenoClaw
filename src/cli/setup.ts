@@ -327,7 +327,7 @@ export async function publishAgent(): Promise<void> {
  * Generate the entrypoint code for a Subhosting agent.
  * Uses the real AgentRuntime + BrokerClient from the DenoClaw SDK.
  */
-function generateAgentEntrypoint(
+export function generateAgentEntrypoint(
   agentId: string,
   model: string,
   permissions: string[],

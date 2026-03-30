@@ -314,6 +314,8 @@ See CLI Flags / Config section. Key variables:
 | `GITHUB_CLIENT_ID`             | GitHub OAuth app client ID                      | none                         |
 | `GITHUB_CLIENT_SECRET`         | GitHub OAuth app client secret                  | none                         |
 | `DENOCLAW_DASHBOARD_AUTH_MODE` | Dashboard auth mode (`github`, `token`, `none`) | `none`                       |
+| `DENO_SUBHOSTING_ORG_ID`      | Subhosting org ID (for `publish`)               | none                         |
+| `DENO_SUBHOSTING_TOKEN`       | Subhosting access token (for `publish`)         | none                         |
 
 ## ADRs
 

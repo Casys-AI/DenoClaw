@@ -287,6 +287,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/transport_message_factory.ts`
   - `src/orchestration/transport_kv_queue.ts`
   - `src/orchestration/transport_websocket.ts`
+- file tool workspace/runtime concerns are now split between:
+  - `src/agent/tools/file.ts`
+  - `src/agent/tools/file_runtime.ts`
+  - `src/agent/tools/file_workspace.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
   - broker message dispatch in
@@ -347,6 +351,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/tools/backends/sandbox_permissions.ts`: 53 lines
   - `src/agent/tools/backends/permission_flags.ts`: 24 lines
   - `src/agent/tools/backends/cloud.ts`: 198 lines
+  - `src/agent/tools/file.ts`: 170 lines
+  - `src/agent/tools/file_runtime.ts`: 80 lines
+  - `src/agent/tools/file_workspace.ts`: 44 lines
   - `src/orchestration/transport.ts`: 11 lines
   - `src/orchestration/transport_types.ts`: 42 lines
   - `src/orchestration/transport_message_factory.ts`: 14 lines

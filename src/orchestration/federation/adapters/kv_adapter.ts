@@ -4,6 +4,7 @@ import type {
   FederatedSubmissionRecord,
   FederationBrokerCorrelationContext,
   FederationCorrelationContext,
+  FederationDenialBreakdown,
   FederationDeadLetter,
   FederationLink,
   FederationLinkCorrelationContext,
@@ -16,8 +17,10 @@ import type {
 import type {
   CrossBrokerHopEvent,
   EstablishFederationLinkInput,
+  FederationEvent,
   FederationControlPort,
   FederationDeliveryPort,
+  FederationDenialEvent,
   FederationDiscoveryPort,
   FederationIdentityPort,
   FederationMetricsPort,
@@ -36,7 +39,7 @@ export class KvFederationAdapter
     FederationMetricsPort {
   private readonly federationEventSubscribers = new Map<
     string,
-    (event: CrossBrokerHopEvent) => void
+    (event: FederationEvent) => void
   >();
 
   constructor(private readonly kv: Deno.Kv) {}
@@ -283,13 +286,24 @@ export class KvFederationAdapter
   }
 
   streamFederationEvents(
-    onEvent: (event: CrossBrokerHopEvent) => void,
+    onEvent: (event: FederationEvent) => void,
   ): Promise<() => void> {
     const subscriberId = crypto.randomUUID();
     this.federationEventSubscribers.set(subscriberId, onEvent);
     return Promise.resolve(() => {
       this.federationEventSubscribers.delete(subscriberId);
     });
+  }
+
+  async recordFederationDenial(event: FederationDenialEvent): Promise<void> {
+    await this.kv.set(
+      ["federation", "denials", event.remoteBrokerId, crypto.randomUUID()],
+      event,
+    );
+
+    for (const subscriber of this.federationEventSubscribers.values()) {
+      subscriber(event);
+    }
   }
 
   async createSubmissionRecord(
@@ -354,6 +368,7 @@ export class KvFederationAdapter
 
   async getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot> {
     const eventPrefix: Deno.KvKey = ["federation", "events"];
+    const denialPrefix: Deno.KvKey = ["federation", "denials"];
     const byLink = new Map<
       string,
       {
@@ -361,6 +376,7 @@ export class KvFederationAdapter
         remoteBrokerId: string;
         successCount: number;
         errorCount: number;
+        denials: FederationDenialBreakdown;
         latencies: number[];
         lastTaskId?: string;
         lastTraceId?: string;
@@ -369,6 +385,7 @@ export class KvFederationAdapter
     >();
     let successCount = 0;
     let errorCount = 0;
+    const denials = this.emptyDenials();
 
     for await (
       const entry of this.kv.list<CrossBrokerHopEvent>({
@@ -384,6 +401,7 @@ export class KvFederationAdapter
         remoteBrokerId: event.remoteBrokerId,
         successCount: 0,
         errorCount: 0,
+        denials: this.emptyDenials(),
         latencies: [],
       };
       link.latencies.push(event.latencyMs);
@@ -398,9 +416,51 @@ export class KvFederationAdapter
       if (event.success) {
         link.successCount += 1;
         successCount += 1;
-      } else {
+      } else if (event.errorKind !== "auth") {
         link.errorCount += 1;
         errorCount += 1;
+      }
+      byLink.set(event.linkId, link);
+    }
+
+    for await (
+      const entry of this.kv.list<FederationDenialEvent>({
+        prefix: denialPrefix,
+      })
+    ) {
+      const event = entry.value;
+      if (!event) continue;
+      if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
+
+      const link = byLink.get(event.linkId) ?? {
+        linkId: event.linkId,
+        remoteBrokerId: event.remoteBrokerId,
+        successCount: 0,
+        errorCount: 0,
+        denials: this.emptyDenials(),
+        latencies: [],
+      };
+      if (
+        !link.lastOccurredAt ||
+        event.occurredAt.localeCompare(link.lastOccurredAt) > 0
+      ) {
+        link.lastOccurredAt = event.occurredAt;
+        link.lastTaskId = event.taskId;
+        link.lastTraceId = event.traceId;
+      }
+      switch (event.kind) {
+        case "policy":
+          link.denials.policy += 1;
+          denials.policy += 1;
+          break;
+        case "auth":
+          link.denials.auth += 1;
+          denials.auth += 1;
+          break;
+        case "not_found":
+          link.denials.notFound += 1;
+          denials.notFound += 1;
+          break;
       }
       byLink.set(event.linkId, link);
     }
@@ -411,6 +471,7 @@ export class KvFederationAdapter
       remoteBrokerId: entry.remoteBrokerId,
       successCount: entry.successCount,
       errorCount: entry.errorCount,
+      denials: entry.denials,
       p50LatencyMs: this.percentile(entry.latencies, 50),
       p95LatencyMs: this.percentile(entry.latencies, 95),
       lastTaskId: entry.lastTaskId,
@@ -422,7 +483,16 @@ export class KvFederationAdapter
       links,
       successCount,
       errorCount,
+      denials,
       deadLetterBacklog: deadLetters.length,
+    };
+  }
+
+  private emptyDenials(): FederationDenialBreakdown {
+    return {
+      policy: 0,
+      auth: 0,
+      notFound: 0,
     };
   }
 

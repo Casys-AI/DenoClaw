@@ -5,6 +5,8 @@ import type {
   FederatedSubmissionRecord,
   FederationBrokerCorrelationContext,
   FederationCorrelationContext,
+  FederationDenialDecision,
+  FederationDenialKind,
   FederationDeadLetter,
   FederationLink,
   FederationLinkCorrelationContext,
@@ -150,13 +152,24 @@ export interface CrossBrokerHopEvent extends FederationCorrelationContext {
   taskId: string;
   latencyMs: number;
   success: boolean;
+  errorKind?: "delivery" | "auth";
   errorCode?: string;
   occurredAt: string;
 }
 
+export interface FederationDenialEvent extends FederationCorrelationContext {
+  kind: FederationDenialKind;
+  decision: FederationDenialDecision;
+  errorCode?: string;
+  occurredAt: string;
+}
+
+export type FederationEvent = CrossBrokerHopEvent | FederationDenialEvent;
+
 export interface FederationObservabilityPort {
   recordCrossBrokerHop(event: CrossBrokerHopEvent): Promise<void>;
+  recordFederationDenial(event: FederationDenialEvent): Promise<void>;
   streamFederationEvents(
-    onEvent: (event: CrossBrokerHopEvent) => void,
+    onEvent: (event: FederationEvent) => void,
   ): Promise<() => void>;
 }

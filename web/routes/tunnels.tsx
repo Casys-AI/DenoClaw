@@ -35,12 +35,24 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
   const tunnels = data.health?.tunnels ?? [];
   const federation = data.federation;
   const hasFederation = federation !== null;
+  const federationRefusalTotal = hasFederation
+    ? federation.denials.policy + federation.denials.auth
+    : 0;
+  const federationRefusalText = hasFederation
+    ? `${formatCompact(federation.denials.policy)} policy · ${
+      formatCompact(federation.denials.auth)
+    } auth${
+      federation.denials.notFound > 0
+        ? ` · ${formatCompact(federation.denials.notFound)} not found`
+        : ""
+    }`
+    : "stats endpoint unavailable";
 
   return (
     <div class="space-y-6">
       <h1 class="text-2xl font-bold">Tunnels</h1>
 
-      <div class="stats bg-base-100 shadow">
+      <div class="stats stats-vertical lg:stats-horizontal bg-base-100 shadow">
         <div class="stat">
           <div class="stat-title">Connected</div>
           <div class="stat-value text-primary">
@@ -60,7 +72,7 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
           </div>
           <div class="stat-desc">
             {hasFederation
-              ? `${formatCompact(federation.errorCount)} errors`
+              ? `${formatCompact(federation.errorCount)} delivery errors`
               : "stats endpoint unavailable"}
           </div>
         </div>
@@ -83,6 +95,19 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
               : "stats endpoint unavailable"}
           </div>
         </div>
+        <div class="stat">
+          <div class="stat-title">Policy/Auth Refusals</div>
+          <div
+            class={`stat-value ${
+              hasFederation ? "text-error" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation ? formatCompact(federationRefusalTotal) : "unavailable"}
+          </div>
+          <div class="stat-desc">
+            {federationRefusalText}
+          </div>
+        </div>
       </div>
 
       {hasFederation && federation.links.length > 0 && (
@@ -97,6 +122,9 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                     <th>Remote</th>
                     <th>Success</th>
                     <th>Errors</th>
+                    <th>Policy</th>
+                    <th>Auth</th>
+                    <th>Not Found</th>
                     <th>P95</th>
                     <th>Latest Trace</th>
                     <th>Last Activity</th>
@@ -112,6 +140,15 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                       </td>
                       <td class="font-data text-error">
                         {formatCompact(link.errorCount)}
+                      </td>
+                      <td class="font-data text-warning">
+                        {formatCompact(link.denials.policy)}
+                      </td>
+                      <td class="font-data text-error">
+                        {formatCompact(link.denials.auth)}
+                      </td>
+                      <td class="font-data text-neutral-content">
+                        {formatCompact(link.denials.notFound)}
                       </td>
                       <td class="font-data">{formatLatency(link.p95LatencyMs)}</td>
                       <td>

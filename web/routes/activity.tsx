@@ -2,7 +2,10 @@ import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import ActivityFeed from "../islands/ActivityFeed.tsx";
 import { getFederationStats } from "../lib/api-client.ts";
-import { selectLatestFederationLink } from "../lib/federation.ts";
+import {
+  getFederationDenialTotals,
+  selectLatestFederationLink,
+} from "../lib/federation.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
@@ -43,10 +46,20 @@ export default function Activity({
     0,
     ...(federation?.links.map((link) => link.p95LatencyMs) ?? []),
   );
+  const federationDenials = getFederationDenialTotals(federation);
+  const federationRefusalTotal =
+    federationDenials.policy + federationDenials.auth;
+  const federationRefusalText = `${formatCompact(federationDenials.policy)} policy · ${
+    formatCompact(federationDenials.auth)
+  } auth${
+    federationDenials.notFound > 0
+      ? ` · ${formatCompact(federationDenials.notFound)} not found`
+      : ""
+  }`;
   return (
     <div class="space-y-4">
       <h1 class="text-2xl font-display font-bold">Activity Feed</h1>
-      <div class="stats stats-horizontal w-full bg-base-200">
+      <div class="stats stats-vertical lg:stats-horizontal w-full bg-base-200">
         <div class="stat">
           <div class="stat-title">Federation Success</div>
           <div
@@ -60,7 +73,7 @@ export default function Activity({
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Federation Errors</div>
+          <div class="stat-title">Delivery Errors</div>
           <div
             class={`stat-value font-data ${
               hasFederation ? "text-error text-lg" : "text-warning text-base"
@@ -69,6 +82,11 @@ export default function Activity({
             {hasFederation
               ? formatCompact(federation?.errorCount ?? 0)
               : "unavailable"}
+          </div>
+          <div class="stat-desc">
+            {hasFederation
+              ? "policy/auth surfaced separately"
+              : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">
@@ -84,6 +102,21 @@ export default function Activity({
             {hasFederation
               ? `dead-letter: ${formatCompact(federation?.deadLetterBacklog ?? 0)}`
               : "stats endpoint unavailable"}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Policy/Auth Refusals</div>
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "text-error text-lg" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatCompact(federationRefusalTotal)
+              : "unavailable"}
+          </div>
+          <div class="stat-desc">
+            {hasFederation ? federationRefusalText : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">

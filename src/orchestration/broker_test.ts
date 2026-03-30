@@ -1345,6 +1345,21 @@ Deno.test(
               success: boolean;
               occurredAt: string;
             }): Promise<void>;
+            recordFederationDenial(event: {
+              linkId: string;
+              remoteBrokerId: string;
+              taskId: string;
+              contextId: string;
+              traceId: string;
+              kind: "policy" | "auth" | "not_found";
+              decision:
+                | "DENY_LOCAL_POLICY"
+                | "DENY_REMOTE_POLICY"
+                | "DENY_REMOTE_NOT_FOUND"
+                | "AUTH_FAILED";
+              errorCode?: string;
+              occurredAt: string;
+            }): Promise<void>;
             moveToDeadLetter(entry: {
               deadLetterId: string;
               idempotencyKey: string;
@@ -1380,7 +1395,28 @@ Deno.test(
         traceId: "trace-stats",
         latencyMs: 42,
         success: true,
-        occurredAt: new Date().toISOString(),
+        occurredAt: "2026-03-30T00:00:01.000Z",
+      });
+      await adapter.recordFederationDenial({
+        linkId: "broker-local:broker-remote",
+        remoteBrokerId: "broker-remote",
+        taskId: "task-policy",
+        contextId: "ctx-policy",
+        traceId: "trace-policy",
+        kind: "policy",
+        decision: "DENY_REMOTE_POLICY",
+        occurredAt: "2026-03-30T00:00:02.000Z",
+      });
+      await adapter.recordFederationDenial({
+        linkId: "broker-local:broker-remote",
+        remoteBrokerId: "broker-remote",
+        taskId: "task-auth",
+        contextId: "ctx-auth",
+        traceId: "trace-auth",
+        kind: "auth",
+        decision: "AUTH_FAILED",
+        errorCode: "token_expired",
+        occurredAt: "2026-03-30T00:00:03.000Z",
       });
       await adapter.moveToDeadLetter({
         deadLetterId: "dead-1",
@@ -1404,7 +1440,11 @@ Deno.test(
       const stats = await statsResponse.json();
       assertEquals(stats.successCount, 1);
       assertEquals(stats.deadLetterBacklog, 1);
-      assertEquals(stats.links[0].lastTaskId, "task-stats");
+      assertEquals(stats.denials.policy, 1);
+      assertEquals(stats.denials.auth, 1);
+      assertEquals(stats.links[0].denials.policy, 1);
+      assertEquals(stats.links[0].denials.auth, 1);
+      assertEquals(stats.links[0].lastTaskId, "task-auth");
 
       const rotateIdentityResponse = await handleHttp(
         new Request("http://localhost/federation/identity/rotate", {

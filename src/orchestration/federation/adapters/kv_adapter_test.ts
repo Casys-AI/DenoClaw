@@ -239,6 +239,16 @@ Deno.test(
         success: true,
         occurredAt: new Date().toISOString(),
       });
+      await adapter.recordFederationDenial({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-stream-denial",
+        contextId: "ctx-denial",
+        traceId: "trace-stream-denial",
+        kind: "policy",
+        decision: "DENY_REMOTE_POLICY",
+        occurredAt: new Date().toISOString(),
+      });
 
       unsubscribe();
 
@@ -253,7 +263,7 @@ Deno.test(
         occurredAt: new Date().toISOString(),
       });
 
-      assertEquals(seen, ["task-stream-1"]);
+      assertEquals(seen, ["task-stream-1", "task-stream-denial"]);
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -299,6 +309,39 @@ Deno.test(
         errorCode: "timeout",
         occurredAt: "2026-03-30T00:00:03.000Z",
       });
+      await adapter.recordFederationDenial({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-4",
+        contextId: "ctx-4",
+        traceId: "trace-4",
+        kind: "policy",
+        decision: "DENY_REMOTE_POLICY",
+        occurredAt: "2026-03-30T00:00:04.000Z",
+      });
+      await adapter.recordFederationDenial({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-5",
+        contextId: "ctx-5",
+        traceId: "trace-5",
+        kind: "auth",
+        decision: "AUTH_FAILED",
+        errorCode: "token_expired",
+        occurredAt: "2026-03-30T00:00:06.000Z",
+      });
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-5",
+        contextId: "ctx-5",
+        traceId: "trace-5",
+        latencyMs: 40,
+        success: false,
+        errorKind: "auth",
+        errorCode: "token_expired",
+        occurredAt: "2026-03-30T00:00:05.000Z",
+      });
       await adapter.moveToDeadLetter({
         deadLetterId: "dead-stats",
         idempotencyKey: "broker-b:task-3:hash",
@@ -321,12 +364,18 @@ Deno.test(
       const stats = await adapter.getFederationStats("broker-b");
       assertEquals(stats.successCount, 2);
       assertEquals(stats.errorCount, 1);
+      assertEquals(stats.denials.policy, 1);
+      assertEquals(stats.denials.auth, 1);
+      assertEquals(stats.denials.notFound, 0);
       assertEquals(stats.deadLetterBacklog, 1);
       assertEquals(stats.links.length, 1);
+      assertEquals(stats.links[0].denials.policy, 1);
+      assertEquals(stats.links[0].denials.auth, 1);
+      assertEquals(stats.links[0].denials.notFound, 0);
       assertEquals(stats.links[0].p50LatencyMs, 20);
-      assertEquals(stats.links[0].p95LatencyMs, 30);
-      assertEquals(stats.links[0].lastTaskId, "task-3");
-      assertEquals(stats.links[0].lastTraceId, "trace-3");
+      assertEquals(stats.links[0].p95LatencyMs, 40);
+      assertEquals(stats.links[0].lastTaskId, "task-5");
+      assertEquals(stats.links[0].lastTraceId, "trace-5");
       assertEquals(typeof stats.links[0].lastOccurredAt, "string");
     } finally {
       kv.close();

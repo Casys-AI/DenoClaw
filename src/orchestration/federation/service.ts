@@ -15,6 +15,8 @@ import type {
   FederationAuthorizationDecision,
   FederationBrokerCorrelationContext,
   FederationCorrelationContext,
+  FederationDenialDecision,
+  FederationDenialKind,
   FederationDeadLetter,
   FederationLink,
   FederationLinkCorrelationContext,
@@ -264,6 +266,7 @@ export class FederationService {
         requesterPolicy.allowAgentIds.length > 0 &&
         !requesterPolicy.allowAgentIds.includes(input.targetAgent));
     if (localDenied) {
+      await this.recordDenial(correlation, "policy", "DENY_LOCAL_POLICY");
       return {
         decision: "DENY_LOCAL_POLICY",
         reason: "denied_by_local_policy",
@@ -276,6 +279,7 @@ export class FederationService {
         (remotePolicy?.allowAgentIds.length ?? 0) > 0 &&
         !remotePolicy?.allowAgentIds.includes(input.targetAgent));
     if (remoteDenied) {
+      await this.recordDenial(correlation, "policy", "DENY_REMOTE_POLICY");
       return {
         decision: "DENY_REMOTE_POLICY",
         reason: "denied_by_remote_policy",
@@ -290,6 +294,7 @@ export class FederationService {
       (entry) => entry.agentId === input.targetAgent,
     );
     if (!available) {
+      await this.recordDenial(correlation, "not_found", "DENY_REMOTE_NOT_FOUND");
       return {
         decision: "DENY_REMOTE_NOT_FOUND",
         reason: "target_agent_not_found",
@@ -389,14 +394,24 @@ export class FederationService {
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
         const latencyMs = Date.now() - attemptStartedAt;
+        const errorKind = this.isAuthFailure(lastError) ? "auth" : "delivery";
         await this.recordHop({
           ...correlation,
           remoteBrokerId: input.remoteBrokerId,
           taskId: input.task.taskId,
           latencyMs,
           success: false,
+          errorKind,
           errorCode: lastError,
         });
+        if (errorKind === "auth") {
+          await this.recordDenial(
+            correlation,
+            "auth",
+            "AUTH_FAILED",
+            lastError,
+          );
+        }
         record = {
           ...record,
           lastErrorCode: lastError,
@@ -503,6 +518,7 @@ export class FederationService {
     input: FederationCorrelationContext & {
       latencyMs: number;
       success: boolean;
+      errorKind?: "delivery" | "auth";
       errorCode?: string;
     },
   ): Promise<void> {
@@ -515,9 +531,36 @@ export class FederationService {
       traceId: input.traceId,
       latencyMs: input.latencyMs,
       success: input.success,
+      errorKind: input.errorKind,
       errorCode: input.errorCode,
       occurredAt: new Date().toISOString(),
     });
+  }
+
+  private async recordDenial(
+    correlation: FederationCorrelationContext,
+    kind: FederationDenialKind,
+    decision: FederationDenialDecision,
+    errorCode?: string,
+  ): Promise<void> {
+    if (!this.observability) return;
+    await this.observability.recordFederationDenial({
+      ...correlation,
+      kind,
+      decision,
+      errorCode,
+      occurredAt: new Date().toISOString(),
+    });
+  }
+
+  private isAuthFailure(errorCode: string): boolean {
+    const normalized = errorCode.toLowerCase();
+    return normalized.includes("auth") ||
+      normalized.includes("unauthorized") ||
+      normalized.includes("forbidden") ||
+      normalized.includes("token") ||
+      normalized.includes("session") ||
+      normalized.includes("expired");
   }
 
   private buildBrokerCorrelationContext(

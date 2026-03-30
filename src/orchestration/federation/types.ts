@@ -47,6 +47,18 @@ export type FederationAuthorizationDecision =
   | "DENY_REMOTE_POLICY"
   | "DENY_REMOTE_NOT_FOUND";
 
+export type FederationDenialKind = "policy" | "auth" | "not_found";
+
+export type FederationDenialDecision =
+  | Exclude<FederationAuthorizationDecision, "ALLOW">
+  | "AUTH_FAILED";
+
+export interface FederationDenialBreakdown {
+  policy: number;
+  auth: number;
+  notFound: number;
+}
+
 export interface FederatedSubmissionRecord {
   idempotencyKey: string;
   remoteBrokerId: string;
@@ -101,6 +113,7 @@ export interface FederationLinkStats {
   remoteBrokerId: string;
   successCount: number;
   errorCount: number;
+  denials: FederationDenialBreakdown;
   p50LatencyMs: number;
   p95LatencyMs: number;
   lastTaskId?: string;
@@ -112,6 +125,7 @@ export interface FederationStatsSnapshot {
   links: FederationLinkStats[];
   successCount: number;
   errorCount: number;
+  denials: FederationDenialBreakdown;
   deadLetterBacklog: number;
 }
 

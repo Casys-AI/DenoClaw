@@ -27,12 +27,12 @@ _Date: 2026-03-30_
   `taskId`, `contextId`, `linkId`, `remoteBrokerId`, `traceId`.
 - Propagation de la derniere trace federation dans `overview`, `network`,
   `activity` et `tunnels`.
+- Refus `policy/auth` exposes dans les stats federation et surfacés dans le
+  dashboard, avec detail par lien.
 - Tests cibles federation/broker alignes et verts sur les flux modifies.
 
 ## Partially Done
 
-- Observabilite federation visible dans le dashboard, mais sans compteurs
-  explicites pour les refus `policy/auth`.
 - Statistiques federation exploitables pour le dashboard, mais encore calculees
   par scan complet du stockage au read-path.
 - KV couvre bien le temps reel et le backlog resilience, mais pas encore
@@ -40,9 +40,6 @@ _Date: 2026-03-30_
 
 ## Remaining
 
-- Enregistrer et exposer les erreurs `DENY_LOCAL_POLICY`,
-  `DENY_REMOTE_POLICY`, auth/session et autres refus control-plane dans les
-  stats federation et le dashboard.
 - Remplacer le `scan-on-read` des stats federation par des agregats maintenus a
   l'ecriture.
 - Ajouter un endpoint ou une vue d'inspection/replay du dead-letter backlog
@@ -57,13 +54,11 @@ _Date: 2026-03-30_
 
 ## Recommended Order
 
-1. Ajouter les metriques de refus `policy/auth` et les surfacer dans
-   l'observabilite federation.
-2. Remplacer les stats calculees par scan par des agregats maintenus a
+1. Remplacer les stats calculees par scan par des agregats maintenus a
    l'ecriture.
-3. Ajouter l'inspection/replay du dead-letter backlog.
-4. Lancer Prisma/Postgres pour l'historique et les analytics dashboard.
-5. Completer les tests de contrat et d'integration federation.
+2. Ajouter l'inspection/replay du dead-letter backlog.
+3. Lancer Prisma/Postgres pour l'historique et les analytics dashboard.
+4. Completer les tests de contrat et d'integration federation.
 
 ## Notes
 

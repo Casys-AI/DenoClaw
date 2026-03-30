@@ -86,6 +86,11 @@ export interface FederationLinkStats {
   remoteBrokerId: string;
   successCount: number;
   errorCount: number;
+  denials: {
+    policy: number;
+    auth: number;
+    notFound: number;
+  };
   p50LatencyMs: number;
   p95LatencyMs: number;
   lastTaskId?: string;
@@ -97,5 +102,10 @@ export interface FederationStatsSnapshot {
   links: FederationLinkStats[];
   successCount: number;
   errorCount: number;
+  denials: {
+    policy: number;
+    auth: number;
+    notFound: number;
+  };
   deadLetterBacklog: number;
 }

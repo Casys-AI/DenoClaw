@@ -1,7 +1,11 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
 import { getAllInstancesData, type InstanceData } from "../lib/api-client.ts";
-import { selectLatestFederationLinkFromSnapshots } from "../lib/federation.ts";
+import {
+  type FederationDenialTotals,
+  selectLatestFederationLinkFromSnapshots,
+  sumFederationDenialsAcrossSnapshots,
+} from "../lib/federation.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,
@@ -26,6 +30,7 @@ interface NetworkData {
   federationErrors: number;
   federationP95LatencyMs: number;
   federationDeadLetters: number;
+  federationDenials: FederationDenialTotals;
   federationReportingCount: number;
   federationExpectedCount: number;
   latestFederationLink: FederationLinkStats | null;
@@ -67,6 +72,9 @@ export const handler = {
       (sum, instance) => sum + (instance.federation?.deadLetterBacklog ?? 0),
       0,
     );
+    const federationDenials = sumFederationDenialsAcrossSnapshots(
+      filteredInstances.map((instance) => instance.federation),
+    );
     const federationReportingCount = filteredInstances.filter(
       (instance) => instance.federation !== null,
     ).length;
@@ -92,6 +100,7 @@ export const handler = {
       federationErrors,
       federationP95LatencyMs,
       federationDeadLetters,
+      federationDenials,
       federationReportingCount,
       federationExpectedCount,
       latestFederationLink,
@@ -110,6 +119,7 @@ export default function Network({ data }: { data: NetworkData }) {
     federationErrors,
     federationP95LatencyMs,
     federationDeadLetters,
+    federationDenials,
     federationReportingCount,
     federationExpectedCount,
     latestFederationLink,
@@ -118,16 +128,25 @@ export default function Network({ data }: { data: NetworkData }) {
   const hasFederation = federationReportingCount > 0;
   const federationCoverageText =
     federationReportingCount === federationExpectedCount
-      ? `${formatCompact(federationErrors)} errors`
+      ? `${formatCompact(federationErrors)} delivery errors`
       : `${
         formatCompact(federationErrors)
-      } errors · ${federationReportingCount}/${federationExpectedCount} brokers reporting`;
+      } delivery errors · ${federationReportingCount}/${federationExpectedCount} brokers reporting`;
   const federationBacklogText =
     federationReportingCount === federationExpectedCount
       ? `dead-letter: ${formatCompact(federationDeadLetters)}`
       : `dead-letter: ${
         formatCompact(federationDeadLetters)
       } · partial coverage`;
+  const federationRefusalTotal =
+    federationDenials.policy + federationDenials.auth;
+  const federationRefusalText = `${formatCompact(federationDenials.policy)} policy · ${
+    formatCompact(federationDenials.auth)
+  } auth${
+    federationDenials.notFound > 0
+      ? ` · ${formatCompact(federationDenials.notFound)} not found`
+      : ""
+  }`;
 
   return (
     <div class="space-y-4">
@@ -195,6 +214,23 @@ export default function Network({ data }: { data: NetworkData }) {
               <div class="stat-desc">
                 {hasFederation
                   ? federationBacklogText
+                  : "stats endpoint unavailable"}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Policy/Auth Refusals</div>
+              <div
+                class={`stat-value font-data ${
+                  hasFederation ? "text-error text-lg" : "text-warning text-base"
+                }`}
+              >
+                {hasFederation
+                  ? formatCompact(federationRefusalTotal)
+                  : "unavailable"}
+              </div>
+              <div class="stat-desc">
+                {hasFederation
+                  ? federationRefusalText
                   : "stats endpoint unavailable"}
               </div>
             </div>

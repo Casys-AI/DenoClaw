@@ -8,6 +8,8 @@ import {
 } from "./crypto.ts";
 import type {
   CrossBrokerHopEvent,
+  FederationDenialEvent,
+  FederationEvent,
   FederationObservabilityPort,
   FederationRoutingPort,
 } from "./ports.ts";
@@ -72,14 +74,20 @@ class DelayedRoutingPort implements FederationRoutingPort {
 
 class InMemoryObservabilityPort implements FederationObservabilityPort {
   public events: CrossBrokerHopEvent[] = [];
+  public denials: FederationDenialEvent[] = [];
 
   recordCrossBrokerHop(event: CrossBrokerHopEvent): Promise<void> {
     this.events.push(event);
     return Promise.resolve();
   }
 
+  recordFederationDenial(event: FederationDenialEvent): Promise<void> {
+    this.denials.push(event);
+    return Promise.resolve();
+  }
+
   streamFederationEvents(
-    _onEvent: (event: CrossBrokerHopEvent) => void,
+    _onEvent: (event: FederationEvent) => void,
   ): Promise<() => void> {
     return Promise.resolve(() => {});
   }
@@ -323,7 +331,16 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
     try {
       const adapter = new KvFederationAdapter(kv);
-      const service = new FederationService(adapter, adapter, adapter, adapter);
+      const observability = new InMemoryObservabilityPort();
+      const service = new FederationService(
+        adapter,
+        adapter,
+        adapter,
+        adapter,
+        undefined,
+        undefined,
+        observability,
+      );
 
       await adapter.setRemoteCatalog(
         "broker-b",
@@ -388,6 +405,79 @@ Deno.test(
         traceId: "trace-remote-denied",
       });
       assertEquals(remoteDenied.decision, "DENY_REMOTE_POLICY");
+
+      const missingTarget = await service.evaluateRouteAuthorization({
+        requesterBrokerId: "broker-a",
+        remoteBrokerId: "broker-b",
+        targetAgent: "agent-missing",
+        taskId: "task-missing",
+        contextId: "ctx-missing",
+        traceId: "trace-missing",
+      });
+      assertEquals(missingTarget.decision, "DENY_REMOTE_NOT_FOUND");
+      assertEquals(observability.denials.length, 3);
+      assertEquals(observability.denials[0].kind, "policy");
+      assertEquals(observability.denials[0].decision, "DENY_LOCAL_POLICY");
+      assertEquals(observability.denials[1].kind, "policy");
+      assertEquals(observability.denials[1].decision, "DENY_REMOTE_POLICY");
+      assertEquals(observability.denials[2].kind, "not_found");
+      assertEquals(observability.denials[2].decision, "DENY_REMOTE_NOT_FOUND");
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "FederationService.forwardTaskIdempotent records auth denials for token failures",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const routing = new FlakyRoutingPort(Number.MAX_SAFE_INTEGER);
+      const observability = new InMemoryObservabilityPort();
+      routing.forwardTask = (
+        _task: BrokerTaskSubmitPayload,
+        _remoteBrokerId: string,
+        _correlation: FederationCorrelationContext,
+      ) => Promise.reject(new Error("token_expired"));
+      const service = new FederationService(
+        adapter,
+        adapter,
+        adapter,
+        adapter,
+        routing,
+        adapter,
+        observability,
+      );
+
+      const task: BrokerTaskSubmitPayload & { contextId: string } = {
+        targetAgent: "agent-auth",
+        taskId: "task-auth",
+        contextId: "ctx-auth",
+        taskMessage: {
+          messageId: "msg-auth",
+          role: "user",
+          parts: [{ kind: "text", text: "hello" }],
+        },
+      };
+
+      const result = await service.forwardTaskIdempotent({
+        remoteBrokerId: "broker-b",
+        task,
+        maxAttempts: 1,
+        linkId: "broker-a:broker-b",
+        traceId: "trace-auth",
+      });
+      assertEquals(result.status, "dead_letter");
+      assertEquals(observability.events.length, 1);
+      assertEquals(observability.events[0].errorKind, "auth");
+      assertEquals(observability.denials.length, 1);
+      assertEquals(observability.denials[0].kind, "auth");
+      assertEquals(observability.denials[0].decision, "AUTH_FAILED");
+      assertEquals(observability.denials[0].errorCode, "token_expired");
     } finally {
       kv.close();
       await Deno.remove(kvPath);

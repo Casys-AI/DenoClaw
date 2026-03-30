@@ -1,5 +1,11 @@
 import type { FederationLinkStats, FederationStatsSnapshot } from "./types.ts";
 
+export interface FederationDenialTotals {
+  policy: number;
+  auth: number;
+  notFound: number;
+}
+
 export function selectLatestFederationLink(
   snapshot: FederationStatsSnapshot | null,
 ): FederationLinkStats | null {
@@ -14,6 +20,12 @@ export function selectLatestFederationLink(
   return latest;
 }
 
+export function getFederationDenialTotals(
+  snapshot: FederationStatsSnapshot | null,
+): FederationDenialTotals {
+  return snapshot?.denials ?? { policy: 0, auth: 0, notFound: 0 };
+}
+
 export function selectLatestFederationLinkFromSnapshots(
   snapshots: Array<FederationStatsSnapshot | null>,
 ): FederationLinkStats | null {
@@ -26,4 +38,16 @@ export function selectLatestFederationLinkFromSnapshots(
     }
   }
   return latest;
+}
+
+export function sumFederationDenialsAcrossSnapshots(
+  snapshots: Array<FederationStatsSnapshot | null>,
+): FederationDenialTotals {
+  return snapshots.reduce<FederationDenialTotals>((totals, snapshot) => {
+    const denials = getFederationDenialTotals(snapshot);
+    totals.policy += denials.policy;
+    totals.auth += denials.auth;
+    totals.notFound += denials.notFound;
+    return totals;
+  }, { policy: 0, auth: 0, notFound: 0 });
 }

@@ -35,13 +35,16 @@ import {
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type {
   WorkerConfig,
+  WorkerPeerDeliverRequest,
   WorkerRequest,
   WorkerResponse,
   WorkerRunRequest,
 } from "./worker_protocol.ts";
 import { createWorkerTaskEventEmitter } from "./worker_runtime_observability.ts";
 import { WorkerApprovalBridge } from "./worker_runtime_approval.ts";
+import { handleWorkerPeerDeliverRequest } from "./worker_runtime_peer_delivery.ts";
 import { WorkerPeerMessenger } from "./worker_runtime_peer_messenger.ts";
+import { handleWorkerRunRequest } from "./worker_runtime_run.ts";
 
 // ── Canonical A2A task execution (Task 3.2) ──────────────
 
@@ -226,7 +229,8 @@ function createAgentLoop(
       sendToAgent: peerMessenger.createSendToAgent(taskId, contextId, traceId),
       availablePeers: peers,
       sandboxConfig,
-      askApproval: overrideAskApproval ?? ((req) => approvalBridge.askApproval(req)),
+      askApproval: overrideAskApproval ??
+        ((req) => approvalBridge.askApproval(req)),
       traceWriter: traceWriter ?? undefined,
       traceId,
       taskId,
@@ -262,40 +266,13 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     }
 
     case "run": {
-      if (!config) {
-        respond({
-          type: "run_error",
-          requestId: msg.requestId,
-          code: "WORKER_NOT_INITIALIZED",
-          message: "Worker has not received init message",
-        });
-        break;
-      }
-
-      const traceId = msg.traceId;
-      const taskId = msg.taskId ?? msg.requestId;
-      const contextId = msg.contextId ?? taskId;
-      taskEvents.emitTaskStarted(
-        msg.requestId,
-        msg.sessionId,
-        traceId,
-        taskId,
-        contextId,
-      );
-
-      try {
-        const result = await executeCanonicalWorkerTask(
-          {
-            type: "run",
-            requestId: msg.requestId,
-            sessionId: msg.sessionId,
-            message: msg.message,
-            model: msg.model,
-            traceId: msg.traceId,
-            taskId,
-            contextId,
-          },
-          {
+      await handleWorkerRunRequest(msg, {
+        agentId,
+        initialized: config !== null,
+        taskEvents,
+        respond,
+        executeTask: (request, onTaskUpdate) =>
+          executeCanonicalWorkerTask(request, {
             createLoop: (ctx) =>
               createAgentLoop(
                 ctx.sessionId,
@@ -306,145 +283,40 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 ctx.askApproval,
               ),
             askApproval: (req) => approvalBridge.askApproval(req),
-            onTaskUpdate: (task) => {
-              taskEvents.emitTaskObservation(
-                task.id,
-                agentId,
-                agentId,
-                msg.message.slice(0, 200),
-                task.status.state.toLowerCase(),
-                undefined,
-                traceId,
-                task.contextId,
-              );
-            },
-          },
-        );
-
-        if (result.response) {
-          respond({
-            type: "run_result",
-            requestId: msg.requestId,
-            content: result.response.content,
-            finishReason: result.response.finishReason,
-          });
-        } else {
-          respond({
-            type: "run_error",
-            requestId: msg.requestId,
-            code: result.error?.code ?? "AGENT_ERROR",
-            message: result.error?.message ?? "Unknown error",
-          });
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        respond({
-          type: "run_error",
-          requestId: msg.requestId,
-          code: "AGENT_ERROR",
-          message,
-        });
-      } finally {
-        taskEvents.emitTaskCompleted(msg.requestId);
-      }
+            onTaskUpdate,
+          }),
+      });
       break;
     }
 
     case "peer_deliver": {
-      const traceId = msg.traceId;
-      const taskId = msg.taskId ?? msg.requestId;
-      const contextId = msg.contextId ?? taskId;
-      taskEvents.emitTaskStarted(
-        msg.requestId,
-        `agent:${msg.fromAgent}:${agentId}`,
-        traceId,
-        taskId,
-        contextId,
-      );
-      taskEvents.emitTaskObservation(
-        taskId,
-        msg.fromAgent,
+      await handleWorkerPeerDeliverRequest(msg as WorkerPeerDeliverRequest, {
         agentId,
-        msg.message,
-        "received",
-        undefined,
-        traceId,
-        contextId,
-      );
-
-      if (!config) {
-        taskEvents.emitTaskObservation(
-          taskId,
-          msg.fromAgent,
-          agentId,
-          msg.message,
-          "failed",
-          "Worker not initialized",
-          traceId,
-          contextId,
-        );
-        taskEvents.emitTaskCompleted(msg.requestId);
-        respond({
-          type: "peer_result",
-          requestId: msg.requestId,
-          content: "Worker not initialized",
-          error: true,
-        });
-        break;
-      }
-
-      try {
-        const sessionId = `agent:${msg.fromAgent}:${agentId}`;
-        const loop = createAgentLoop(
+        initialized: config !== null,
+        taskEvents,
+        respond,
+        processPeerMessage: async (
           sessionId,
-          undefined,
-          msg.traceId,
+          message,
+          traceId,
           taskId,
           contextId,
-        );
-        try {
-          const result = await loop.processMessage(
-            `[Message from agent "${msg.fromAgent}"]: ${msg.message}`,
-          );
-          taskEvents.emitTaskObservation(
-            taskId,
-            msg.fromAgent,
-            agentId,
-            msg.message,
-            "completed",
-            result.content,
+        ) => {
+          const loop = createAgentLoop(
+            sessionId,
+            undefined,
             traceId,
+            taskId,
             contextId,
           );
-          respond({
-            type: "peer_result",
-            requestId: msg.requestId,
-            content: result.content,
-          });
-        } finally {
-          await loop.close();
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        taskEvents.emitTaskObservation(
-          taskId,
-          msg.fromAgent,
-          agentId,
-          msg.message,
-          "failed",
-          errMsg,
-          traceId,
-          contextId,
-        );
-        respond({
-          type: "peer_result",
-          requestId: msg.requestId,
-          content: errMsg,
-          error: true,
-        });
-      } finally {
-        taskEvents.emitTaskCompleted(msg.requestId);
-      }
+          try {
+            const result = await loop.processMessage(message);
+            return result.content;
+          } finally {
+            await loop.close();
+          }
+        },
+      });
       break;
     }
 

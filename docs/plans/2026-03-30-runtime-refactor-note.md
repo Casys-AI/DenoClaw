@@ -255,7 +255,9 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/broker/server.ts`: 499 lines
   - `src/orchestration/federation/service.ts`: 268 lines
   - `src/orchestration/federation/identity_manager.ts`: 82 lines
-  - `src/agent/worker_entrypoint.ts`: 473 lines
+  - `src/agent/worker_entrypoint.ts`: 345 lines
+  - `src/agent/worker_runtime_run.ts`: 93 lines
+  - `src/agent/worker_runtime_peer_delivery.ts`: 111 lines
   - `src/agent/worker_pool.ts`: 393 lines
 
 ## Priority order
@@ -381,8 +383,8 @@ polish and should be treated as a separate track.
   message dispatch ergonomics only
 - if desired, continue shrinking `src/orchestration/federation/service.ts`
   around link/control-plane wrappers only
-- split `src/orchestration/federation/service.ts`
-- split `src/agent/worker_entrypoint.ts`
+- if desired, continue shrinking `src/agent/worker_entrypoint.ts` around
+  worker init/shutdown state only
 - split `src/agent/worker_pool.ts`
 
 ### Priority C — stronger verification

@@ -124,10 +124,7 @@ export class BrokerServer {
   private kv: Deno.Kv | null = null;
   private ownsKv: boolean;
   private taskStore: TaskStore;
-  private tunnels = new Map<
-    string,
-    TunnelConnection
-  >();
+  private tunnels = new Map<string, TunnelConnection>();
   private federationAdapter: KvFederationAdapter | null = null;
   private federationService: FederationService | null = null;
   private federationControlRouter = createFederationControlRouter(
@@ -138,7 +135,8 @@ export class BrokerServer {
   constructor(config: Config, deps?: BrokerServerDeps) {
     this.config = config;
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
-    this.toolExecution = deps?.toolExecution ?? this.createDefaultToolExecutionAdapter();
+    this.toolExecution = deps?.toolExecution ??
+      this.createDefaultToolExecutionAdapter();
     this.metrics = deps?.metrics ?? new MetricsCollector();
     this.kv = deps?.kv ?? null;
     this.ownsKv = !deps?.kv;
@@ -147,7 +145,9 @@ export class BrokerServer {
 
   private createDefaultToolExecutionAdapter(): ToolExecutionPort {
     const sandboxToken = Deno.env.get("DENO_SANDBOX_API_TOKEN") ?? "";
-    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? { allowedPermissions: [] };
+    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? {
+      allowedPermissions: [],
+    };
     const sandbox = sandboxToken
       ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken)
       : null;
@@ -295,10 +295,15 @@ export class BrokerServer {
 
     // Record metrics
     const provider = req.model.split("/")[0] || req.model;
-    await this.metrics.recordLLMCall(msg.from, provider, {
-      prompt: response.usage?.promptTokens || 0,
-      completion: response.usage?.completionTokens || 0,
-    }, latency);
+    await this.metrics.recordLLMCall(
+      msg.from,
+      provider,
+      {
+        prompt: response.usage?.promptTokens || 0,
+        completion: response.usage?.completionTokens || 0,
+      },
+      latency,
+    );
 
     const reply: BrokerMessage = {
       id: msg.id,
@@ -318,13 +323,11 @@ export class BrokerServer {
   private async checkToolPermissions(
     agentId: string,
     tool: string,
-  ): Promise<
-    {
-      granted: SandboxPermission[];
-      denied: SandboxPermission[];
-      agentConfig: Deno.KvEntryMaybe<AgentEntry>;
-    }
-  > {
+  ): Promise<{
+    granted: SandboxPermission[];
+    denied: SandboxPermission[];
+    agentConfig: Deno.KvEntryMaybe<AgentEntry>;
+  }> {
     const kv = await this.getKv();
     const toolPerms = this.resolveToolPermissions(tool);
     const agentConfig = await kv.get<AgentEntry>(["agents", agentId, "config"]);
@@ -355,7 +358,9 @@ export class BrokerServer {
         code: "SANDBOX_PERMISSION_DENIED",
         context: { tool: req.tool, required: toolPerms, agentAllowed, denied },
         recovery: `Add ${
-          JSON.stringify(denied)
+          JSON.stringify(
+            denied,
+          )
         } to agent sandbox.allowedPermissions`,
       });
       return;
@@ -397,7 +402,8 @@ export class BrokerServer {
       const defaultNetwork = this.config.agents?.defaults?.sandbox
         ?.networkAllow;
       const maxDuration = agentConfig.value?.sandbox?.maxDurationSec ||
-        this.config.agents?.defaults?.sandbox?.maxDurationSec || 30;
+        this.config.agents?.defaults?.sandbox?.maxDurationSec ||
+        30;
       const execPolicy = agentConfig.value?.sandbox?.execPolicy ??
         this.config.agents?.defaults?.sandbox?.execPolicy ??
         DEFAULT_EXEC_POLICY;
@@ -452,7 +458,7 @@ export class BrokerServer {
       req.taskId &&
       check.reason !== "denied" &&
       (policy.ask === "always" || policy.ask === "on-miss") &&
-      await this.consumeApprovedTaskResume(req.taskId, command)
+      (await this.consumeApprovedTaskResume(req.taskId, command))
     ) {
       return null;
     }
@@ -523,10 +529,11 @@ export class BrokerServer {
       },
     };
     // Atomic check+set to prevent TOCTOU: if another request already consumed this grant, commit fails.
-    const result = await kv.atomic().check(entry).set(
-      ["a2a_tasks", taskId],
-      nextTask,
-    ).commit();
+    const result = await kv
+      .atomic()
+      .check(entry)
+      .set(["a2a_tasks", taskId], nextTask)
+      .commit();
     return result.ok;
   }
 
@@ -554,7 +561,11 @@ export class BrokerServer {
   private resolveToolPermissions(tool: string): SandboxPermission[] {
     const tunnelPermissions: Record<string, SandboxPermission[]> = {};
     for (const [_, tunnel] of this.tunnels) {
-      for (const [toolName, perms] of Object.entries(tunnel.capabilities.toolPermissions ?? {})) {
+      for (
+        const [toolName, perms] of Object.entries(
+          tunnel.capabilities.toolPermissions ?? {},
+        )
+      ) {
         if (!tunnelPermissions[toolName]) {
           tunnelPermissions[toolName] = [...perms];
         }
@@ -818,7 +829,7 @@ export class BrokerServer {
   private getTaskBrokerMetadata(task: Task): BrokerTaskMetadata {
     const metadata = task.metadata?.broker;
     return typeof metadata === "object" && metadata !== null
-      ? metadata as BrokerTaskMetadata
+      ? (metadata as BrokerTaskMetadata)
       : {};
   }
 
@@ -870,9 +881,12 @@ export class BrokerServer {
 
   private async routeBrokerMessageToAgent(
     targetAgentId: string,
-    message: Extract<BrokerMessage, {
-      type: "task_submit" | "task_continue";
-    }>,
+    message: Extract<
+      BrokerMessage,
+      {
+        type: "task_submit" | "task_continue";
+      }
+    >,
   ): Promise<void> {
     await this.metrics.recordAgentMessage(message.from, targetAgentId);
 
@@ -1055,17 +1069,25 @@ export class BrokerServer {
 
   private routeToTunnel(ws: WebSocket, msg: BrokerMessage): void {
     if (ws.readyState !== WebSocket.OPEN) {
-      throw new DenoClawError("TUNNEL_NOT_OPEN", {
-        readyState: ws.readyState,
-        msgId: msg.id,
-      }, "Tunnel disconnected. Reconnect and retry.");
+      throw new DenoClawError(
+        "TUNNEL_NOT_OPEN",
+        {
+          readyState: ws.readyState,
+          msgId: msg.id,
+        },
+        "Tunnel disconnected. Reconnect and retry.",
+      );
     }
     if (ws.bufferedAmount > WS_BUFFERED_AMOUNT_HIGH_WATERMARK) {
-      throw new DenoClawError("TUNNEL_BACKPRESSURE", {
-        bufferedAmount: ws.bufferedAmount,
-        maxBufferedAmount: WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
-        msgId: msg.id,
-      }, "Tunnel is saturated. Retry after the relay drains pending messages.");
+      throw new DenoClawError(
+        "TUNNEL_BACKPRESSURE",
+        {
+          bufferedAmount: ws.bufferedAmount,
+          maxBufferedAmount: WS_BUFFERED_AMOUNT_HIGH_WATERMARK,
+          msgId: msg.id,
+        },
+        "Tunnel is saturated. Retry after the relay drains pending messages.",
+      );
     }
     ws.send(JSON.stringify(msg));
   }
@@ -1131,11 +1153,16 @@ export class BrokerServer {
       const auth = await this.getAuth();
       const authResult = await auth.checkRequest(req);
       if (!authResult.ok) {
-        return Response.json({
-          error: { code: authResult.code, recovery: authResult.recovery },
-        }, { status: 401 });
+        return Response.json(
+          {
+            error: { code: authResult.code, recovery: authResult.recovery },
+          },
+          { status: 401 },
+        );
       }
-      const body = await req.json().catch(() => ({})) as { tunnelId?: string };
+      const body = (await req.json().catch(() => ({}))) as {
+        tunnelId?: string;
+      };
       const invite = await auth.generateInviteToken(body.tunnelId);
       return Response.json({
         token: invite.token,
@@ -1184,19 +1211,23 @@ export class BrokerServer {
     if (req.method === "GET" && url.pathname === "/federation/catalog") {
       const remoteBrokerId = url.searchParams.get("remoteBrokerId");
       if (!remoteBrokerId) {
-        return Response.json({
-          error: {
-            code: "MISSING_REMOTE_BROKER_ID",
-            recovery: "Add ?remoteBrokerId=<broker-id>",
+        return Response.json(
+          {
+            error: {
+              code: "MISSING_REMOTE_BROKER_ID",
+              recovery: "Add ?remoteBrokerId=<broker-id>",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const adapter = await this.getFederationAdapter();
       return Response.json(await adapter.listRemoteAgents(remoteBrokerId));
     }
 
     if (req.method === "GET" && url.pathname === "/federation/stats") {
-      const remoteBrokerId = url.searchParams.get("remoteBrokerId") ?? undefined;
+      const remoteBrokerId = url.searchParams.get("remoteBrokerId") ??
+        undefined;
       const adapter = await this.getFederationAdapter();
       return Response.json(await adapter.getFederationStats(remoteBrokerId));
     }
@@ -1204,30 +1235,38 @@ export class BrokerServer {
     if (req.method === "GET" && url.pathname === "/federation/policy") {
       const brokerId = url.searchParams.get("brokerId");
       if (!brokerId) {
-        return Response.json({
-          error: {
-            code: "MISSING_BROKER_ID",
-            recovery: "Add ?brokerId=<broker-id>",
+        return Response.json(
+          {
+            error: {
+              code: "MISSING_BROKER_ID",
+              recovery: "Add ?brokerId=<broker-id>",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const adapter = await this.getFederationAdapter();
       return Response.json(await adapter.getRoutePolicy(brokerId));
     }
 
     if (req.method === "PUT" && url.pathname === "/federation/policy") {
-      const body = await req.json().catch(() => null) as
-        | FederatedRoutePolicy
-        | null;
+      const body = (await req
+        .json()
+        .catch(() => null)) as FederatedRoutePolicy | null;
       if (
-        !body || typeof body.policyId !== "string" || body.policyId.length === 0
+        !body ||
+        typeof body.policyId !== "string" ||
+        body.policyId.length === 0
       ) {
-        return Response.json({
-          error: {
-            code: "INVALID_POLICY",
-            recovery: "Provide a valid FederatedRoutePolicy JSON body",
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_POLICY",
+              recovery: "Provide a valid FederatedRoutePolicy JSON body",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const adapter = await this.getFederationAdapter();
       await adapter.setRoutePolicy(body.policyId, body);
@@ -1242,28 +1281,38 @@ export class BrokerServer {
     if (req.method === "GET" && url.pathname === "/federation/identity") {
       const brokerId = url.searchParams.get("brokerId");
       if (!brokerId) {
-        return Response.json({
-          error: {
-            code: "MISSING_BROKER_ID",
-            recovery: "Add ?brokerId=<broker-id>",
+        return Response.json(
+          {
+            error: {
+              code: "MISSING_BROKER_ID",
+              recovery: "Add ?brokerId=<broker-id>",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const service = await this.getFederationService();
       return Response.json(await service.getIdentity(brokerId));
     }
 
     if (req.method === "PUT" && url.pathname === "/federation/identity") {
-      const body = await req.json().catch(() => null) as BrokerIdentity | null;
+      const body = (await req
+        .json()
+        .catch(() => null)) as BrokerIdentity | null;
       if (
-        !body || typeof body.brokerId !== "string" || body.brokerId.length === 0
+        !body ||
+        typeof body.brokerId !== "string" ||
+        body.brokerId.length === 0
       ) {
-        return Response.json({
-          error: {
-            code: "INVALID_IDENTITY",
-            recovery: "Provide a valid BrokerIdentity JSON body",
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_IDENTITY",
+              recovery: "Provide a valid BrokerIdentity JSON body",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const service = await this.getFederationService();
       await service.upsertIdentity(body);
@@ -1273,33 +1322,45 @@ export class BrokerServer {
     if (req.method === "DELETE" && url.pathname === "/federation/identity") {
       const brokerId = url.searchParams.get("brokerId");
       if (!brokerId) {
-        return Response.json({
-          error: {
-            code: "MISSING_BROKER_ID",
-            recovery: "Add ?brokerId=<broker-id>",
+        return Response.json(
+          {
+            error: {
+              code: "MISSING_BROKER_ID",
+              recovery: "Add ?brokerId=<broker-id>",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const service = await this.getFederationService();
       await service.revokeIdentity(brokerId);
       return Response.json({ ok: true, brokerId });
     }
 
-    if (req.method === "POST" && url.pathname === "/federation/identity/rotate") {
-      const body = await req.json().catch(() => null) as {
+    if (
+      req.method === "POST" &&
+      url.pathname === "/federation/identity/rotate"
+    ) {
+      const body = (await req.json().catch(() => null)) as {
         brokerId?: string;
         nextPublicKey?: string;
       } | null;
       if (
-        !body || typeof body.brokerId !== "string" || body.brokerId.length === 0 ||
-        typeof body.nextPublicKey !== "string" || body.nextPublicKey.length === 0
+        !body ||
+        typeof body.brokerId !== "string" ||
+        body.brokerId.length === 0 ||
+        typeof body.nextPublicKey !== "string" ||
+        body.nextPublicKey.length === 0
       ) {
-        return Response.json({
-          error: {
-            code: "INVALID_ROTATE_IDENTITY_REQUEST",
-            recovery: "Provide { brokerId, nextPublicKey }",
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_ROTATE_IDENTITY_REQUEST",
+              recovery: "Provide { brokerId, nextPublicKey }",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
 
       const service = await this.getFederationService();
@@ -1310,18 +1371,31 @@ export class BrokerServer {
       return Response.json({ ok: true, identity });
     }
 
-    if (req.method === "POST" && url.pathname === "/federation/session/rotate") {
-      const body = await req.json().catch(() => null) as {
+    if (
+      req.method === "POST" &&
+      url.pathname === "/federation/session/rotate"
+    ) {
+      const body = (await req.json().catch(() => null)) as {
         linkId?: string;
         ttlSeconds?: number;
       } | null;
-      if (!body || typeof body.linkId !== "string" || body.linkId.length === 0) {
-        return Response.json({
-          error: {
-            code: "INVALID_ROTATE_SESSION_REQUEST",
-            recovery: "Provide { linkId, ttlSeconds? }",
+      const invalidTtl = body?.ttlSeconds !== undefined &&
+        (!Number.isFinite(body.ttlSeconds) || body.ttlSeconds <= 0);
+      if (
+        !body ||
+        typeof body.linkId !== "string" ||
+        body.linkId.length === 0 ||
+        invalidTtl
+      ) {
+        return Response.json(
+          {
+            error: {
+              code: "INVALID_ROTATE_SESSION_REQUEST",
+              recovery: "Provide { linkId, ttlSeconds? } with ttlSeconds > 0",
+            },
           },
-        }, { status: 400 });
+          { status: 400 },
+        );
       }
       const service = await this.getFederationService();
       const session = await service.rotateLinkSession(
@@ -1471,8 +1545,10 @@ export class BrokerServer {
         }
 
         if (
-          typeof data === "object" && data !== null &&
-          "type" in data && data.type === "register"
+          typeof data === "object" &&
+          data !== null &&
+          "type" in data &&
+          data.type === "register"
         ) {
           socket.close(1002, "Tunnel is already registered");
           return;

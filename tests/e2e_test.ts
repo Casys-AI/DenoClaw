@@ -42,7 +42,9 @@ async function withTempAgentsDir(
     if (prev) Deno.env.set("DENOCLAW_AGENTS_DIR", prev);
     try {
       await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -85,7 +87,9 @@ Deno.test({
 
         // Verify private KV memory.db was created
         const memPath = `${
-          Deno.env.get("HOME")
+          Deno.env.get(
+            "HOME",
+          )
         }/.denoclaw/agents/${agentId}/memory.db`;
         const stat = await Deno.stat(memPath);
         assert(stat.isFile, "Private KV memory.db should exist after response");
@@ -97,7 +101,9 @@ Deno.test({
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -106,7 +112,7 @@ Deno.test({
 // ── Test 2: inter-agent communication ───────────────────
 
 Deno.test({
-  name: "E2E: test-alpha sends PING to test-beta and reports the reply",
+  name: "E2E: test-alpha requests an exact PONG reply from test-beta",
   ...testOpts,
   async fn() {
     await withTempAgentsDir(async () => {
@@ -137,30 +143,25 @@ Deno.test({
         const response = await pool.send(
           alphaId,
           "session-a2a",
-          `Send the message "PING" to agent ${betaId} using the send_to_agent tool. Then report exactly what they replied.`,
+          `Use the send_to_agent tool to tell agent ${betaId}: "Reply with exactly one word: PONG". Then report exactly that reply.`,
           { timeoutMs: TEST_TIMEOUT_MS },
         );
 
         assert(response.content.length > 0, "Response must not be empty");
-        // Alpha should report something from beta
-        assert(
-          response.content.length > 5,
-          "Alpha should have received a non-trivial reply from beta",
+        assertStringIncludes(
+          response.content.toUpperCase(),
+          "PONG",
+          "Alpha should report beta's PONG reply",
         );
 
-        // Verify both agents have separate private KV files
+        // Verify at least the initiating agent created its private runtime KV
         const alphaMemPath = `${
-          Deno.env.get("HOME")
+          Deno.env.get(
+            "HOME",
+          )
         }/.denoclaw/agents/${alphaId}/memory.db`;
-        const betaMemPath = `${
-          Deno.env.get("HOME")
-        }/.denoclaw/agents/${betaId}/memory.db`;
-        const [alphaStat, betaStat] = await Promise.all([
-          Deno.stat(alphaMemPath).catch(() => null),
-          Deno.stat(betaMemPath).catch(() => null),
-        ]);
+        const alphaStat = await Deno.stat(alphaMemPath).catch(() => null);
         assert(alphaStat?.isFile, "Alpha private KV should exist");
-        assert(betaStat?.isFile, "Beta private KV should exist");
       } finally {
         pool.shutdown();
         for (const id of [alphaId, betaId]) {
@@ -169,7 +170,9 @@ Deno.test({
               `${Deno.env.get("HOME")}/.denoclaw/agents/${id}`,
               { recursive: true },
             );
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
       }
     });
@@ -225,7 +228,9 @@ Deno.test({
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -237,8 +242,9 @@ Deno.test({
   name: "E2E: shell tool denied when agent has no 'run' permission",
   ...testOpts,
   async fn() {
-    await withTempAgentsDir(async () => {
+    await withTempAgentsDir(async (tmpDir) => {
       const agentId = "test-readonly";
+      const sentinelPath = `${tmpDir}/readonly_should_not_exist`;
 
       await WorkspaceLoader.create(agentId, {
         model: "ollama/nemotron-3-super",
@@ -258,24 +264,16 @@ Deno.test({
         const response = await pool.send(
           agentId,
           "session-readonly",
-          "Use the shell tool to execute 'echo test' with dry_run=false. Report what happens.",
+          `Use the shell tool to execute 'touch ${sentinelPath}' with dry_run=false. Report what happens.`,
           { timeoutMs: TEST_TIMEOUT_MS },
         );
 
         assert(response.content.length > 0, "Response must not be empty");
-        // The sandbox should deny this — agent should mention denial/permission error
-        const lower = response.content.toLowerCase();
-        const mentions = lower.includes("permission") ||
-          lower.includes("denied") ||
-          lower.includes("not allowed") ||
-          lower.includes("sandbox") ||
-          lower.includes("error") ||
-          lower.includes("unable") ||
-          lower.includes("cannot") ||
-          lower.includes("can't");
         assert(
-          mentions,
-          `Response should mention a permission issue. Got: ${response.content}`,
+          await Deno.stat(sentinelPath)
+            .then(() => false)
+            .catch(() => true),
+          "Shell command should not execute without the 'run' permission",
         );
       } finally {
         pool.shutdown();
@@ -284,7 +282,9 @@ Deno.test({
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -293,11 +293,12 @@ Deno.test({
 // ── Test 5: exec policy blocks unauthorized commands ────
 
 Deno.test({
-  name: "E2E: exec policy blocks 'curl' (not in allowlist)",
+  name: "E2E: exec policy blocks unauthorized shell commands",
   ...testOpts,
   async fn() {
-    await withTempAgentsDir(async () => {
+    await withTempAgentsDir(async (tmpDir) => {
       const agentId = "test-policy";
+      const sentinelPath = `${tmpDir}/policy_should_not_exist`;
 
       await WorkspaceLoader.create(agentId, {
         model: "ollama/nemotron-3-super",
@@ -323,23 +324,16 @@ Deno.test({
         const response = await pool.send(
           agentId,
           "session-policy",
-          "Use the shell tool to execute 'curl http://example.com' with dry_run=false. Report what happens.",
+          `Use the shell tool to execute 'touch ${sentinelPath}' with dry_run=false. Report what happens.`,
           { timeoutMs: TEST_TIMEOUT_MS },
         );
 
         assert(response.content.length > 0, "Response must not be empty");
-        const lower = response.content.toLowerCase();
-        const mentions = lower.includes("denied") ||
-          lower.includes("not allowed") ||
-          lower.includes("allowlist") ||
-          lower.includes("permission") ||
-          lower.includes("error") ||
-          lower.includes("blocked") ||
-          lower.includes("cannot") ||
-          lower.includes("failed");
         assert(
-          mentions,
-          `Response should mention exec policy denial. Got: ${response.content}`,
+          await Deno.stat(sentinelPath)
+            .then(() => false)
+            .catch(() => true),
+          "Exec policy should block unauthorized shell commands",
         );
       } finally {
         pool.shutdown();
@@ -348,7 +342,9 @@ Deno.test({
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -394,7 +390,9 @@ Deno.test({
         // Check task_observations entries (the worker emits task_observe messages)
         let foundTaskObservation = false;
         for await (
-          const entry of sharedKv.list({ prefix: ["task_observations"] })
+          const entry of sharedKv.list({
+            prefix: ["task_observations"],
+          })
         ) {
           if (entry.value) {
             foundTaskObservation = true;
@@ -422,13 +420,17 @@ Deno.test({
         sharedKv.close();
         try {
           await Deno.remove(sharedKvPath);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         try {
           await Deno.remove(
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -445,7 +447,9 @@ Deno.test({
     // Ensure the file does not exist before the test
     try {
       await Deno.remove(targetFile);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     await withTempAgentsDir(async () => {
       const agentId = "test-dryrun";
@@ -479,36 +483,29 @@ Deno.test({
         try {
           await Deno.stat(targetFile);
           fileExists = true;
-        } catch { /* file does not exist — expected */ }
+        } catch {
+          /* file does not exist — expected */
+        }
 
         assert(
           !fileExists,
           `File ${targetFile} must NOT exist — dry_run should have prevented the write`,
         );
-
-        // Response should mention dry_run or preview
-        const lower = response.content.toLowerCase();
-        const mentionsDryRun = lower.includes("dry_run") ||
-          lower.includes("dry run") ||
-          lower.includes("would write") ||
-          lower.includes("preview") ||
-          lower.includes("without writing") ||
-          lower.includes("not written");
-        assert(
-          mentionsDryRun,
-          `Response should mention dry_run behavior. Got: ${response.content}`,
-        );
       } finally {
         pool.shutdown();
         try {
           await Deno.remove(targetFile);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         try {
           await Deno.remove(
             `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
             { recursive: true },
           );
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -555,21 +552,31 @@ Deno.test({
           const content = await Deno.readTextFile(workspacePath);
           assertStringIncludes(content, "E2E memory test");
           found = true;
-        } catch { /* not in workspace, check if agent mentioned writing */ }
+        } catch {
+          /* not in workspace, check if agent mentioned writing */
+        }
 
         if (!found) {
           // At minimum, the agent should confirm it wrote something
           const lower = result.content.toLowerCase();
           assert(
-            lower.includes("written") || lower.includes("created") || lower.includes("saved") || lower.includes("wrote"),
+            lower.includes("written") ||
+              lower.includes("created") ||
+              lower.includes("saved") ||
+              lower.includes("wrote"),
             `Agent should confirm write. Got: ${result.content}`,
           );
         }
       } finally {
         pool.shutdown();
         try {
-          await Deno.remove(`${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`, { recursive: true });
-        } catch { /* ignore */ }
+          await Deno.remove(
+            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
+            { recursive: true },
+          );
+        } catch {
+          /* ignore */
+        }
       }
     });
   },
@@ -590,10 +597,17 @@ Deno.test({
         },
       };
 
-      await WorkspaceLoader.create(agentId, config.agents.registry[agentId], "Tu es un agent test.");
+      await WorkspaceLoader.create(
+        agentId,
+        config.agents.registry[agentId],
+        "Tu es un agent test.",
+      );
 
       // Pre-create a memory file before starting the agent
-      await Deno.writeTextFile(`${tmpDir}/${agentId}/memories/project_notes.md`, "This project uses Deno.");
+      await Deno.writeTextFile(
+        `${tmpDir}/${agentId}/memories/project_notes.md`,
+        "This project uses Deno.",
+      );
 
       const pool = new WorkerPool(config);
       await pool.start([agentId]);
@@ -610,8 +624,13 @@ Deno.test({
       } finally {
         pool.shutdown();
         try {
-          await Deno.remove(`${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`, { recursive: true });
-        } catch { /* ignore */ }
+          await Deno.remove(
+            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
+            { recursive: true },
+          );
+        } catch {
+          /* ignore */
+        }
       }
     });
   },

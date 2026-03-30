@@ -1,6 +1,6 @@
 import type {
-  FederationDeliveryPort,
   FederationControlPort,
+  FederationDeliveryPort,
   FederationDiscoveryPort,
   FederationIdentityPort,
   FederationObservabilityPort,
@@ -10,17 +10,21 @@ import type {
 import type { BrokerTaskSubmitPayload } from "../types.ts";
 import type {
   BrokerIdentity,
-  FederationCorrelationContext,
-  FederationDeadLetter,
-  FederationAuthorizationDecision,
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
+  FederationAuthorizationDecision,
+  FederationCorrelationContext,
+  FederationDeadLetter,
   FederationLink,
   FederationSessionToken,
   RemoteAgentCatalogEntry,
   SignedCatalogEnvelope,
 } from "./types.ts";
-import { verifyCatalogEnvelopeSignature } from "./crypto.ts";
+import {
+  canonicalJson,
+  sha256Base64Url,
+  verifyCatalogEnvelopeSignature,
+} from "./crypto.ts";
 
 export interface FederationLinkOpenInput {
   linkId: string;
@@ -75,6 +79,8 @@ const DEFAULT_POLICY: FederatedRoutePolicy = {
   preferredRemoteBrokerIds: [],
   denyAgentIds: [],
 };
+const SUBMISSION_SETTLE_POLL_MS = 25;
+const SUBMISSION_SETTLE_TIMEOUT_MS = 2_000;
 
 export class FederationService {
   constructor(
@@ -104,6 +110,12 @@ export class FederationService {
     linkId: string,
     ttlSeconds?: number,
   ): Promise<FederationSessionToken> {
+    if (
+      ttlSeconds !== undefined &&
+      (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0)
+    ) {
+      throw new Error("ttlSeconds must be a positive number");
+    }
     return await this.control.rotateLinkSession(linkId, ttlSeconds);
   }
 
@@ -187,11 +199,12 @@ export class FederationService {
     input: FederationRouteProbeInput,
   ): Promise<FederationAuthorizationResult> {
     const requesterPolicy =
-      await this.policy.getRoutePolicy(input.requesterBrokerId) ??
+      (await this.policy.getRoutePolicy(input.requesterBrokerId)) ??
         DEFAULT_POLICY;
     const remotePolicy = await this.policy.getRoutePolicy(input.remoteBrokerId);
 
-    const localDenied = requesterPolicy.denyAgentIds.includes(input.targetAgent) ||
+    const localDenied =
+      requesterPolicy.denyAgentIds.includes(input.targetAgent) ||
       (Array.isArray(requesterPolicy.allowAgentIds) &&
         requesterPolicy.allowAgentIds.length > 0 &&
         !requesterPolicy.allowAgentIds.includes(input.targetAgent));
@@ -202,8 +215,8 @@ export class FederationService {
       };
     }
 
-    const remoteDenied = (remotePolicy?.denyAgentIds.includes(input.targetAgent) ??
-      false) ||
+    const remoteDenied =
+      (remotePolicy?.denyAgentIds.includes(input.targetAgent) ?? false) ||
       (Array.isArray(remotePolicy?.allowAgentIds) &&
         (remotePolicy?.allowAgentIds.length ?? 0) > 0 &&
         !remotePolicy?.allowAgentIds.includes(input.targetAgent));
@@ -215,8 +228,8 @@ export class FederationService {
     }
 
     const catalog = await this.discovery.listRemoteAgents(input.remoteBrokerId);
-    const available = catalog.some((entry) =>
-      entry.agentId === input.targetAgent
+    const available = catalog.some(
+      (entry) => entry.agentId === input.targetAgent,
     );
     if (!available) {
       return {
@@ -241,22 +254,13 @@ export class FederationService {
     }
 
     const now = new Date().toISOString();
-    const payloadHash = this.computePayloadHash(input.task);
-    const idempotencyKey = `${input.remoteBrokerId}:${input.task.taskId}:${payloadHash}`;
+    const payloadHash = await this.computePayloadHash(input.task);
+    const idempotencyKey =
+      `${input.remoteBrokerId}:${input.task.taskId}:${payloadHash}`;
     const maxAttempts = input.maxAttempts ?? 3;
     const baseBackoffMs = input.baseBackoffMs ?? 100;
     const maxBackoffMs = input.maxBackoffMs ?? 2_000;
-
-    const existing = await this.delivery.getSubmissionRecord(idempotencyKey);
-    if (existing?.status === "completed") {
-      return {
-        status: "deduplicated",
-        idempotencyKey,
-        attempts: existing.attempts,
-      };
-    }
-
-    let record: FederatedSubmissionRecord = existing ?? {
+    const initialRecord: FederatedSubmissionRecord = {
       idempotencyKey,
       remoteBrokerId: input.remoteBrokerId,
       taskId: input.task.taskId,
@@ -266,6 +270,12 @@ export class FederationService {
       updatedAt: now,
       attempts: 0,
     };
+    const created = await this.delivery.createSubmissionRecord(initialRecord);
+    if (!created) {
+      return await this.waitForSettledSubmission(idempotencyKey);
+    }
+
+    let record = initialRecord;
 
     let lastError = "unknown";
     while (record.attempts < maxAttempts) {
@@ -321,11 +331,9 @@ export class FederationService {
         };
         await this.delivery.upsertSubmissionRecord(record);
         if (record.attempts < maxAttempts) {
-          await this.sleep(this.nextBackoffMs(
-            record.attempts,
-            baseBackoffMs,
-            maxBackoffMs,
-          ));
+          await this.sleep(
+            this.nextBackoffMs(record.attempts, baseBackoffMs, maxBackoffMs),
+          );
         }
       }
     }
@@ -355,8 +363,10 @@ export class FederationService {
     };
   }
 
-  private computePayloadHash(task: BrokerTaskSubmitPayload): string {
-    return btoa(JSON.stringify(task));
+  private async computePayloadHash(
+    task: BrokerTaskSubmitPayload,
+  ): Promise<string> {
+    return await sha256Base64Url(canonicalJson(task));
   }
 
   private nextBackoffMs(
@@ -364,7 +374,7 @@ export class FederationService {
     baseBackoffMs: number,
     maxBackoffMs: number,
   ): number {
-    const exponential = baseBackoffMs * (2 ** Math.max(0, attempt - 1));
+    const exponential = baseBackoffMs * 2 ** Math.max(0, attempt - 1);
     return Math.min(exponential, maxBackoffMs);
   }
 
@@ -373,11 +383,46 @@ export class FederationService {
     await new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 
-  private async recordHop(input: FederationCorrelationContext & {
-    latencyMs: number;
-    success: boolean;
-    errorCode?: string;
-  }): Promise<void> {
+  private async waitForSettledSubmission(
+    idempotencyKey: string,
+  ): Promise<ForwardFederatedTaskResult> {
+    const deadline = Date.now() + SUBMISSION_SETTLE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const existing = await this.delivery?.getSubmissionRecord(idempotencyKey);
+      if (existing?.status === "completed") {
+        return {
+          status: "deduplicated",
+          idempotencyKey,
+          attempts: existing.attempts,
+        };
+      }
+      if (existing?.status === "dead_letter") {
+        return {
+          status: "dead_letter",
+          idempotencyKey,
+          attempts: existing.attempts,
+        };
+      }
+      await this.sleep(SUBMISSION_SETTLE_POLL_MS);
+    }
+
+    const existing = await this.delivery?.getSubmissionRecord(idempotencyKey);
+    return {
+      status: existing?.status === "dead_letter"
+        ? "dead_letter"
+        : "deduplicated",
+      idempotencyKey,
+      attempts: existing?.attempts ?? 0,
+    };
+  }
+
+  private async recordHop(
+    input: FederationCorrelationContext & {
+      latencyMs: number;
+      success: boolean;
+      errorCode?: string;
+    },
+  ): Promise<void> {
     if (!this.observability) return;
     await this.observability.recordCrossBrokerHop({
       linkId: input.linkId ?? `federation:${input.remoteBrokerId}`,

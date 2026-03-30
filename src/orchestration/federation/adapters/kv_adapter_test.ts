@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { KvFederationAdapter } from "./kv_adapter.ts";
 
 Deno.test("KvFederationAdapter link lifecycle", async () => {
@@ -33,13 +33,15 @@ Deno.test("KvFederationAdapter catalog lookup", async () => {
   const kv = await Deno.openKv(kvPath);
   try {
     const adapter = new KvFederationAdapter(kv);
-    await adapter.setRemoteCatalog("broker-b", [{
-      remoteBrokerId: "broker-b",
-      agentId: "agent-1",
-      card: { name: "Agent 1" },
-      capabilities: ["chat"],
-      visibility: "public",
-    }]);
+    await adapter.setRemoteCatalog("broker-b", [
+      {
+        remoteBrokerId: "broker-b",
+        agentId: "agent-1",
+        card: { name: "Agent 1" },
+        capabilities: ["chat"],
+        visibility: "public",
+      },
+    ]);
 
     const card = await adapter.getRemoteAgentCard("broker-b", "agent-1");
     assertExists(card);
@@ -74,7 +76,6 @@ Deno.test("KvFederationAdapter stores and reads route policy", async () => {
   }
 });
 
-
 Deno.test("KvFederationAdapter identity lifecycle", async () => {
   const kvPath = await Deno.makeTempFile({ suffix: ".db" });
   const kv = await Deno.openKv(kvPath);
@@ -103,163 +104,196 @@ Deno.test("KvFederationAdapter identity lifecycle", async () => {
   }
 });
 
-Deno.test("KvFederationAdapter submission + dead-letter lifecycle", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
-  try {
-    const adapter = new KvFederationAdapter(kv);
-    await adapter.upsertSubmissionRecord({
-      idempotencyKey: "broker-b:task-1:hash-1",
-      remoteBrokerId: "broker-b",
-      taskId: "task-1",
-      payloadHash: "hash-1",
-      status: "in_flight",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attempts: 1,
-    });
+Deno.test(
+  "KvFederationAdapter submission + dead-letter lifecycle",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const created = await adapter.createSubmissionRecord({
+        idempotencyKey: "broker-b:task-1:hash-1",
+        remoteBrokerId: "broker-b",
+        taskId: "task-1",
+        payloadHash: "hash-1",
+        status: "in_flight",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        attempts: 1,
+      });
+      assertEquals(created, true);
 
-    const record = await adapter.getSubmissionRecord("broker-b:task-1:hash-1");
-    assertEquals(record?.attempts, 1);
+      const duplicate = await adapter.createSubmissionRecord({
+        idempotencyKey: "broker-b:task-1:hash-1",
+        remoteBrokerId: "broker-b",
+        taskId: "task-1",
+        payloadHash: "hash-1",
+        status: "in_flight",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        attempts: 99,
+      });
+      assertEquals(duplicate, false);
 
-    await adapter.moveToDeadLetter({
-      deadLetterId: "dead-1",
-      idempotencyKey: "broker-b:task-1:hash-1",
-      remoteBrokerId: "broker-b",
-      taskId: "task-1",
-      payloadHash: "hash-1",
-      reason: "network_timeout",
-      movedAt: new Date().toISOString(),
-    });
-    const deadLetters = await adapter.listDeadLetters("broker-b");
-    assertEquals(deadLetters.length, 1);
-    assertEquals(deadLetters[0].reason, "network_timeout");
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
-});
+      const record = await adapter.getSubmissionRecord(
+        "broker-b:task-1:hash-1",
+      );
+      assertEquals(record?.attempts, 1);
 
-Deno.test("KvFederationAdapter streams federation events to subscribers", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
-  try {
-    const adapter = new KvFederationAdapter(kv);
-    const seen: string[] = [];
-    const unsubscribe = await adapter.streamFederationEvents((event) => {
-      seen.push(event.taskId);
-    });
+      await adapter.moveToDeadLetter({
+        deadLetterId: "dead-1",
+        idempotencyKey: "broker-b:task-1:hash-1",
+        remoteBrokerId: "broker-b",
+        taskId: "task-1",
+        payloadHash: "hash-1",
+        reason: "network_timeout",
+        movedAt: new Date().toISOString(),
+      });
+      const deadLetters = await adapter.listDeadLetters("broker-b");
+      assertEquals(deadLetters.length, 1);
+      assertEquals(deadLetters[0].reason, "network_timeout");
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
 
-    await adapter.recordCrossBrokerHop({
-      linkId: "broker-a:broker-b",
-      remoteBrokerId: "broker-b",
-      taskId: "task-stream-1",
-      contextId: "ctx-1",
-      latencyMs: 12,
-      success: true,
-      occurredAt: new Date().toISOString(),
-    });
+Deno.test(
+  "KvFederationAdapter streams federation events to subscribers",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const seen: string[] = [];
+      const unsubscribe = await adapter.streamFederationEvents((event) => {
+        seen.push(event.taskId);
+      });
 
-    unsubscribe();
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-stream-1",
+        contextId: "ctx-1",
+        latencyMs: 12,
+        success: true,
+        occurredAt: new Date().toISOString(),
+      });
 
-    await adapter.recordCrossBrokerHop({
-      linkId: "broker-a:broker-b",
-      remoteBrokerId: "broker-b",
-      taskId: "task-stream-2",
-      contextId: "ctx-2",
-      latencyMs: 10,
-      success: true,
-      occurredAt: new Date().toISOString(),
-    });
+      unsubscribe();
 
-    assertEquals(seen, ["task-stream-1"]);
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
-});
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-stream-2",
+        contextId: "ctx-2",
+        latencyMs: 10,
+        success: true,
+        occurredAt: new Date().toISOString(),
+      });
 
-Deno.test("KvFederationAdapter computes federation stats snapshot", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
-  try {
-    const adapter = new KvFederationAdapter(kv);
-    await adapter.recordCrossBrokerHop({
-      linkId: "broker-a:broker-b",
-      remoteBrokerId: "broker-b",
-      taskId: "task-1",
-      contextId: "ctx-1",
-      latencyMs: 10,
-      success: true,
-      occurredAt: new Date().toISOString(),
-    });
-    await adapter.recordCrossBrokerHop({
-      linkId: "broker-a:broker-b",
-      remoteBrokerId: "broker-b",
-      taskId: "task-2",
-      contextId: "ctx-2",
-      latencyMs: 20,
-      success: true,
-      occurredAt: new Date().toISOString(),
-    });
-    await adapter.recordCrossBrokerHop({
-      linkId: "broker-a:broker-b",
-      remoteBrokerId: "broker-b",
-      taskId: "task-3",
-      contextId: "ctx-3",
-      latencyMs: 30,
-      success: false,
-      errorCode: "timeout",
-      occurredAt: new Date().toISOString(),
-    });
-    await adapter.moveToDeadLetter({
-      deadLetterId: "dead-stats",
-      idempotencyKey: "broker-b:task-3:hash",
-      remoteBrokerId: "broker-b",
-      taskId: "task-3",
-      payloadHash: "hash",
-      reason: "timeout",
-      movedAt: new Date().toISOString(),
-    });
+      assertEquals(seen, ["task-stream-1"]);
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
 
-    const stats = await adapter.getFederationStats("broker-b");
-    assertEquals(stats.successCount, 2);
-    assertEquals(stats.errorCount, 1);
-    assertEquals(stats.deadLetterBacklog, 1);
-    assertEquals(stats.links.length, 1);
-    assertEquals(stats.links[0].p50LatencyMs, 20);
-    assertEquals(stats.links[0].p95LatencyMs, 30);
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
-});
+Deno.test(
+  "KvFederationAdapter computes federation stats snapshot",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-1",
+        contextId: "ctx-1",
+        latencyMs: 10,
+        success: true,
+        occurredAt: new Date().toISOString(),
+      });
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-2",
+        contextId: "ctx-2",
+        latencyMs: 20,
+        success: true,
+        occurredAt: new Date().toISOString(),
+      });
+      await adapter.recordCrossBrokerHop({
+        linkId: "broker-a:broker-b",
+        remoteBrokerId: "broker-b",
+        taskId: "task-3",
+        contextId: "ctx-3",
+        latencyMs: 30,
+        success: false,
+        errorCode: "timeout",
+        occurredAt: new Date().toISOString(),
+      });
+      await adapter.moveToDeadLetter({
+        deadLetterId: "dead-stats",
+        idempotencyKey: "broker-b:task-3:hash",
+        remoteBrokerId: "broker-b",
+        taskId: "task-3",
+        payloadHash: "hash",
+        reason: "timeout",
+        movedAt: new Date().toISOString(),
+      });
 
-Deno.test("KvFederationAdapter rotates identity key and link session", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
-  try {
-    const adapter = new KvFederationAdapter(kv);
-    await adapter.establishLink({
-      linkId: "broker-a:broker-b",
-      localBrokerId: "broker-a",
-      remoteBrokerId: "broker-b",
-      requestedBy: "broker-a",
-    });
+      const stats = await adapter.getFederationStats("broker-b");
+      assertEquals(stats.successCount, 2);
+      assertEquals(stats.errorCount, 1);
+      assertEquals(stats.deadLetterBacklog, 1);
+      assertEquals(stats.links.length, 1);
+      assertEquals(stats.links[0].p50LatencyMs, 20);
+      assertEquals(stats.links[0].p95LatencyMs, 30);
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
 
-    const rotatedIdentity = await adapter.rotateIdentityKey(
-      "broker-b",
-      "pub-key-v2",
-    );
-    assertEquals(rotatedIdentity.activeKeyId, "pub-key-v2");
-    assertEquals(rotatedIdentity.publicKeys[0], "pub-key-v2");
+Deno.test(
+  "KvFederationAdapter rotates identity key and link session",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      await adapter.establishLink({
+        linkId: "broker-a:broker-b",
+        localBrokerId: "broker-a",
+        remoteBrokerId: "broker-b",
+        requestedBy: "broker-a",
+      });
 
-    const session = await adapter.rotateLinkSession("broker-a:broker-b", 60);
-    assertEquals(session.linkId, "broker-a:broker-b");
-    assertEquals(session.remoteBrokerId, "broker-b");
-    assertEquals(session.status, "active");
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
-});
+      const rotatedIdentity = await adapter.rotateIdentityKey(
+        "broker-b",
+        "pub-key-v2",
+      );
+      assertEquals(rotatedIdentity.activeKeyId, "pub-key-v2");
+      assertEquals(rotatedIdentity.publicKeys[0], "pub-key-v2");
+
+      const session = await adapter.rotateLinkSession("broker-a:broker-b", 60);
+      assertEquals(session.linkId, "broker-a:broker-b");
+      assertEquals(session.remoteBrokerId, "broker-b");
+      assertEquals(session.status, "active");
+
+      await assertRejects(
+        () => adapter.rotateLinkSession("broker-a:broker-b", 0),
+        Error,
+        "ttlSeconds must be a positive number",
+      );
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);

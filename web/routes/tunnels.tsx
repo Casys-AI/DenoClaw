@@ -34,6 +34,7 @@ export const handler = {
 export default function Tunnels({ data }: { data: TunnelsData }) {
   const tunnels = data.health?.tunnels ?? [];
   const federation = data.federation;
+  const hasFederation = federation !== null;
 
   return (
     <div class="space-y-6">
@@ -48,20 +49,38 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
         </div>
         <div class="stat">
           <div class="stat-title">Federation Success</div>
-          <div class="stat-value text-success">
-            {formatCompact(federation?.successCount ?? 0)}
+          <div
+            class={`stat-value ${
+              hasFederation ? "text-success" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatCompact(federation.successCount)
+              : "unavailable"}
           </div>
           <div class="stat-desc">
-            {formatCompact(federation?.errorCount ?? 0)} errors
+            {hasFederation
+              ? `${formatCompact(federation.errorCount)} errors`
+              : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Federation P95</div>
-          <div class="stat-value">
-            {formatLatency(Math.max(0, ...(federation?.links.map((l) => l.p95LatencyMs) ?? [])))}
+          <div class="stat-title">Worst Link P95</div>
+          <div
+            class={`stat-value ${
+              hasFederation ? "" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatLatency(
+                Math.max(0, ...federation.links.map((l) => l.p95LatencyMs)),
+              )
+              : "unavailable"}
           </div>
           <div class="stat-desc">
-            dead-letter: {formatCompact(federation?.deadLetterBacklog ?? 0)}
+            {hasFederation
+              ? `dead-letter: ${formatCompact(federation.deadLetterBacklog)}`
+              : "stats endpoint unavailable"}
           </div>
         </div>
       </div>

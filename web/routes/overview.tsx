@@ -34,6 +34,8 @@ interface OverviewData {
   federationErrors: number;
   federationDeadLetters: number;
   federationP95LatencyMs: number;
+  federationReportingCount: number;
+  federationExpectedCount: number;
 }
 
 export const handler = {
@@ -46,6 +48,7 @@ export const handler = {
     const instances = await getAllInstancesData({
       instances: dashboard.instances,
       token: dashboard.token,
+      includeFederation: true,
     });
     const filtered = selectedInstance === "all"
       ? instances
@@ -68,6 +71,10 @@ export const handler = {
       (s, i) => s + (i.federation?.deadLetterBacklog ?? 0),
       0,
     );
+    const federationReportingCount = filtered.filter(
+      (instance) => instance.federation !== null,
+    ).length;
+    const federationExpectedCount = filtered.length;
     const linkP95s = filtered
       .flatMap((i) => i.federation?.links ?? [])
       .map((link) => link.p95LatencyMs);
@@ -85,7 +92,9 @@ export const handler = {
           token: dashboard.token,
         });
         metrics.push(...m);
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // Fetch recent task observations
@@ -93,30 +102,32 @@ export const handler = {
     try {
       const brokerUrl = filtered[0]?.instance.url ?? dashboard.brokerUrl;
       const headers: HeadersInit = dashboard.token
-        ? { "Authorization": `Bearer ${dashboard.token}` }
+        ? { Authorization: `Bearer ${dashboard.token}` }
         : {};
       const res = await fetch(`${brokerUrl}/tasks/observations`, { headers });
       if (res.ok) {
         const body = await res.json();
         tasks = Array.isArray(body) ? body.slice(0, 5) : [];
       }
-    } catch { /* not available */ }
+    } catch {
+      /* not available */
+    }
 
-    return page(
-      {
-        instances,
-        summary,
-        agents,
-        metrics,
-        tasks,
-        selectedInstance,
-        tunnelCount,
-        federationSuccess,
-        federationErrors,
-        federationDeadLetters,
-        federationP95LatencyMs,
-      } as OverviewData,
-    );
+    return page({
+      instances,
+      summary,
+      agents,
+      metrics,
+      tasks,
+      selectedInstance,
+      tunnelCount,
+      federationSuccess,
+      federationErrors,
+      federationDeadLetters,
+      federationP95LatencyMs,
+      federationReportingCount,
+      federationExpectedCount,
+    } as OverviewData);
   },
 };
 
@@ -133,9 +144,12 @@ export default function Overview({ data }: { data: OverviewData }) {
     federationErrors,
     federationDeadLetters,
     federationP95LatencyMs,
+    federationReportingCount,
+    federationExpectedCount,
   } = data;
-  const running =
-    agents.filter((a) => a.status === "running" || a.status === "alive").length;
+  const running = agents.filter(
+    (a) => a.status === "running" || a.status === "alive",
+  ).length;
 
   // Compute aggregate tool success rate
   const totalToolCalls = metrics.reduce((s, m) => s + m.tools.calls, 0);
@@ -148,6 +162,19 @@ export default function Overview({ data }: { data: OverviewData }) {
   const avgLLMLatency = metrics.length > 0
     ? metrics.reduce((s, m) => s + m.llm.avgLatencyMs, 0) / metrics.length
     : 0;
+  const hasFederation = federationReportingCount > 0;
+  const federationCoverageText =
+    federationReportingCount === federationExpectedCount
+      ? `${formatCompact(federationErrors)} errors`
+      : `${
+        formatCompact(federationErrors)
+      } errors · ${federationReportingCount}/${federationExpectedCount} brokers reporting`;
+  const federationBacklogText =
+    federationReportingCount === federationExpectedCount
+      ? `dead-letter: ${formatCompact(federationDeadLetters)}`
+      : `dead-letter: ${
+        formatCompact(federationDeadLetters)
+      } · partial coverage`;
 
   return (
     <div class="space-y-4">
@@ -213,20 +240,34 @@ export default function Overview({ data }: { data: OverviewData }) {
         </div>
         <div class="stat">
           <div class="stat-title">Federation Success</div>
-          <div class="stat-value text-success font-data">
-            {formatCompact(federationSuccess)}
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "text-success" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation ? formatCompact(federationSuccess) : "unavailable"}
           </div>
           <div class="stat-desc">
-            {formatCompact(federationErrors)} errors
+            {hasFederation
+              ? federationCoverageText
+              : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Federation P95</div>
-          <div class="stat-value font-data">
-            {formatLatency(federationP95LatencyMs)}
+          <div class="stat-title">Worst Link P95</div>
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatLatency(federationP95LatencyMs)
+              : "unavailable"}
           </div>
           <div class="stat-desc">
-            dead-letter: {formatCompact(federationDeadLetters)}
+            {hasFederation
+              ? federationBacklogText
+              : "stats endpoint unavailable"}
           </div>
         </div>
       </div>
@@ -279,7 +320,8 @@ export default function Overview({ data }: { data: OverviewData }) {
                                   title={agent.activeTask.taskId}
                                 >
                                   Processing:{" "}
-                                  {agent.activeTask.taskId.slice(0, 12)}...
+                                  {agent.activeTask.taskId.slice(0, 12)}
+                                  ...
                                 </span>
                               )
                               : (
@@ -426,8 +468,8 @@ export default function Overview({ data }: { data: OverviewData }) {
             <div class="flex justify-between text-xs text-neutral-content mt-2">
               <span>Active tasks</span>
               <span class="font-data text-primary">
-                {tasks.filter((t) =>
-                  t.status === "sent" || t.status === "received"
+                {tasks.filter(
+                  (t) => t.status === "sent" || t.status === "received",
                 ).length}
               </span>
             </div>
@@ -451,11 +493,12 @@ export default function Overview({ data }: { data: OverviewData }) {
       {instances.some((i) => !i.reachable) && (
         <div role="alert" class="alert alert-warning">
           <span>
-            Unreachable: {instances.filter((i) =>
-              !i.reachable
-            ).map((i) =>
-              i.instance.name
-            ).join(", ")}
+            Unreachable: {instances
+              .filter((i) =>
+                !i.reachable
+              )
+              .map((i) => i.instance.name)
+              .join(", ")}
           </span>
         </div>
       )}

@@ -23,9 +23,12 @@ export const handler = {
   },
 };
 
-export default function Activity(
-  { data }: { data: { brokerUrl: string; federation: FederationStatsSnapshot | null } },
-) {
+export default function Activity({
+  data,
+}: {
+  data: { brokerUrl: string; federation: FederationStatsSnapshot | null };
+}) {
+  const hasFederation = data.federation !== null;
   const p95 = Math.max(
     0,
     ...(data.federation?.links.map((link) => link.p95LatencyMs) ?? []),
@@ -36,21 +39,43 @@ export default function Activity(
       <div class="stats stats-horizontal w-full bg-base-200">
         <div class="stat">
           <div class="stat-title">Federation Success</div>
-          <div class="stat-value text-success font-data text-lg">
-            {formatCompact(data.federation?.successCount ?? 0)}
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "text-success text-lg" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatCompact(data.federation.successCount)
+              : "unavailable"}
           </div>
         </div>
         <div class="stat">
           <div class="stat-title">Federation Errors</div>
-          <div class="stat-value text-error font-data text-lg">
-            {formatCompact(data.federation?.errorCount ?? 0)}
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "text-error text-lg" : "text-warning text-base"
+            }`}
+          >
+            {hasFederation
+              ? formatCompact(data.federation.errorCount)
+              : "unavailable"}
           </div>
         </div>
         <div class="stat">
-          <div class="stat-title">Federation P95</div>
-          <div class="stat-value font-data text-lg">{formatLatency(p95)}</div>
+          <div class="stat-title">Worst Link P95</div>
+          <div
+            class={`stat-value font-data ${
+              hasFederation ? "text-lg" : "text-base text-warning"
+            }`}
+          >
+            {hasFederation ? formatLatency(p95) : "unavailable"}
+          </div>
           <div class="stat-desc">
-            dead-letter: {formatCompact(data.federation?.deadLetterBacklog ?? 0)}
+            {hasFederation
+              ? `dead-letter: ${
+                formatCompact(data.federation.deadLetterBacklog)
+              }`
+              : "stats endpoint unavailable"}
           </div>
         </div>
       </div>

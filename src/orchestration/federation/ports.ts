@@ -1,13 +1,13 @@
 import type { BrokerTaskSubmitPayload } from "../types.ts";
 import type {
   BrokerIdentity,
-  FederationDeadLetter,
-  FederationSessionToken,
-  FederationStatsSnapshot,
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
+  FederationDeadLetter,
   FederationLink,
   FederationLinkState,
+  FederationSessionToken,
+  FederationStatsSnapshot,
   RemoteAgentCatalogEntry,
 } from "./types.ts";
 
@@ -55,10 +55,7 @@ export interface FederationIdentityPort {
 }
 
 export interface FederationPolicyPort {
-  setRoutePolicy(
-    brokerId: string,
-    policy: FederatedRoutePolicy,
-  ): Promise<void>;
+  setRoutePolicy(brokerId: string, policy: FederatedRoutePolicy): Promise<void>;
   getRoutePolicy(brokerId: string): Promise<FederatedRoutePolicy | null>;
 }
 
@@ -66,9 +63,11 @@ export interface FederationRoutingPort {
   resolveTarget(
     task: BrokerTaskSubmitPayload,
     policy: FederatedRoutePolicy,
-  ): Promise<
-    { kind: "local" | "remote"; remoteBrokerId?: string; reason: string }
-  >;
+  ): Promise<{
+    kind: "local" | "remote";
+    remoteBrokerId?: string;
+    reason: string;
+  }>;
   forwardTask(
     task: BrokerTaskSubmitPayload,
     remoteBrokerId: string,
@@ -76,6 +75,7 @@ export interface FederationRoutingPort {
 }
 
 export interface FederationDeliveryPort {
+  createSubmissionRecord(record: FederatedSubmissionRecord): Promise<boolean>;
   getSubmissionRecord(
     idempotencyKey: string,
   ): Promise<FederatedSubmissionRecord | null>;

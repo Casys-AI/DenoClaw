@@ -1,11 +1,11 @@
 import type {
   BrokerIdentity,
-  FederationDeadLetter,
-  FederationSessionToken,
   FederatedRoutePolicy,
   FederatedSubmissionRecord,
+  FederationDeadLetter,
   FederationLink,
   FederationLinkState,
+  FederationSessionToken,
   FederationStatsSnapshot,
   RemoteAgentCatalogEntry,
 } from "../types.ts";
@@ -75,7 +75,15 @@ export class KvFederationAdapter
     linkId: string,
     ttlSeconds = 900,
   ): Promise<FederationSessionToken> {
-    const link = await this.kv.get<FederationLink>(["federation", "links", linkId]);
+    if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error("ttlSeconds must be a positive number");
+    }
+
+    const link = await this.kv.get<FederationLink>([
+      "federation",
+      "links",
+      linkId,
+    ]);
     if (!link.value) {
       throw new Error(`Federation link not found: ${linkId}`);
     }
@@ -91,7 +99,10 @@ export class KvFederationAdapter
       status: "active",
     };
 
-    await this.kv.set(["federation", "sessions", linkId, session.sessionId], session);
+    await this.kv.set(
+      ["federation", "sessions", linkId, session.sessionId],
+      session,
+    );
     return session;
   }
 
@@ -172,7 +183,10 @@ export class KvFederationAdapter
     const updated: BrokerIdentity = existing
       ? {
         ...existing,
-        publicKeys: [nextPublicKey, ...existing.publicKeys.filter((key) => key !== nextPublicKey)],
+        publicKeys: [
+          nextPublicKey,
+          ...existing.publicKeys.filter((key) => key !== nextPublicKey),
+        ],
         activeKeyId: nextPublicKey,
         rotatedAt: now,
       }
@@ -195,9 +209,7 @@ export class KvFederationAdapter
     await this.kv.set(["federation", "policies", brokerId], policy);
   }
 
-  async getRoutePolicy(
-    brokerId: string,
-  ): Promise<FederatedRoutePolicy | null> {
+  async getRoutePolicy(brokerId: string): Promise<FederatedRoutePolicy | null> {
     const entry = await this.kv.get<FederatedRoutePolicy>([
       "federation",
       "policies",
@@ -221,26 +233,40 @@ export class KvFederationAdapter
   }
 
   async recordCrossBrokerHop(event: CrossBrokerHopEvent): Promise<void> {
-    await this.kv.set([
-      "federation",
-      "events",
-      event.taskId,
-      crypto.randomUUID(),
-    ], event);
+    await this.kv.set(
+      ["federation", "events", event.taskId, crypto.randomUUID()],
+      event,
+    );
 
     for (const subscriber of this.federationEventSubscribers.values()) {
       subscriber(event);
     }
   }
 
-  async streamFederationEvents(
+  streamFederationEvents(
     onEvent: (event: CrossBrokerHopEvent) => void,
   ): Promise<() => void> {
     const subscriberId = crypto.randomUUID();
     this.federationEventSubscribers.set(subscriberId, onEvent);
-    return () => {
+    return Promise.resolve(() => {
       this.federationEventSubscribers.delete(subscriberId);
-    };
+    });
+  }
+
+  async createSubmissionRecord(
+    record: FederatedSubmissionRecord,
+  ): Promise<boolean> {
+    const key: Deno.KvKey = [
+      "federation",
+      "submissions",
+      record.idempotencyKey,
+    ];
+    const result = await this.kv
+      .atomic()
+      .check({ key, versionstamp: null })
+      .set(key, record)
+      .commit();
+    return result.ok;
   }
 
   async getSubmissionRecord(
@@ -254,24 +280,25 @@ export class KvFederationAdapter
     return entry.value ?? null;
   }
 
-  async upsertSubmissionRecord(record: FederatedSubmissionRecord): Promise<void> {
-    await this.kv.set([
-      "federation",
-      "submissions",
-      record.idempotencyKey,
-    ], record);
+  async upsertSubmissionRecord(
+    record: FederatedSubmissionRecord,
+  ): Promise<void> {
+    await this.kv.set(
+      ["federation", "submissions", record.idempotencyKey],
+      record,
+    );
   }
 
   async moveToDeadLetter(entry: FederationDeadLetter): Promise<void> {
-    await this.kv.set([
-      "federation",
-      "dead-letter",
-      entry.remoteBrokerId,
-      entry.deadLetterId,
-    ], entry);
+    await this.kv.set(
+      ["federation", "dead-letter", entry.remoteBrokerId, entry.deadLetterId],
+      entry,
+    );
   }
 
-  async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
+  async listDeadLetters(
+    remoteBrokerId?: string,
+  ): Promise<FederationDeadLetter[]> {
     const prefix: Deno.KvKey = remoteBrokerId
       ? ["federation", "dead-letter", remoteBrokerId]
       : ["federation", "dead-letter"];
@@ -286,17 +313,24 @@ export class KvFederationAdapter
     remoteBrokerId?: string,
   ): Promise<FederationStatsSnapshot> {
     const eventPrefix: Deno.KvKey = ["federation", "events"];
-    const byLink = new Map<string, {
-      linkId: string;
-      remoteBrokerId: string;
-      successCount: number;
-      errorCount: number;
-      latencies: number[];
-    }>();
+    const byLink = new Map<
+      string,
+      {
+        linkId: string;
+        remoteBrokerId: string;
+        successCount: number;
+        errorCount: number;
+        latencies: number[];
+      }
+    >();
     let successCount = 0;
     let errorCount = 0;
 
-    for await (const entry of this.kv.list<CrossBrokerHopEvent>({ prefix: eventPrefix })) {
+    for await (
+      const entry of this.kv.list<CrossBrokerHopEvent>({
+        prefix: eventPrefix,
+      })
+    ) {
       const event = entry.value;
       if (!event) continue;
       if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;

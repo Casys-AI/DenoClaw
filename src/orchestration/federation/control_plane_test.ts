@@ -1,8 +1,8 @@
 import { assertEquals } from "@std/assert";
 import {
   createFederationControlRouter,
-  isFederationControlMethod,
   type FederationControlEnvelope,
+  isFederationControlMethod,
 } from "./control_plane.ts";
 
 Deno.test("federation control-plane method guard", () => {
@@ -13,11 +13,26 @@ Deno.test("federation control-plane method guard", () => {
 Deno.test("federation control-plane router dispatches", async () => {
   const seen: string[] = [];
   const router = createFederationControlRouter({
-    federation_link_open: async () => { seen.push("open"); },
-    federation_link_ack: async () => { seen.push("ack"); },
-    federation_catalog_sync: async () => { seen.push("sync"); },
-    federation_route_probe: async () => { seen.push("probe"); },
-    federation_link_close: async () => { seen.push("close"); },
+    federation_link_open: () => {
+      seen.push("open");
+      return Promise.resolve();
+    },
+    federation_link_ack: () => {
+      seen.push("ack");
+      return Promise.resolve();
+    },
+    federation_catalog_sync: () => {
+      seen.push("sync");
+      return Promise.resolve();
+    },
+    federation_route_probe: () => {
+      seen.push("probe");
+      return Promise.resolve();
+    },
+    federation_link_close: () => {
+      seen.push("close");
+      return Promise.resolve();
+    },
   });
 
   const envelope: FederationControlEnvelope = {

@@ -4,8 +4,8 @@ import type {
   ToolResult,
 } from "../../shared/types.ts";
 import type {
-  ExecuteToolRequest,
   ExecPolicyCheckResult,
+  ExecuteToolRequest,
   ToolExecutionPort,
 } from "../tool_execution_port.ts";
 import type { BuiltinToolName } from "../../agent/tools/types.ts";
@@ -15,7 +15,7 @@ import { ToolRegistry } from "../../agent/tools/registry.ts";
 import { ShellTool } from "../../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../../agent/tools/file.ts";
 import { WebFetchTool } from "../../agent/tools/web.ts";
-import { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
+import type { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
 
 export interface LocalToolExecutionAdapterOptions {
   registry?: ToolRegistry;
@@ -35,7 +35,8 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
   constructor(options?: LocalToolExecutionAdapterOptions) {
     this.registry = options?.registry ?? new ToolRegistry();
     this.sandbox = options?.sandbox ?? null;
-    this.requireSandboxForPermissionedTools = options?.requireSandboxForPermissionedTools ?? false;
+    this.requireSandboxForPermissionedTools =
+      options?.requireSandboxForPermissionedTools ?? false;
   }
 
   static forRelay(tools: string[]): LocalToolExecutionAdapter {

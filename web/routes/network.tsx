@@ -21,6 +21,8 @@ interface NetworkData {
   federationErrors: number;
   federationP95LatencyMs: number;
   federationDeadLetters: number;
+  federationReportingCount: number;
+  federationExpectedCount: number;
 }
 
 export const handler = {
@@ -33,6 +35,7 @@ export const handler = {
     const instances = await getAllInstancesData({
       instances: dashboard.instances,
       token: dashboard.token,
+      includeFederation: true,
     });
 
     const filteredInstances = selectedInstance === "all"
@@ -58,10 +61,15 @@ export const handler = {
       (sum, instance) => sum + (instance.federation?.deadLetterBacklog ?? 0),
       0,
     );
+    const federationReportingCount = filteredInstances.filter(
+      (instance) => instance.federation !== null,
+    ).length;
+    const federationExpectedCount = filteredInstances.length;
     const federationP95LatencyMs = Math.max(
       0,
-      ...filteredInstances.flatMap((instance) =>
-        instance.federation?.links.map((link) => link.p95LatencyMs) ?? []
+      ...filteredInstances.flatMap(
+        (instance) =>
+          instance.federation?.links.map((link) => link.p95LatencyMs) ?? [],
       ),
     );
 
@@ -75,6 +83,8 @@ export const handler = {
       federationErrors,
       federationP95LatencyMs,
       federationDeadLetters,
+      federationReportingCount,
+      federationExpectedCount,
     } as NetworkData);
   },
 };
@@ -90,8 +100,23 @@ export default function Network({ data }: { data: NetworkData }) {
     federationErrors,
     federationP95LatencyMs,
     federationDeadLetters,
+    federationReportingCount,
+    federationExpectedCount,
   } = data;
   const tunnels = health?.tunnels ?? [];
+  const hasFederation = federationReportingCount > 0;
+  const federationCoverageText =
+    federationReportingCount === federationExpectedCount
+      ? `${formatCompact(federationErrors)} errors`
+      : `${
+        formatCompact(federationErrors)
+      } errors · ${federationReportingCount}/${federationExpectedCount} brokers reporting`;
+  const federationBacklogText =
+    federationReportingCount === federationExpectedCount
+      ? `dead-letter: ${formatCompact(federationDeadLetters)}`
+      : `dead-letter: ${
+        formatCompact(federationDeadLetters)
+      } · partial coverage`;
 
   return (
     <div class="space-y-4">
@@ -128,18 +153,38 @@ export default function Network({ data }: { data: NetworkData }) {
             </div>
             <div class="stat">
               <div class="stat-title">Federation Success</div>
-              <div class="stat-value text-success font-data text-lg">
-                {formatCompact(federationSuccess)}
-              </div>
-              <div class="stat-desc">{formatCompact(federationErrors)} errors</div>
-            </div>
-            <div class="stat">
-              <div class="stat-title">Federation P95</div>
-              <div class="stat-value font-data text-lg">
-                {formatLatency(federationP95LatencyMs)}
+              <div
+                class={`stat-value font-data ${
+                  hasFederation
+                    ? "text-success text-lg"
+                    : "text-warning text-base"
+                }`}
+              >
+                {hasFederation
+                  ? formatCompact(federationSuccess)
+                  : "unavailable"}
               </div>
               <div class="stat-desc">
-                dead-letter: {formatCompact(federationDeadLetters)}
+                {hasFederation
+                  ? federationCoverageText
+                  : "stats endpoint unavailable"}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">Worst Link P95</div>
+              <div
+                class={`stat-value font-data ${
+                  hasFederation ? "text-lg" : "text-base text-warning"
+                }`}
+              >
+                {hasFederation
+                  ? formatLatency(federationP95LatencyMs)
+                  : "unavailable"}
+              </div>
+              <div class="stat-desc">
+                {hasFederation
+                  ? federationBacklogText
+                  : "stats endpoint unavailable"}
               </div>
             </div>
           </div>

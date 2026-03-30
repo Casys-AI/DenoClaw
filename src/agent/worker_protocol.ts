@@ -17,6 +17,7 @@ import type { AgentDefaults, ToolsConfig } from "./types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import type { AgentEntry } from "../shared/types.ts";
 import type { ApprovalReason } from "./sandbox_types.ts";
+import type { ResolvedAgentRegistry } from "./registry.ts";
 
 /** Minimal Config projection sent to the Worker (JSON-serializable). */
 export interface WorkerConfig {
@@ -67,6 +68,7 @@ export type WorkerRequest =
     type: "init";
     agentId: string;
     config: WorkerConfig;
+    agentRegistry: ResolvedAgentRegistry;
     kvPaths: WorkerKvPaths;
   }
   // infra: approval transport (ADR-010)

@@ -13,6 +13,7 @@ import { WorkerPoolRequestTracker } from "./worker_pool_request_tracker.ts";
 import { WorkerPoolPeerRouter } from "./worker_pool_peer_router.ts";
 import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
 import { WorkerPoolApprovalBridge } from "./worker_pool_approval.ts";
+import { AgentRuntimeRegistry, getResolvedAgentRegistry } from "./registry.ts";
 import type { WorkerPeerSendMessage } from "./worker_protocol.ts";
 import type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
 export type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
@@ -27,6 +28,7 @@ export class WorkerPool {
   private readonly callbacks: WorkerPoolCallbacks;
   private readonly observability = new WorkerPoolObservability();
   private readonly requestTracker = new WorkerPoolRequestTracker();
+  private readonly runtimeRegistry: AgentRuntimeRegistry;
   private readonly lifecycle: WorkerPoolLifecycle;
   private readonly approvalBridge: WorkerPoolApprovalBridge;
   private peerRouter: WorkerPoolPeerRouter;
@@ -36,8 +38,12 @@ export class WorkerPool {
     callbacks?: WorkerPoolCallbacks,
   ) {
     this.callbacks = callbacks ?? {};
+    this.runtimeRegistry = new AgentRuntimeRegistry(
+      getResolvedAgentRegistry(this.config),
+    );
     this.lifecycle = new WorkerPoolLifecycle({
       config: this.config,
+      runtimeRegistry: this.runtimeRegistry,
       callbacks: this.callbacks,
       entrypointUrl: new URL("./worker_entrypoint.ts", import.meta.url).href,
       onWorkerMessage: (agentId, msg) => this.handleWorkerMessage(agentId, msg),
@@ -47,7 +53,7 @@ export class WorkerPool {
       onAskApproval: this.callbacks.onAskApproval,
     });
     this.peerRouter = new WorkerPoolPeerRouter({
-      config: this.config,
+      runtimeRegistry: this.runtimeRegistry,
       getAgent: (agentId) => this.lifecycle.getAgent(agentId),
       onAgentMessage: this.callbacks.onAgentMessage,
     });

@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { AgentEntry } from "../shared/types.ts";
+import { AgentRuntimeRegistry } from "./registry.ts";
 import type { WorkerResponse } from "./worker_protocol.ts";
 import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
 import type { WorkerConfig } from "./worker_protocol.ts";
@@ -64,8 +65,10 @@ Deno.test("WorkerPoolLifecycle starts workers and forwards runtime messages", as
   const workers = new Map<string, FakeWorker>();
   const ready: string[] = [];
   const messages: Array<{ agentId: string; type: string }> = [];
+  const runtimeRegistry = new AgentRuntimeRegistry();
   const lifecycle = new WorkerPoolLifecycle({
     config: createWorkerConfig(),
+    runtimeRegistry,
     entrypointUrl: "file:///worker_entrypoint.ts",
     callbacks: {
       onWorkerReady: (agentId) => ready.push(agentId),
@@ -94,6 +97,7 @@ Deno.test("WorkerPoolLifecycle starts workers and forwards runtime messages", as
     type: "init",
     agentId: "agent-alpha",
     config: createWorkerConfig(),
+    agentRegistry: {},
     kvPaths: {
       private: "/tmp/agent-alpha-memory.db",
       shared: "/tmp/shared.db",
@@ -120,8 +124,10 @@ Deno.test(
     const workers = new Map<string, FakeWorker>();
     const stopped: string[] = [];
     const config = createWorkerConfig();
+    const runtimeRegistry = new AgentRuntimeRegistry();
     const lifecycle = new WorkerPoolLifecycle({
       config,
+      runtimeRegistry,
       entrypointUrl: "file:///worker_entrypoint.ts",
       callbacks: {
         onWorkerStopped: (agentId) => stopped.push(agentId),
@@ -148,12 +154,12 @@ Deno.test(
     worker.emit({ type: "ready", agentId: "agent-beta" });
     await pending;
 
-    assertEquals(config.agents.registry?.["agent-beta"], agentEntry);
+    assertEquals(runtimeRegistry.get("agent-beta"), agentEntry);
     assertEquals(lifecycle.isReady("agent-beta"), true);
 
     assertEquals(lifecycle.removeAgent("agent-beta"), true);
     assertEquals(worker.terminated, true);
-    assertEquals(config.agents.registry?.["agent-beta"], undefined);
+    assertEquals(runtimeRegistry.get("agent-beta"), undefined);
     assertEquals(stopped, ["agent-beta"]);
   },
 );
@@ -162,6 +168,7 @@ Deno.test("WorkerPoolLifecycle rejects init failures", async () => {
   const worker = new FakeWorker();
   const lifecycle = new WorkerPoolLifecycle({
     config: createWorkerConfig(),
+    runtimeRegistry: new AgentRuntimeRegistry(),
     entrypointUrl: "file:///worker_entrypoint.ts",
     callbacks: {},
     onWorkerMessage: () => {},

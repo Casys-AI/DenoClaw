@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
-import type { WorkerConfig, WorkerPeerSendMessage } from "./worker_protocol.ts";
+import { AgentRuntimeRegistry } from "./registry.ts";
+import type { WorkerPeerSendMessage } from "./worker_protocol.ts";
 import {
   type WorkerPoolAgentHandle,
   WorkerPoolPeerRouter,
@@ -26,28 +27,17 @@ function createCapturedWorker(agentId: string, ready = true): CapturedWorker {
   };
 }
 
-function createConfig(): WorkerConfig {
-  return {
-    agents: {
-      defaults: {
-        model: "test/model",
-        temperature: 0.2,
-        maxTokens: 256,
-      },
-      registry: {
-        "agent-a": {
-          model: "test/model",
-          peers: ["agent-b"],
-        },
-        "agent-b": {
-          model: "test/model",
-          acceptFrom: ["agent-a"],
-        },
-      },
+function createRuntimeRegistry(): AgentRuntimeRegistry {
+  return new AgentRuntimeRegistry({
+    "agent-a": {
+      model: "test/model",
+      peers: ["agent-b"],
     },
-    providers: {},
-    tools: {},
-  };
+    "agent-b": {
+      model: "test/model",
+      acceptFrom: ["agent-a"],
+    },
+  });
 }
 
 function createPeerSend(
@@ -69,9 +59,10 @@ Deno.test("WorkerPoolPeerRouter routes peer messages and relays peer results", (
     ["agent-a", source.handle],
     ["agent-b", target.handle],
   ]);
+  const runtimeRegistry = createRuntimeRegistry();
   const seenMessages: Array<{ from: string; to: string; message: string }> = [];
   const router = new WorkerPoolPeerRouter({
-    config: createConfig(),
+    runtimeRegistry,
     getAgent: (agentId) => agents.get(agentId),
     onAgentMessage: (from, to, message) => {
       seenMessages.push({ from, to, message });
@@ -120,7 +111,7 @@ Deno.test("WorkerPoolPeerRouter rejects peers outside the sender allowlist", () 
     ["agent-b", target.handle],
   ]);
   const router = new WorkerPoolPeerRouter({
-    config: createConfig(),
+    runtimeRegistry: createRuntimeRegistry(),
     getAgent: (agentId) => agents.get(agentId),
   });
 

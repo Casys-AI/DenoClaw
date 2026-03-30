@@ -6,10 +6,7 @@ import {
 } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
-import {
-  ensureResolvedAgentRegistry,
-  getResolvedAgentRegistry,
-} from "./registry.ts";
+import type { AgentRuntimeRegistry } from "./registry.ts";
 import type {
   WorkerConfig,
   WorkerKvPaths,
@@ -27,6 +24,7 @@ const INIT_TIMEOUT_MS = 30_000;
 
 export interface WorkerPoolLifecycleDeps {
   config: WorkerConfig;
+  runtimeRegistry: AgentRuntimeRegistry;
   entrypointUrl: string;
   callbacks: WorkerPoolCallbacks;
   onWorkerMessage: (agentId: string, msg: WorkerResponse) => void;
@@ -69,7 +67,7 @@ export class WorkerPoolLifecycle {
     }
     // Keep the resolved in-memory registry aligned for hot-added workers.
     // This is runtime-only state, not canonical persisted agent storage.
-    ensureResolvedAgentRegistry(this.deps.config)[agentId] = entry;
+    this.deps.runtimeRegistry.set(agentId, entry);
 
     await this.prepareSharedStorage();
     await this.prepareAgentStorage(agentId);
@@ -85,11 +83,10 @@ export class WorkerPoolLifecycle {
       log.debug(`Worker ${agentId} already terminated`);
     }
     this.agents.delete(agentId);
-    const registry = getResolvedAgentRegistry(this.deps.config);
-    if (registry[agentId]) {
+    if (this.deps.runtimeRegistry.has(agentId)) {
       // Remove from the in-memory resolved registry used by already-running
       // workers and peer routing.
-      delete registry[agentId];
+      this.deps.runtimeRegistry.delete(agentId);
     }
     this.deps.callbacks.onWorkerStopped?.(agentId);
     return true;
@@ -172,6 +169,7 @@ export class WorkerPoolLifecycle {
         type: "init",
         agentId,
         config: this.deps.config,
+        agentRegistry: this.deps.runtimeRegistry.snapshot(),
         kvPaths: this.getKvPaths(agentId),
       };
       worker.postMessage(initMsg);

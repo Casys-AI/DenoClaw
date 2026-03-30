@@ -21,7 +21,7 @@ import type {
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
-import { getResolvedAgentEntry } from "./registry.ts";
+import type { ResolvedAgentRegistry } from "./registry.ts";
 import { getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
@@ -167,6 +167,7 @@ const workerGlobal = globalThis as typeof globalThis & {
 
 let agentId = "default";
 let config: WorkerConfig | null = null;
+let agentRegistry: ResolvedAgentRegistry = {};
 let kvPrivatePath: string | undefined;
 let traceWriter: TraceWriter | null = null;
 let sharedKv: Deno.Kv | null = null;
@@ -216,7 +217,7 @@ function createAgentLoop(
   }
 
   const memory = new KvdexMemory(agentId, sessionId, 100, kvPrivatePath);
-  const entry = getResolvedAgentEntry(config, agentId);
+  const entry = agentRegistry[agentId];
   const peers = entry?.peers ?? [];
   const sandboxConfig = entry?.sandbox ??
     config.agents.defaults?.sandbox;
@@ -252,6 +253,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     case "init": {
       agentId = msg.agentId;
       config = msg.config;
+      agentRegistry = msg.agentRegistry;
       kvPrivatePath = msg.kvPaths.private;
       // Open shared KV for trace writing (best-effort observability)
       try {

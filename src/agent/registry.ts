@@ -1,29 +1,47 @@
 import type { AgentEntry } from "../shared/types.ts";
 
+export type ResolvedAgentRegistry = Record<string, AgentEntry>;
+
 export interface HasResolvedAgentRegistry {
   agents: {
-    registry?: Record<string, AgentEntry>;
+    registry?: ResolvedAgentRegistry;
   };
 }
 
 export function getResolvedAgentRegistry(
   config: HasResolvedAgentRegistry,
-): Record<string, AgentEntry> {
+): ResolvedAgentRegistry {
   return config.agents.registry ?? {};
 }
 
-export function getResolvedAgentEntry(
-  config: HasResolvedAgentRegistry,
-  agentId: string,
-): AgentEntry | undefined {
-  return getResolvedAgentRegistry(config)[agentId];
-}
+export class AgentRuntimeRegistry {
+  private registry: ResolvedAgentRegistry;
 
-export function ensureResolvedAgentRegistry(
-  config: HasResolvedAgentRegistry,
-): Record<string, AgentEntry> {
-  if (!config.agents.registry) {
-    config.agents.registry = {};
+  constructor(initialRegistry: ResolvedAgentRegistry = {}) {
+    this.registry = { ...initialRegistry };
   }
-  return config.agents.registry;
+
+  listIds(): string[] {
+    return Object.keys(this.registry);
+  }
+
+  has(agentId: string): boolean {
+    return agentId in this.registry;
+  }
+
+  get(agentId: string): AgentEntry | undefined {
+    return this.registry[agentId];
+  }
+
+  set(agentId: string, entry: AgentEntry): void {
+    this.registry[agentId] = entry;
+  }
+
+  delete(agentId: string): void {
+    delete this.registry[agentId];
+  }
+
+  snapshot(): ResolvedAgentRegistry {
+    return { ...this.registry };
+  }
 }

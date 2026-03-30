@@ -108,13 +108,17 @@ Current migration state:
   config residue when present
 - runtime-facing code is starting to read agent declarations through a resolved
   registry helper instead of reaching straight into `config.agents.registry`
+- `WorkerPool` now owns a dedicated runtime agent registry, instead of mutating
+  the resolved config object to track live agents
+- workers now receive a dedicated agent-registry snapshot during `init`,
+  separate from global config defaults/providers/tools
 
 Remaining work in Track 2:
 
 - make the legacy fallback more explicit in runtime-facing code
 - stop referring to `agents.registry` as if it were canonical
-- decide whether hot-add runtime state should move to a dedicated runtime
-  registry instead of mutating resolved config in memory
+- decide whether hot-add/remove should actively re-sync registry snapshots to
+  already-running workers, or whether a fresh worker start is sufficient
 
 ### High priority
 

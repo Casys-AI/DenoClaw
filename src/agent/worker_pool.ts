@@ -2,12 +2,10 @@ import type { AgentResponse } from "./types.ts";
 import type {
   WorkerAskApprovalMessage,
   WorkerConfig,
-  WorkerPeerResponseRequest,
   WorkerPeerSendMessage,
   WorkerRequest,
   WorkerResponse,
   WorkerRunRequest,
-  WorkerTaskObserveMessage,
 } from "./worker_protocol.ts";
 import { log } from "../shared/log.ts";
 import {
@@ -19,12 +17,9 @@ import { ensureDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import type { AgentEntry } from "../shared/types.ts";
 import type { ApprovalReason } from "./sandbox_types.ts";
-
-interface PendingRequest {
-  resolve: (value: AgentResponse) => void;
-  reject: (reason: Error) => void;
-  timer: number;
-}
+import { WorkerPoolObservability } from "./worker_pool_observability.ts";
+import { WorkerPoolRequestTracker } from "./worker_pool_request_tracker.ts";
+import { WorkerPoolPeerRouter } from "./worker_pool_peer_router.ts";
 
 interface AgentWorker {
   worker: Worker;
@@ -57,34 +52,30 @@ const DATA_DIR = "./data";
  * WorkerPool — spawns and manages one Worker per agent.
  * Communication uses postMessage (typed WorkerRequest/WorkerResponse protocol).
  */
-interface AgentMessagePending {
-  fromAgent: string;
-  sourceRequestId: string;
-  taskId?: string;
-  contextId?: string;
-  traceId?: string;
-  timer: number;
-}
-
 export class WorkerPool {
   private config: WorkerConfig;
   private agents: Map<string, AgentWorker> = new Map();
-  private pending: Map<string, PendingRequest> = new Map();
-  private agentPending: Map<string, AgentMessagePending> = new Map();
   private entrypointUrl: string;
   private callbacks: WorkerPoolCallbacks;
-  private sharedKv: Deno.Kv | null = null;
+  private observability = new WorkerPoolObservability();
+  private requestTracker = new WorkerPoolRequestTracker();
+  private peerRouter: WorkerPoolPeerRouter;
 
   constructor(config: WorkerConfig, callbacks?: WorkerPoolCallbacks) {
     this.config = config;
     this.callbacks = callbacks ?? {};
     this.entrypointUrl =
       new URL("./worker_entrypoint.ts", import.meta.url).href;
+    this.peerRouter = new WorkerPoolPeerRouter({
+      config: this.config,
+      getAgent: (agentId) => this.agents.get(agentId),
+      onAgentMessage: this.callbacks.onAgentMessage,
+    });
   }
 
   /** Inject shared KV for observability writes (task tracking, agent status). */
   setSharedKv(kv: Deno.Kv): void {
-    this.sharedKv = kv;
+    this.observability.setSharedKv(kv);
   }
 
   async start(agentIds: string[]): Promise<void> {
@@ -183,28 +174,12 @@ export class WorkerPool {
   private handleWorkerMessage(fromAgentId: string, msg: WorkerResponse): void {
     switch (msg.type) {
       case "run_result": {
-        const req = this.pending.get(msg.requestId);
-        if (req) {
-          clearTimeout(req.timer);
-          this.pending.delete(msg.requestId);
-          req.resolve({ content: msg.content, finishReason: msg.finishReason });
-        }
+        this.requestTracker.resolveRunResult(msg);
         break;
       }
 
       case "run_error": {
-        const req = this.pending.get(msg.requestId);
-        if (req) {
-          clearTimeout(req.timer);
-          this.pending.delete(msg.requestId);
-          req.reject(
-            new AgentError(
-              msg.code,
-              { message: msg.message },
-              "Check agent logs",
-            ),
-          );
-        } else {
+        if (!this.requestTracker.rejectRunError(msg)) {
           log.error(`Uncorrelated worker error: [${msg.code}] ${msg.message}`);
         }
         break;
@@ -216,26 +191,12 @@ export class WorkerPool {
       }
 
       case "peer_result": {
-        const pendingReq = this.agentPending.get(msg.requestId);
-        if (pendingReq) {
-          clearTimeout(pendingReq.timer);
-          this.agentPending.delete(msg.requestId);
-          const source = this.agents.get(pendingReq.fromAgent);
-          if (source) {
-            const response: WorkerPeerResponseRequest = {
-              type: "peer_response",
-              requestId: pendingReq.sourceRequestId,
-              content: msg.content,
-              error: msg.error,
-            };
-            source.worker.postMessage(response);
-          }
-        }
+        this.peerRouter.handlePeerResult(msg);
         break;
       }
 
       case "task_started": {
-        this.writeActiveTask(
+        this.observability.writeActiveTask(
           fromAgentId,
           msg.taskId ?? msg.requestId,
           msg.sessionId,
@@ -246,12 +207,12 @@ export class WorkerPool {
       }
 
       case "task_completed": {
-        this.clearActiveTask(fromAgentId);
+        this.observability.clearActiveTask(fromAgentId);
         break;
       }
 
       case "task_observe": {
-        this.writeTaskObservation(msg);
+        this.observability.writeTaskObservation(msg);
         break;
       }
 
@@ -342,32 +303,24 @@ export class WorkerPool {
 
     const requestId = generateId();
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const responsePromise = this.requestTracker.createRunRequest(
+      requestId,
+      entry.agentId,
+      timeoutMs,
+    );
 
-    return new Promise<AgentResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(requestId);
-        reject(
-          new AgentError("WORKER_TIMEOUT", {
-            agentId: entry.agentId,
-            timeoutMs,
-          }, "Increase timeout or check agent health"),
-        );
-      }, timeoutMs);
-
-      this.pending.set(requestId, { resolve, reject, timer });
-
-      const msg: WorkerRunRequest = {
-        type: "run",
-        requestId,
-        sessionId,
-        message,
-        model: options?.model,
-        traceId: options?.traceId,
-        taskId: options?.taskId,
-        contextId: options?.contextId,
-      };
-      entry.worker.postMessage(msg);
-    });
+    const msg: WorkerRunRequest = {
+      type: "run",
+      requestId,
+      sessionId,
+      message,
+      model: options?.model,
+      traceId: options?.traceId,
+      taskId: options?.taskId,
+      contextId: options?.contextId,
+    };
+    entry.worker.postMessage(msg);
+    return responsePromise;
   }
 
   shutdown(): void {
@@ -380,25 +333,8 @@ export class WorkerPool {
       }
       this.callbacks.onWorkerStopped?.(agentId);
     }
-
-    // Drain pending maps
-    const snapshot = [...this.pending.entries()];
-    this.pending.clear();
-    for (const [_, req] of snapshot) {
-      clearTimeout(req.timer);
-      req.reject(
-        new AgentError(
-          "WORKER_POOL_SHUTDOWN",
-          {},
-          "WorkerPool is shutting down",
-        ),
-      );
-    }
-
-    for (const [_, pendingReq] of this.agentPending) {
-      clearTimeout(pendingReq.timer);
-    }
-    this.agentPending.clear();
+    this.requestTracker.shutdown();
+    this.peerRouter.shutdown();
 
     this.agents.clear();
     log.info("WorkerPool stopped");
@@ -438,144 +374,13 @@ export class WorkerPool {
     log.info(`Agent removed: ${agentId}`);
   }
 
-  // ── Shared KV writes (observability, on behalf of Workers) ──
-
-  private writeActiveTask(
-    agentId: string,
-    taskId: string,
-    sessionId: string,
-    traceId?: string,
-    contextId?: string,
-  ): void {
-    if (!this.sharedKv) return;
-    this.sharedKv.set(["agents", agentId, "active_task"], {
-      taskId,
-      sessionId,
-      traceId,
-      contextId,
-      startedAt: new Date().toISOString(),
-    }).catch(() => {/* best-effort */});
-  }
-
-  private clearActiveTask(agentId: string): void {
-    if (!this.sharedKv) return;
-    this.sharedKv.delete(["agents", agentId, "active_task"]).catch(
-      () => {/* best-effort */},
-    );
-  }
-
-  private writeTaskObservation(
-    msg: WorkerTaskObserveMessage,
-  ): void {
-    if (!this.sharedKv) return;
-    const task = { ...msg, timestamp: new Date().toISOString() };
-    this.sharedKv.atomic()
-      .set(["task_observations", msg.taskId], task)
-      .set(["_dashboard", "task_observation_update"], task)
-      .commit()
-      .catch(() => {/* best-effort */});
-  }
-
   // ── Agent Message Routing ───────────────────────────────
 
   private routeAgentMessage(
     fromAgent: string,
     msg: WorkerPeerSendMessage,
   ): void {
-    // Peer check
-    const registry = this.config.agents.registry;
-    if (registry) {
-      const sender = registry[fromAgent];
-      const target = registry[msg.toAgent];
-
-      // Closed by default (ADR-006): undefined/empty = deny all, must explicitly list peers
-      const senderPeers = sender?.peers ?? [];
-      if (!senderPeers.includes(msg.toAgent) && !senderPeers.includes("*")) {
-        this.rejectAgentRequest(
-          fromAgent,
-          msg.requestId,
-          "PEER_NOT_ALLOWED",
-          `Agent "${fromAgent}" cannot send to "${msg.toAgent}" (not in peers)`,
-        );
-        return;
-      }
-      const targetAccept = target?.acceptFrom ?? [];
-      if (!targetAccept.includes(fromAgent) && !targetAccept.includes("*")) {
-        this.rejectAgentRequest(
-          fromAgent,
-          msg.requestId,
-          "PEER_REJECTED",
-          `Agent "${msg.toAgent}" does not accept from "${fromAgent}"`,
-        );
-        return;
-      }
-    }
-
-    // Target worker exists?
-    const targetEntry = this.agents.get(msg.toAgent);
-    if (!targetEntry || !targetEntry.ready) {
-      this.rejectAgentRequest(
-        fromAgent,
-        msg.requestId,
-        "NO_WORKER",
-        `Agent "${msg.toAgent}" not found or not ready`,
-      );
-      return;
-    }
-
-    // Callback for metrics/logging
-    this.callbacks.onAgentMessage?.(fromAgent, msg.toAgent, msg.message);
-
-    // Route to target Worker with timeout
-    const deliverRequestId = generateId();
-    const timer = setTimeout(() => {
-      this.agentPending.delete(deliverRequestId);
-      this.rejectAgentRequest(
-        fromAgent,
-        msg.requestId,
-        "AGENT_MSG_TIMEOUT",
-        `Agent "${msg.toAgent}" did not respond within 120s`,
-      );
-    }, DEFAULT_TIMEOUT_MS);
-    this.agentPending.set(deliverRequestId, {
-      fromAgent,
-      sourceRequestId: msg.requestId,
-      taskId: msg.taskId,
-      contextId: msg.contextId,
-      traceId: msg.traceId,
-      timer,
-    });
-
-    const deliverMsg: WorkerRequest = {
-      type: "peer_deliver",
-      requestId: deliverRequestId,
-      fromAgent,
-      message: msg.message,
-      traceId: msg.traceId,
-      taskId: msg.taskId,
-      contextId: msg.contextId,
-    };
-    targetEntry.worker.postMessage(deliverMsg);
-
-    log.info(`Agent message: ${fromAgent} → ${msg.toAgent}`);
-  }
-
-  private rejectAgentRequest(
-    fromAgent: string,
-    sourceRequestId: string,
-    code: string,
-    message: string,
-  ): void {
-    const source = this.agents.get(fromAgent);
-    if (source) {
-      const response: WorkerRequest = {
-        type: "peer_response",
-        requestId: sourceRequestId,
-        content: `[${code}] ${message}`,
-        error: true,
-      };
-      source.worker.postMessage(response);
-    }
+    this.peerRouter.routeAgentMessage(fromAgent, msg);
   }
 
   getAgentIds(): string[] {

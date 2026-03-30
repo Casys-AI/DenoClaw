@@ -21,7 +21,7 @@ import type {
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
-import { generateId, getAgentDefDir } from "../shared/helpers.ts";
+import { getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 import type { ApprovalRequest, ApprovalResponse } from "./sandbox_types.ts";
@@ -39,6 +39,9 @@ import type {
   WorkerResponse,
   WorkerRunRequest,
 } from "./worker_protocol.ts";
+import { createWorkerTaskEventEmitter } from "./worker_runtime_observability.ts";
+import { WorkerApprovalBridge } from "./worker_runtime_approval.ts";
+import { WorkerPeerMessenger } from "./worker_runtime_peer_messenger.ts";
 
 // ── Canonical A2A task execution (Task 3.2) ──────────────
 
@@ -166,184 +169,21 @@ let sharedKv: Deno.Kv | null = null;
 function respond(msg: WorkerResponse): void {
   workerGlobal.postMessage(msg);
 }
-
-// ── Observability — emit to main process (no direct KV writes) ──
-
-function emitTaskStarted(
-  requestId: string,
-  sessionId: string,
-  traceId?: string,
-  taskId?: string,
-  contextId?: string,
-): void {
-  respond({
-    type: "task_started",
-    requestId,
-    sessionId,
-    traceId,
-    taskId,
-    contextId,
-  });
-}
-
-function emitTaskCompleted(requestId: string): void {
-  respond({ type: "task_completed", requestId });
-}
-
-function emitTaskObservation(
-  taskId: string,
-  from: string,
-  to: string,
-  message: string,
-  status: string,
-  result?: string,
-  traceId?: string,
-  contextId?: string,
-): void {
-  respond({
-    type: "task_observe",
-    taskId,
-    from,
-    to,
-    message: message.slice(0, 500),
-    status,
-    result: result?.slice(0, 500),
-    traceId,
-    contextId,
-  });
-}
-
-// ── Pending ask-approval requests (ADR-010) ──
-
-const APPROVAL_TIMEOUT_MS = 60_000;
-
-const askPending = new Map<string, {
-  resolve: (resp: { approved: boolean; allowAlways?: boolean }) => void;
-  reject: (err: Error) => void;
-  timer: number;
-}>();
-
-function askApproval(
-  req: ApprovalRequest,
-): Promise<ApprovalResponse> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      askPending.delete(req.requestId);
-      reject(
-        new AgentError(
-          "APPROVAL_TIMEOUT",
-          { binary: req.binary },
-          "Approval was not answered in time — denying",
-        ),
-      );
-    }, APPROVAL_TIMEOUT_MS);
-
-    askPending.set(req.requestId, {
-      resolve: (resp) => {
-        clearTimeout(timer);
-        askPending.delete(req.requestId);
-        resolve(resp);
-      },
-      reject: (err) => {
-        clearTimeout(timer);
-        askPending.delete(req.requestId);
-        reject(err);
-      },
-      timer,
-    });
-
-    respond({
-      type: "ask_approval",
-      requestId: req.requestId,
-      agentId,
-      command: req.command,
-      binary: req.binary,
-      reason: req.reason,
-    });
-  });
-}
-
-function drainAskPending(): void {
-  for (const [, pending] of askPending) {
-    clearTimeout(pending.timer);
-    pending.reject(
-      new AgentError("WORKER_SHUTDOWN", {}, "Worker is shutting down"),
-    );
-  }
-  askPending.clear();
-}
-
-// ── Agent message pending requests (waiting for another agent's response) ──
-
-const agentPending = new Map<string, {
-  resolve: (content: string) => void;
-  reject: (err: Error) => void;
-}>();
-
-function createSendToAgent(
-  taskId?: string,
-  contextId?: string,
-  traceId?: string,
-): (toAgent: string, message: string) => Promise<string> {
-  return (toAgent: string, message: string): Promise<string> => {
-    const requestId = generateId();
-    const delegatedTaskId = taskId ?? requestId;
-    const delegatedContextId = contextId ?? taskId ?? requestId;
-
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        agentPending.delete(requestId);
-        reject(
-          new AgentError(
-            "AGENT_MSG_TIMEOUT",
-            { toAgent },
-            `No response from "${toAgent}" within 120s`,
-          ),
-        );
-      }, 120_000);
-
-      agentPending.set(requestId, {
-        resolve: (content: string) => {
-          clearTimeout(timer);
-          agentPending.delete(requestId);
-          resolve(content);
-        },
-        reject: (err: Error) => {
-          clearTimeout(timer);
-          agentPending.delete(requestId);
-          reject(err);
-        },
-      });
-
-      respond({
-        type: "peer_send",
-        requestId,
-        toAgent,
-        message,
-        traceId,
-        taskId: delegatedTaskId,
-        contextId: delegatedContextId,
-      });
-      emitTaskObservation(
-        delegatedTaskId,
-        agentId,
-        toAgent,
-        message,
-        "sent",
-        undefined,
-        traceId,
-        delegatedContextId,
-      );
-    });
-  };
-}
+const taskEvents = createWorkerTaskEventEmitter(respond);
+const approvalBridge = new WorkerApprovalBridge(respond, () => agentId);
+const peerMessenger = new WorkerPeerMessenger(
+  respond,
+  taskEvents,
+  () => agentId,
+);
 
 // ── BroadcastChannel — shutdown global ───────────────────
 
 const broadcast = new BroadcastChannel("denoclaw");
 broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
-    drainAskPending();
+    approvalBridge.shutdown();
+    peerMessenger.shutdown();
     if (sharedKv) {
       sharedKv.close();
       sharedKv = null;
@@ -383,10 +223,10 @@ function createAgentLoop(
     10,
     {
       memory,
-      sendToAgent: createSendToAgent(taskId, contextId, traceId),
+      sendToAgent: peerMessenger.createSendToAgent(taskId, contextId, traceId),
       availablePeers: peers,
       sandboxConfig,
-      askApproval: overrideAskApproval ?? askApproval,
+      askApproval: overrideAskApproval ?? ((req) => approvalBridge.askApproval(req)),
       traceWriter: traceWriter ?? undefined,
       traceId,
       taskId,
@@ -435,7 +275,13 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       const traceId = msg.traceId;
       const taskId = msg.taskId ?? msg.requestId;
       const contextId = msg.contextId ?? taskId;
-      emitTaskStarted(msg.requestId, msg.sessionId, traceId, taskId, contextId);
+      taskEvents.emitTaskStarted(
+        msg.requestId,
+        msg.sessionId,
+        traceId,
+        taskId,
+        contextId,
+      );
 
       try {
         const result = await executeCanonicalWorkerTask(
@@ -459,9 +305,9 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 ctx.contextId,
                 ctx.askApproval,
               ),
-            askApproval,
+            askApproval: (req) => approvalBridge.askApproval(req),
             onTaskUpdate: (task) => {
-              emitTaskObservation(
+              taskEvents.emitTaskObservation(
                 task.id,
                 agentId,
                 agentId,
@@ -499,7 +345,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           message,
         });
       } finally {
-        emitTaskCompleted(msg.requestId);
+        taskEvents.emitTaskCompleted(msg.requestId);
       }
       break;
     }
@@ -508,14 +354,14 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       const traceId = msg.traceId;
       const taskId = msg.taskId ?? msg.requestId;
       const contextId = msg.contextId ?? taskId;
-      emitTaskStarted(
+      taskEvents.emitTaskStarted(
         msg.requestId,
         `agent:${msg.fromAgent}:${agentId}`,
         traceId,
         taskId,
         contextId,
       );
-      emitTaskObservation(
+      taskEvents.emitTaskObservation(
         taskId,
         msg.fromAgent,
         agentId,
@@ -527,7 +373,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       );
 
       if (!config) {
-        emitTaskObservation(
+        taskEvents.emitTaskObservation(
           taskId,
           msg.fromAgent,
           agentId,
@@ -537,7 +383,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           traceId,
           contextId,
         );
-        emitTaskCompleted(msg.requestId);
+        taskEvents.emitTaskCompleted(msg.requestId);
         respond({
           type: "peer_result",
           requestId: msg.requestId,
@@ -560,7 +406,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           const result = await loop.processMessage(
             `[Message from agent "${msg.fromAgent}"]: ${msg.message}`,
           );
-          emitTaskObservation(
+          taskEvents.emitTaskObservation(
             taskId,
             msg.fromAgent,
             agentId,
@@ -580,7 +426,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        emitTaskObservation(
+        taskEvents.emitTaskObservation(
           taskId,
           msg.fromAgent,
           agentId,
@@ -597,42 +443,24 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           error: true,
         });
       } finally {
-        emitTaskCompleted(msg.requestId);
+        taskEvents.emitTaskCompleted(msg.requestId);
       }
       break;
     }
 
     case "peer_response": {
-      const pending = agentPending.get(msg.requestId);
-      if (pending) {
-        if (msg.error) {
-          pending.reject(
-            new AgentError(
-              "AGENT_MSG_REJECTED",
-              { content: msg.content },
-              msg.content,
-            ),
-          );
-        } else {
-          pending.resolve(msg.content);
-        }
-      }
+      peerMessenger.handlePeerResponse(msg);
       break;
     }
 
     case "ask_response": {
-      const pendingAsk = askPending.get(msg.requestId);
-      if (pendingAsk) {
-        pendingAsk.resolve({
-          approved: msg.approved,
-          allowAlways: msg.allowAlways,
-        });
-      }
+      approvalBridge.handleAskResponse(msg);
       break;
     }
 
     case "shutdown": {
-      drainAskPending();
+      approvalBridge.shutdown();
+      peerMessenger.shutdown();
       if (sharedKv) {
         sharedKv.close();
         sharedKv = null;

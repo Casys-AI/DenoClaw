@@ -29,19 +29,17 @@ _Date: 2026-03-30_
   `activity` et `tunnels`.
 - Refus `policy/auth` exposes dans les stats federation et surfacés dans le
   dashboard, avec detail par lien.
+- Statistiques federation servies via des agregats KV maintenus a l'ecriture,
+  sans rescanner tous les evenements au read-path.
 - Tests cibles federation/broker alignes et verts sur les flux modifies.
 
 ## Partially Done
 
-- Statistiques federation exploitables pour le dashboard, mais encore calculees
-  par scan complet du stockage au read-path.
 - KV couvre bien le temps reel et le backlog resilience, mais pas encore
   l'analytics historique SQL prevu par Prisma/Postgres.
 
 ## Remaining
 
-- Remplacer le `scan-on-read` des stats federation par des agregats maintenus a
-  l'ecriture.
 - Ajouter un endpoint ou une vue d'inspection/replay du dead-letter backlog
   pour l'operabilite.
 - Demarrer le plan Prisma/Postgres analytics:
@@ -54,11 +52,9 @@ _Date: 2026-03-30_
 
 ## Recommended Order
 
-1. Remplacer les stats calculees par scan par des agregats maintenus a
-   l'ecriture.
-2. Ajouter l'inspection/replay du dead-letter backlog.
-3. Lancer Prisma/Postgres pour l'historique et les analytics dashboard.
-4. Completer les tests de contrat et d'integration federation.
+1. Ajouter l'inspection/replay du dead-letter backlog.
+2. Lancer Prisma/Postgres pour l'historique et les analytics dashboard.
+3. Completer les tests de contrat et d'integration federation.
 
 ## Notes
 

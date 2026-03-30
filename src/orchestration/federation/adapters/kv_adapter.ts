@@ -7,6 +7,7 @@ import type {
   FederationDenialBreakdown,
   FederationDeadLetter,
   FederationLink,
+  FederationLinkStats,
   FederationLinkCorrelationContext,
   FederationLinkState,
   FederationSessionToken,
@@ -27,6 +28,19 @@ import type {
   FederationObservabilityPort,
   FederationPolicyPort,
 } from "../ports.ts";
+
+const MAX_KV_UPDATE_RETRIES = 8;
+
+interface FederationStatsSummaryAggregate {
+  successCount: number;
+  errorCount: number;
+  denials: FederationDenialBreakdown;
+  deadLetterBacklog: number;
+}
+
+interface FederationLinkStatsAggregate extends FederationLinkStats {
+  latencySamples: number[];
+}
 
 export class KvFederationAdapter
   implements
@@ -279,6 +293,33 @@ export class KvFederationAdapter
       ["federation", "events", event.taskId, crypto.randomUUID()],
       event,
     );
+    await this.updateLinkAggregate(event.remoteBrokerId, event.linkId, (link) => {
+      const latencySamples = [...link.latencySamples, event.latencyMs];
+      return {
+        ...link,
+        successCount: link.successCount + (event.success ? 1 : 0),
+        errorCount: link.errorCount +
+          (!event.success && event.errorKind !== "auth" ? 1 : 0),
+        p50LatencyMs: this.percentile(latencySamples, 50),
+        p95LatencyMs: this.percentile(latencySamples, 95),
+        lastTaskId: event.taskId,
+        lastTraceId: event.traceId,
+        lastOccurredAt: event.occurredAt,
+        latencySamples,
+      };
+    });
+    await this.updateSummaryAggregate(undefined, (summary) => ({
+      ...summary,
+      successCount: summary.successCount + (event.success ? 1 : 0),
+      errorCount: summary.errorCount +
+        (!event.success && event.errorKind !== "auth" ? 1 : 0),
+    }));
+    await this.updateSummaryAggregate(event.remoteBrokerId, (summary) => ({
+      ...summary,
+      successCount: summary.successCount + (event.success ? 1 : 0),
+      errorCount: summary.errorCount +
+        (!event.success && event.errorKind !== "auth" ? 1 : 0),
+    }));
 
     for (const subscriber of this.federationEventSubscribers.values()) {
       subscriber(event);
@@ -300,6 +341,21 @@ export class KvFederationAdapter
       ["federation", "denials", event.remoteBrokerId, crypto.randomUUID()],
       event,
     );
+    await this.updateLinkAggregate(event.remoteBrokerId, event.linkId, (link) => ({
+      ...link,
+      denials: this.incrementDenials(link.denials, event.kind),
+      lastTaskId: event.taskId,
+      lastTraceId: event.traceId,
+      lastOccurredAt: event.occurredAt,
+    }));
+    await this.updateSummaryAggregate(undefined, (summary) => ({
+      ...summary,
+      denials: this.incrementDenials(summary.denials, event.kind),
+    }));
+    await this.updateSummaryAggregate(event.remoteBrokerId, (summary) => ({
+      ...summary,
+      denials: this.incrementDenials(summary.denials, event.kind),
+    }));
 
     for (const subscriber of this.federationEventSubscribers.values()) {
       subscriber(event);
@@ -349,10 +405,29 @@ export class KvFederationAdapter
     entry: FederationDeadLetter,
     _correlation: FederationCorrelationContext,
   ): Promise<void> {
-    await this.kv.set(
-      ["federation", "dead-letter", entry.remoteBrokerId, entry.deadLetterId],
-      entry,
-    );
+    const key: Deno.KvKey = [
+      "federation",
+      "dead-letter",
+      entry.remoteBrokerId,
+      entry.deadLetterId,
+    ];
+    const created = await this.kv
+      .atomic()
+      .check({ key, versionstamp: null })
+      .set(key, entry)
+      .commit();
+    if (!created.ok) {
+      await this.kv.set(key, entry);
+      return;
+    }
+    await this.updateSummaryAggregate(undefined, (summary) => ({
+      ...summary,
+      deadLetterBacklog: summary.deadLetterBacklog + 1,
+    }));
+    await this.updateSummaryAggregate(entry.remoteBrokerId, (summary) => ({
+      ...summary,
+      deadLetterBacklog: summary.deadLetterBacklog + 1,
+    }));
   }
 
   async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
@@ -367,22 +442,157 @@ export class KvFederationAdapter
   }
 
   async getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot> {
+    const aggregated = await this.readAggregatedFederationStats(remoteBrokerId);
+    if (aggregated) return aggregated;
+    return await this.scanFederationStats(remoteBrokerId);
+  }
+
+  private emptyDenials(): FederationDenialBreakdown {
+    return {
+      policy: 0,
+      auth: 0,
+      notFound: 0,
+    };
+  }
+
+  private emptySummaryAggregate(): FederationStatsSummaryAggregate {
+    return {
+      successCount: 0,
+      errorCount: 0,
+      denials: this.emptyDenials(),
+      deadLetterBacklog: 0,
+    };
+  }
+
+  private emptyLinkAggregate(
+    remoteBrokerId: string,
+    linkId: string,
+  ): FederationLinkStatsAggregate {
+    return {
+      linkId,
+      remoteBrokerId,
+      successCount: 0,
+      errorCount: 0,
+      denials: this.emptyDenials(),
+      p50LatencyMs: 0,
+      p95LatencyMs: 0,
+      latencySamples: [],
+    };
+  }
+
+  private incrementDenials(
+    denials: FederationDenialBreakdown,
+    kind: FederationDenialEvent["kind"],
+  ): FederationDenialBreakdown {
+    switch (kind) {
+      case "policy":
+        return { ...denials, policy: denials.policy + 1 };
+      case "auth":
+        return { ...denials, auth: denials.auth + 1 };
+      case "not_found":
+        return { ...denials, notFound: denials.notFound + 1 };
+    }
+  }
+
+  private summaryKey(remoteBrokerId?: string): Deno.KvKey {
+    return remoteBrokerId
+      ? ["federation", "stats", "summary", remoteBrokerId]
+      : ["federation", "stats", "summary"];
+  }
+
+  private linkKey(remoteBrokerId: string, linkId: string): Deno.KvKey {
+    return ["federation", "stats", "links", remoteBrokerId, linkId];
+  }
+
+  private linkPrefix(remoteBrokerId?: string): Deno.KvKey {
+    return remoteBrokerId
+      ? ["federation", "stats", "links", remoteBrokerId]
+      : ["federation", "stats", "links"];
+  }
+
+  private async updateSummaryAggregate(
+    remoteBrokerId: string | undefined,
+    update: (
+      current: FederationStatsSummaryAggregate,
+    ) => FederationStatsSummaryAggregate,
+  ): Promise<void> {
+    const key = this.summaryKey(remoteBrokerId);
+    await this.updateKvValue(
+      key,
+      () => this.emptySummaryAggregate(),
+      update,
+    );
+  }
+
+  private async updateLinkAggregate(
+    remoteBrokerId: string,
+    linkId: string,
+    update: (
+      current: FederationLinkStatsAggregate,
+    ) => FederationLinkStatsAggregate,
+  ): Promise<void> {
+    const key = this.linkKey(remoteBrokerId, linkId);
+    await this.updateKvValue(
+      key,
+      () => this.emptyLinkAggregate(remoteBrokerId, linkId),
+      update,
+    );
+  }
+
+  private async updateKvValue<T>(
+    key: Deno.KvKey,
+    createEmpty: () => T,
+    update: (current: T) => T,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
+      const entry = await this.kv.get<T>(key);
+      const current = entry.value ?? createEmpty();
+      const next = update(current);
+      const committed = await this.kv
+        .atomic()
+        .check({ key, versionstamp: entry.versionstamp })
+        .set(key, next)
+        .commit();
+      if (committed.ok) return;
+    }
+    throw new Error(`Failed to update federation aggregate at ${key.join(":")}`);
+  }
+
+  private async readAggregatedFederationStats(
+    remoteBrokerId?: string,
+  ): Promise<FederationStatsSnapshot | null> {
+    const summaryEntry = await this.kv.get<FederationStatsSummaryAggregate>(
+      this.summaryKey(remoteBrokerId),
+    );
+    const links: FederationLinkStats[] = [];
+    for await (
+      const entry of this.kv.list<FederationLinkStatsAggregate>({
+        prefix: this.linkPrefix(remoteBrokerId),
+      })
+    ) {
+      if (!entry.value) continue;
+      const { latencySamples: _latencySamples, ...link } = entry.value;
+      links.push(link);
+    }
+    if (!summaryEntry.value && links.length === 0) {
+      return null;
+    }
+    const summary = summaryEntry.value ?? this.emptySummaryAggregate();
+    return {
+      links,
+      successCount: summary.successCount,
+      errorCount: summary.errorCount,
+      denials: summary.denials,
+      deadLetterBacklog: summary.deadLetterBacklog,
+    };
+  }
+
+  private async scanFederationStats(
+    remoteBrokerId?: string,
+  ): Promise<FederationStatsSnapshot> {
     const eventPrefix: Deno.KvKey = ["federation", "events"];
     const denialPrefix: Deno.KvKey = ["federation", "denials"];
-    const byLink = new Map<
-      string,
-      {
-        linkId: string;
-        remoteBrokerId: string;
-        successCount: number;
-        errorCount: number;
-        denials: FederationDenialBreakdown;
-        latencies: number[];
-        lastTaskId?: string;
-        lastTraceId?: string;
-        lastOccurredAt?: string;
-      }
-    >();
+    const byLink = new Map<string, FederationLinkStatsAggregate>();
     let successCount = 0;
     let errorCount = 0;
     const denials = this.emptyDenials();
@@ -396,28 +606,24 @@ export class KvFederationAdapter
       if (!event) continue;
       if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
 
-      const link = byLink.get(event.linkId) ?? {
-        linkId: event.linkId,
-        remoteBrokerId: event.remoteBrokerId,
-        successCount: 0,
-        errorCount: 0,
-        denials: this.emptyDenials(),
-        latencies: [],
+      const existing = byLink.get(event.linkId) ??
+        this.emptyLinkAggregate(event.remoteBrokerId, event.linkId);
+      const latencySamples = [...existing.latencySamples, event.latencyMs];
+      const link: FederationLinkStatsAggregate = {
+        ...existing,
+        successCount: existing.successCount + (event.success ? 1 : 0),
+        errorCount: existing.errorCount +
+          (!event.success && event.errorKind !== "auth" ? 1 : 0),
+        p50LatencyMs: this.percentile(latencySamples, 50),
+        p95LatencyMs: this.percentile(latencySamples, 95),
+        latencySamples,
+        lastTaskId: event.taskId,
+        lastTraceId: event.traceId,
+        lastOccurredAt: event.occurredAt,
       };
-      link.latencies.push(event.latencyMs);
-      if (
-        !link.lastOccurredAt ||
-        event.occurredAt.localeCompare(link.lastOccurredAt) > 0
-      ) {
-        link.lastOccurredAt = event.occurredAt;
-        link.lastTaskId = event.taskId;
-        link.lastTraceId = event.traceId;
-      }
       if (event.success) {
-        link.successCount += 1;
         successCount += 1;
       } else if (event.errorKind !== "auth") {
-        link.errorCount += 1;
         errorCount += 1;
       }
       byLink.set(event.linkId, link);
@@ -432,52 +638,34 @@ export class KvFederationAdapter
       if (!event) continue;
       if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
 
-      const link = byLink.get(event.linkId) ?? {
-        linkId: event.linkId,
-        remoteBrokerId: event.remoteBrokerId,
-        successCount: 0,
-        errorCount: 0,
-        denials: this.emptyDenials(),
-        latencies: [],
+      const existing = byLink.get(event.linkId) ??
+        this.emptyLinkAggregate(event.remoteBrokerId, event.linkId);
+      const link: FederationLinkStatsAggregate = {
+        ...existing,
+        denials: this.incrementDenials(existing.denials, event.kind),
+        lastTaskId: event.taskId,
+        lastTraceId: event.traceId,
+        lastOccurredAt: event.occurredAt,
       };
-      if (
-        !link.lastOccurredAt ||
-        event.occurredAt.localeCompare(link.lastOccurredAt) > 0
-      ) {
-        link.lastOccurredAt = event.occurredAt;
-        link.lastTaskId = event.taskId;
-        link.lastTraceId = event.traceId;
-      }
+      byLink.set(event.linkId, link);
       switch (event.kind) {
         case "policy":
-          link.denials.policy += 1;
           denials.policy += 1;
           break;
         case "auth":
-          link.denials.auth += 1;
           denials.auth += 1;
           break;
         case "not_found":
-          link.denials.notFound += 1;
           denials.notFound += 1;
           break;
       }
-      byLink.set(event.linkId, link);
     }
 
     const deadLetters = await this.listDeadLetters(remoteBrokerId);
-    const links = [...byLink.values()].map((entry) => ({
-      linkId: entry.linkId,
-      remoteBrokerId: entry.remoteBrokerId,
-      successCount: entry.successCount,
-      errorCount: entry.errorCount,
-      denials: entry.denials,
-      p50LatencyMs: this.percentile(entry.latencies, 50),
-      p95LatencyMs: this.percentile(entry.latencies, 95),
-      lastTaskId: entry.lastTaskId,
-      lastTraceId: entry.lastTraceId,
-      lastOccurredAt: entry.lastOccurredAt,
-    }));
+    const links = [...byLink.values()].map((entry) => {
+      const { latencySamples: _latencySamples, ...link } = entry;
+      return link;
+    });
 
     return {
       links,
@@ -485,14 +673,6 @@ export class KvFederationAdapter
       errorCount,
       denials,
       deadLetterBacklog: deadLetters.length,
-    };
-  }
-
-  private emptyDenials(): FederationDenialBreakdown {
-    return {
-      policy: 0,
-      auth: 0,
-      notFound: 0,
     };
   }
 

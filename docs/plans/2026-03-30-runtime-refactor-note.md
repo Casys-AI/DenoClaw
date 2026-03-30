@@ -238,9 +238,19 @@ After landing the refactor into the local checkpoint branch:
 - internal CLI imports now use the canonical `src/cli/setup/mod.ts` module
 - top-level orchestration exports now point at canonical server modules
 - the canonical agent publish module is now `src/cli/setup/agent_publish.ts`
-- the canonical broker HTTP route module is now `src/orchestration/broker/http_routes.ts`
-- compatibility wrappers remain in place, but internal code no longer depends
-  on them by default
+- the canonical broker HTTP route module is now
+  `src/orchestration/broker/http_routes.ts`
+- compatibility wrappers remain in place, but internal code no longer depends on
+  them by default
+- `src/orchestration/broker/server.ts` has since been reduced again by
+  extracting:
+  - `src/orchestration/broker/llm_proxy.ts`
+  - `src/orchestration/broker/agent_message_router.ts`
+- current broker/federation/agent runtime file sizes are now:
+  - `src/orchestration/broker/server.ts`: 589 lines
+  - `src/orchestration/federation/service.ts`: 293 lines
+  - `src/agent/worker_entrypoint.ts`: 473 lines
+  - `src/agent/worker_pool.ts`: 393 lines
 
 ## Priority order
 
@@ -361,7 +371,8 @@ polish and should be treated as a separate track.
 
 ### Priority B — reduce remaining large files
 
-- continue shrinking `src/orchestration/broker/server.ts`
+- if desired, continue shrinking `src/orchestration/broker/server.ts` around
+  federation service wiring and lifecycle helpers
 - split `src/orchestration/federation/service.ts`
 - split `src/agent/worker_entrypoint.ts`
 - split `src/agent/worker_pool.ts`

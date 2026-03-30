@@ -32,12 +32,12 @@ import {
   type TunnelConnection,
   TunnelRegistry,
 } from "./tunnel_registry.ts";
-import {
-  handleBrokerAgentSocketUpgrade,
-} from "./agent_socket_upgrade.ts";
+import { handleBrokerAgentSocketUpgrade } from "./agent_socket_upgrade.ts";
 import { BrokerAgentRegistry } from "./agent_registry.ts";
+import { BrokerAgentMessageRouter } from "./agent_message_router.ts";
 import { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
 import { type BrokerHttpContext, handleBrokerHttp } from "./http_routes.ts";
+import { BrokerLlmProxy } from "./llm_proxy.ts";
 import { BrokerTaskPersistence } from "./persistence.ts";
 import { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import { BrokerTaskDispatcher } from "./task_dispatch.ts";
@@ -81,6 +81,8 @@ export class BrokerServer {
   private tunnelRegistry: TunnelRegistry;
   private connectedAgents: BrokerAgentSocketRegistry;
   private agentRegistry: BrokerAgentRegistry;
+  private agentMessageRouter: BrokerAgentMessageRouter;
+  private llmProxy: BrokerLlmProxy;
   private taskPersistence: BrokerTaskPersistence;
   private replyDispatcher: BrokerReplyDispatcher;
   private taskDispatcher: BrokerTaskDispatcher;
@@ -107,6 +109,14 @@ export class BrokerServer {
     this.agentRegistry = new BrokerAgentRegistry({
       getKv: () => this.getKv(),
     });
+    this.agentMessageRouter = new BrokerAgentMessageRouter({
+      getKv: () => this.getKv(),
+      metrics: this.metrics,
+      connectedAgents: this.connectedAgents,
+      agentRegistry: this.agentRegistry,
+      tunnelRegistry: this.tunnelRegistry,
+      routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
+    });
     this.taskPersistence = new BrokerTaskPersistence({
       getKv: () => this.getKv(),
     });
@@ -119,7 +129,7 @@ export class BrokerServer {
       taskStore: this.taskStore,
       persistence: this.taskPersistence,
       routeTaskMessage: (targetAgentId, message) =>
-        this.routeBrokerMessageToAgent(targetAgentId, message),
+        this.agentMessageRouter.routeTaskMessage(targetAgentId, message),
     });
     this.toolDispatcher = new BrokerToolDispatcher({
       config: this.config,
@@ -130,6 +140,13 @@ export class BrokerServer {
       persistence: this.taskPersistence,
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
       metrics: this.metrics,
+    });
+    this.llmProxy = new BrokerLlmProxy({
+      providers: this.providers,
+      metrics: this.metrics,
+      findTunnelForProvider: (model) => this.findTunnelForProvider(model),
+      routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
+      sendReply: (reply) => this.sendReply(reply),
     });
     this.federationControlRouter = createFederationControlRouter(
       this.getFederationControlHandlers(),
@@ -267,54 +284,7 @@ export class BrokerServer {
   private async handleLLMRequest(
     msg: Extract<BrokerMessage, { type: "llm_request" }>,
   ): Promise<void> {
-    const req = msg.payload;
-
-    // Check if model is a CLI provider → route to tunnel
-    const tunnel = this.findTunnelForProvider(req.model);
-    if (tunnel) {
-      await this.routeToTunnel(tunnel, msg);
-      return;
-    }
-
-    // Otherwise: direct API call (broker has the keys)
-    const start = performance.now();
-    const response = await this.providers.complete(
-      req.messages.map((m) => ({
-        role: m.role as "system" | "user" | "assistant" | "tool",
-        content: m.content,
-        name: m.name,
-        tool_call_id: m.tool_call_id,
-        tool_calls: m.tool_calls as undefined,
-      })),
-      req.model,
-      req.temperature,
-      req.maxTokens,
-      req.tools as undefined,
-    );
-    const latency = performance.now() - start;
-
-    // Record metrics
-    const provider = req.model.split("/")[0] || req.model;
-    await this.metrics.recordLLMCall(
-      msg.from,
-      provider,
-      {
-        prompt: response.usage?.promptTokens || 0,
-        completion: response.usage?.completionTokens || 0,
-      },
-      latency,
-    );
-
-    const reply: BrokerMessage = {
-      id: msg.id,
-      from: "broker",
-      to: msg.from,
-      type: "llm_response",
-      payload: response,
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.sendReply(reply);
+    await this.llmProxy.handleRequest(msg);
   }
 
   // ── Tool routing (ADR-005: permissions par intersection) ─
@@ -418,82 +388,6 @@ export class BrokerServer {
     payload: BrokerTaskResultPayload,
   ): Promise<Task | null> {
     return await this.taskDispatcher.recordTaskResult(fromAgentId, payload);
-  }
-
-  private async routeBrokerMessageToAgent(
-    targetAgentId: string,
-    message: Extract<
-      BrokerMessage,
-      {
-        type: "task_submit" | "task_continue";
-      }
-    >,
-  ): Promise<void> {
-    await this.metrics.recordAgentMessage(message.from, targetAgentId);
-
-    const connectedSocket = this.connectedAgents.getSocket(targetAgentId);
-    if (connectedSocket) {
-      this.routeToTunnel(connectedSocket, message);
-      log.info(
-        `A2A routed via agent socket: ${message.from} → ${targetAgentId} (${message.type})`,
-      );
-      return;
-    }
-
-    const tunnel = this.findTunnelByAgentId(targetAgentId);
-    if (tunnel) {
-      this.routeToTunnel(tunnel, message);
-      log.info(
-        `A2A routed via tunnel: ${message.from} → ${targetAgentId} (${message.type})`,
-      );
-      return;
-    }
-
-    const endpoint = await this.agentRegistry.getAgentEndpoint(targetAgentId);
-    if (endpoint) {
-      await this.postMessageToAgentEndpoint(endpoint, message);
-      log.info(
-        `A2A routed via HTTP wake-up: ${message.from} → ${targetAgentId} (${message.type})`,
-      );
-      return;
-    }
-
-    // Local-mode transport: canonical task messages are delivered over KV Queue
-    // when no WebSocket tunnel is active for the target agent.
-    const kv = await this.getKv();
-    await kv.enqueue(message);
-    log.info(
-      `A2A routed via KV Queue: ${message.from} → ${targetAgentId} (${message.type})`,
-    );
-  }
-
-  private async postMessageToAgentEndpoint(
-    endpoint: string,
-    message: Extract<BrokerMessage, { type: "task_submit" | "task_continue" }>,
-  ): Promise<void> {
-    const token = Deno.env.get("DENOCLAW_API_TOKEN");
-    const res = await fetch(new URL("/tasks", endpoint), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(message),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new ConfigError(
-        "AGENT_ENDPOINT_DELIVERY_FAILED",
-        {
-          endpoint,
-          status: res.status,
-          body: body.slice(0, 300),
-          targetAgent: message.to,
-        },
-        "Check agent deployment health and broker registration",
-      );
-    }
   }
 
   // ── Federation control-plane ───────────────────────────
@@ -661,10 +555,6 @@ export class BrokerServer {
     return this.tunnelRegistry.findReplySocket(agentId);
   }
 
-  private findTunnelByAgentId(agentId: string): WebSocket | null {
-    return this.tunnelRegistry.findReplySocket(agentId);
-  }
-
   private async sendStructuredError(
     to: string,
     requestId: string,
@@ -675,8 +565,11 @@ export class BrokerServer {
 
   async stop(): Promise<void> {
     if (this.httpServer) await this.httpServer.shutdown();
-    this.connectedAgents.closeAll(1001, "Broker shutting down", (agentId, e) =>
-      log.warn(`Failed to close agent socket ${agentId} cleanly`, e)
+    this.connectedAgents.closeAll(
+      1001,
+      "Broker shutting down",
+      (agentId, e) =>
+        log.warn(`Failed to close agent socket ${agentId} cleanly`, e),
     );
     for (const [tunnelId, t] of this.tunnelRegistry.entries()) {
       try {

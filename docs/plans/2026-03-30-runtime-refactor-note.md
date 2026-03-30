@@ -342,9 +342,16 @@ After landing the refactor into the local checkpoint branch:
   - `src/cli/publish_kv.ts`: 93 lines
   - `src/cli/setup/broker_deploy.ts`: 320 lines
   - `src/cli/setup/broker_deploy_naming.ts`: 52 lines
+  - `src/orchestration/federation/adapters/kv_adapter.ts`: 382 lines
+  - `src/orchestration/federation/adapters/kv_adapter_stats.ts`: 564 lines
+  - `src/orchestration/federation/adapters/kv_adapter_keys.ts`: 79 lines
   - `src/telemetry/metrics.ts`: 269 lines
   - `src/telemetry/metrics_queries.ts`: 335 lines
   - `src/telemetry/metrics_types.ts`: 58 lines
+  - `src/telemetry/traces.ts`: 18 lines
+  - `src/telemetry/trace_writer.ts`: 171 lines
+  - `src/telemetry/trace_reader.ts`: 38 lines
+  - `src/telemetry/trace_types.ts`: 59 lines
   - `src/agent/tools/backends/local.ts`: 60 lines
   - `src/agent/tools/backends/local_exec_policy.ts`: 149 lines
   - `src/agent/tools/backends/local_process_runner.ts`: 128 lines
@@ -485,6 +492,9 @@ polish and should be treated as a separate track.
   message dispatch ergonomics only
 - if desired, continue shrinking `src/orchestration/federation/service.ts`
   around link/control-plane wrappers only
+- if desired, continue shrinking
+  `src/orchestration/federation/adapters/kv_adapter_stats.ts` around aggregate
+  scanning and persistence helpers only
 - if desired, continue shrinking `src/agent/worker_entrypoint.ts` around
   worker init/shutdown state only
 - if desired, continue shrinking `src/agent/worker_pool.ts` around

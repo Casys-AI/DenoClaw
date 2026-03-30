@@ -4,10 +4,8 @@ import type {
   FederatedSubmissionRecord,
   FederationBrokerCorrelationContext,
   FederationCorrelationContext,
-  FederationDenialBreakdown,
   FederationDeadLetter,
   FederationLink,
-  FederationLinkStats,
   FederationLinkCorrelationContext,
   FederationLinkState,
   FederationSessionToken,
@@ -18,29 +16,27 @@ import type {
 import type {
   CrossBrokerHopEvent,
   EstablishFederationLinkInput,
-  FederationEvent,
   FederationControlPort,
   FederationDeliveryPort,
   FederationDenialEvent,
   FederationDiscoveryPort,
+  FederationEvent,
   FederationIdentityPort,
   FederationMetricsPort,
   FederationObservabilityPort,
   FederationPolicyPort,
 } from "../ports.ts";
-
-const MAX_KV_UPDATE_RETRIES = 8;
-
-interface FederationStatsSummaryAggregate {
-  successCount: number;
-  errorCount: number;
-  denials: FederationDenialBreakdown;
-  deadLetterBacklog: number;
-}
-
-interface FederationLinkStatsAggregate extends FederationLinkStats {
-  latencySamples: number[];
-}
+import {
+  federationCatalogKey,
+  federationIdentityKey,
+  federationIdentityPrefix,
+  federationLinkKey,
+  federationLinksPrefix,
+  federationPolicyKey,
+  federationSessionKey,
+  federationSubmissionKey,
+} from "./kv_adapter_keys.ts";
+import { KvFederationStatsStore } from "./kv_adapter_stats.ts";
 
 export class KvFederationAdapter
   implements
@@ -55,8 +51,11 @@ export class KvFederationAdapter
     string,
     (event: FederationEvent) => void
   >();
+  private readonly statsStore: KvFederationStatsStore;
 
-  constructor(private readonly kv: Deno.Kv) {}
+  constructor(private readonly kv: Deno.Kv) {
+    this.statsStore = new KvFederationStatsStore(kv);
+  }
 
   async establishLink(
     input: EstablishFederationLinkInput,
@@ -68,8 +67,8 @@ export class KvFederationAdapter
       state: "active",
       lastHeartbeatAt: new Date().toISOString(),
     };
-    await this.kv.set(["federation", "links", link.linkId], link);
-    await this.ensureLinkStatsAggregate(link);
+    await this.kv.set(federationLinkKey(link.linkId), link);
+    await this.statsStore.ensureLinkStatsAggregate(link);
     return link;
   }
 
@@ -89,14 +88,14 @@ export class KvFederationAdapter
     linkId: string,
     _correlation: FederationLinkCorrelationContext,
   ): Promise<void> {
-    await this.kv.delete(["federation", "links", linkId]);
+    await this.kv.delete(federationLinkKey(linkId));
   }
 
   async listLinks(): Promise<FederationLink[]> {
     const links: FederationLink[] = [];
     for await (
       const entry of this.kv.list<FederationLink>({
-        prefix: ["federation", "links"],
+        prefix: federationLinksPrefix(),
       })
     ) {
       if (entry.value) links.push(entry.value);
@@ -113,11 +112,7 @@ export class KvFederationAdapter
       throw new Error("ttlSeconds must be a positive number");
     }
 
-    const link = await this.kv.get<FederationLink>([
-      "federation",
-      "links",
-      linkId,
-    ]);
+    const link = await this.kv.get<FederationLink>(federationLinkKey(linkId));
     if (!link.value) {
       throw new Error(`Federation link not found: ${linkId}`);
     }
@@ -134,7 +129,7 @@ export class KvFederationAdapter
     };
 
     await this.kv.set(
-      ["federation", "sessions", linkId, session.sessionId],
+      federationSessionKey(linkId, session.sessionId),
       session,
     );
     return session;
@@ -144,11 +139,11 @@ export class KvFederationAdapter
     remoteBrokerId: string,
     _correlation: FederationBrokerCorrelationContext,
   ): Promise<BrokerIdentity> {
-    const identity = {
+    const identity: BrokerIdentity = {
       brokerId: remoteBrokerId,
       instanceUrl: "",
       publicKeys: [],
-      status: "pending" as const,
+      status: "pending",
     };
     await this.upsertIdentity(identity);
     return identity;
@@ -158,11 +153,9 @@ export class KvFederationAdapter
     remoteBrokerId: string,
     _correlation: FederationBrokerCorrelationContext,
   ): Promise<RemoteAgentCatalogEntry[]> {
-    const entry = await this.kv.get<RemoteAgentCatalogEntry[]>([
-      "federation",
-      "catalog",
-      remoteBrokerId,
-    ]);
+    const entry = await this.kv.get<RemoteAgentCatalogEntry[]>(
+      federationCatalogKey(remoteBrokerId),
+    );
     return entry.value ?? [];
   }
 
@@ -180,25 +173,23 @@ export class KvFederationAdapter
     entries: RemoteAgentCatalogEntry[],
     _correlation: FederationBrokerCorrelationContext,
   ): Promise<void> {
-    await this.kv.set(["federation", "catalog", remoteBrokerId], entries);
+    await this.kv.set(federationCatalogKey(remoteBrokerId), entries);
   }
 
   async upsertIdentity(
     identity: BrokerIdentity,
     _correlation?: FederationTraceContext,
   ): Promise<void> {
-    await this.kv.set(["federation", "identity", identity.brokerId], identity);
+    await this.kv.set(federationIdentityKey(identity.brokerId), identity);
   }
 
   async getIdentity(
     brokerId: string,
     _correlation?: FederationTraceContext,
   ): Promise<BrokerIdentity | null> {
-    const entry = await this.kv.get<BrokerIdentity>([
-      "federation",
-      "identity",
-      brokerId,
-    ]);
+    const entry = await this.kv.get<BrokerIdentity>(
+      federationIdentityKey(brokerId),
+    );
     return entry.value ?? null;
   }
 
@@ -208,7 +199,7 @@ export class KvFederationAdapter
     const identities: BrokerIdentity[] = [];
     for await (
       const entry of this.kv.list<BrokerIdentity>({
-        prefix: ["federation", "identity"],
+        prefix: federationIdentityPrefix(),
       })
     ) {
       if (entry.value) identities.push(entry.value);
@@ -259,18 +250,16 @@ export class KvFederationAdapter
     policy: FederatedRoutePolicy,
     _correlation: FederationBrokerCorrelationContext,
   ): Promise<void> {
-    await this.kv.set(["federation", "policies", brokerId], policy);
+    await this.kv.set(federationPolicyKey(brokerId), policy);
   }
 
   async getRoutePolicy(
     brokerId: string,
     _correlation: FederationBrokerCorrelationContext,
   ): Promise<FederatedRoutePolicy | null> {
-    const entry = await this.kv.get<FederatedRoutePolicy>([
-      "federation",
-      "policies",
-      brokerId,
-    ]);
+    const entry = await this.kv.get<FederatedRoutePolicy>(
+      federationPolicyKey(brokerId),
+    );
     return entry.value ?? null;
   }
 
@@ -279,10 +268,9 @@ export class KvFederationAdapter
     state: FederationLinkState,
     _correlation: FederationLinkCorrelationContext,
   ): Promise<void> {
-    const key: Deno.KvKey = ["federation", "links", linkId];
-    const entry = await this.kv.get<FederationLink>(key);
+    const entry = await this.kv.get<FederationLink>(federationLinkKey(linkId));
     if (!entry.value) return;
-    await this.kv.set(key, {
+    await this.kv.set(federationLinkKey(linkId), {
       ...entry.value,
       state,
       lastHeartbeatAt: new Date().toISOString(),
@@ -290,11 +278,8 @@ export class KvFederationAdapter
   }
 
   async recordCrossBrokerHop(event: CrossBrokerHopEvent): Promise<void> {
-    await this.persistHopEvent(event);
-
-    for (const subscriber of this.federationEventSubscribers.values()) {
-      subscriber(event);
-    }
+    await this.statsStore.recordCrossBrokerHop(event);
+    this.emitFederationEvent(event);
   }
 
   streamFederationEvents(
@@ -308,22 +293,15 @@ export class KvFederationAdapter
   }
 
   async recordFederationDenial(event: FederationDenialEvent): Promise<void> {
-    await this.persistDenialEvent(event);
-
-    for (const subscriber of this.federationEventSubscribers.values()) {
-      subscriber(event);
-    }
+    await this.statsStore.recordFederationDenial(event);
+    this.emitFederationEvent(event);
   }
 
   async createSubmissionRecord(
     record: FederatedSubmissionRecord,
     _correlation: FederationCorrelationContext,
   ): Promise<boolean> {
-    const key: Deno.KvKey = [
-      "federation",
-      "submissions",
-      record.idempotencyKey,
-    ];
+    const key = federationSubmissionKey(record.idempotencyKey);
     const result = await this.kv
       .atomic()
       .check({ key, versionstamp: null })
@@ -336,11 +314,9 @@ export class KvFederationAdapter
     idempotencyKey: string,
     _correlation: FederationCorrelationContext,
   ): Promise<FederatedSubmissionRecord | null> {
-    const entry = await this.kv.get<FederatedSubmissionRecord>([
-      "federation",
-      "submissions",
-      idempotencyKey,
-    ]);
+    const entry = await this.kv.get<FederatedSubmissionRecord>(
+      federationSubmissionKey(idempotencyKey),
+    );
     return entry.value ?? null;
   }
 
@@ -348,565 +324,59 @@ export class KvFederationAdapter
     record: FederatedSubmissionRecord,
     _correlation: FederationCorrelationContext,
   ): Promise<void> {
-    await this.kv.set(
-      ["federation", "submissions", record.idempotencyKey],
-      record,
-    );
+    await this.kv.set(federationSubmissionKey(record.idempotencyKey), record);
   }
 
   async moveToDeadLetter(
     entry: FederationDeadLetter,
     _correlation: FederationCorrelationContext,
   ): Promise<void> {
-    const key: Deno.KvKey = [
-      "federation",
-      "dead-letter",
-      entry.remoteBrokerId,
-      entry.deadLetterId,
-    ];
-    await this.persistDeadLetterEntry(key, entry);
+    await this.statsStore.moveToDeadLetter(entry);
   }
 
   async deleteSubmissionRecord(
     idempotencyKey: string,
     _correlation: FederationCorrelationContext,
   ): Promise<void> {
-    await this.kv.delete([
-      "federation",
-      "submissions",
-      idempotencyKey,
-    ]);
+    await this.kv.delete(federationSubmissionKey(idempotencyKey));
   }
 
   async getDeadLetter(
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<FederationDeadLetter | null> {
-    const entry = await this.kv.get<FederationDeadLetter>([
-      "federation",
-      "dead-letter",
-      remoteBrokerId,
-      deadLetterId,
-    ]);
-    return entry.value ?? null;
+    return await this.statsStore.getDeadLetter(remoteBrokerId, deadLetterId);
   }
 
   async claimDeadLetter(
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<FederationDeadLetter | null> {
-    const key: Deno.KvKey = [
-      "federation",
-      "dead-letter",
-      remoteBrokerId,
-      deadLetterId,
-    ];
-    const globalSummaryKey = this.summaryKey();
-    const remoteSummaryKey = this.summaryKey(remoteBrokerId);
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
-        await Promise.all([
-          this.kv.get<FederationDeadLetter>(key),
-          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
-          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
-        ]);
-      if (!deadLetterEntry.value) return null;
-      const nextGlobal = this.decrementDeadLetterBacklog(
-        globalSummaryEntry.value,
-      );
-      const nextRemote = this.decrementDeadLetterBacklog(
-        remoteSummaryEntry.value,
-      );
-      const committed = await this.kv
-        .atomic()
-        .check({ key, versionstamp: deadLetterEntry.versionstamp })
-        .check({
-          key: globalSummaryKey,
-          versionstamp: globalSummaryEntry.versionstamp,
-        })
-        .check({
-          key: remoteSummaryKey,
-          versionstamp: remoteSummaryEntry.versionstamp,
-        })
-        .delete(key)
-        .set(globalSummaryKey, nextGlobal)
-        .set(remoteSummaryKey, nextRemote)
-        .commit();
-      if (committed.ok) return deadLetterEntry.value;
-    }
-    throw new Error("Failed to claim federation dead-letter aggregate");
+    return await this.statsStore.claimDeadLetter(remoteBrokerId, deadLetterId);
   }
 
   async deleteDeadLetter(
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<void> {
-    await this.claimDeadLetter(remoteBrokerId, deadLetterId);
+    await this.statsStore.claimDeadLetter(remoteBrokerId, deadLetterId);
   }
 
-  async listDeadLetters(remoteBrokerId?: string): Promise<FederationDeadLetter[]> {
-    const prefix: Deno.KvKey = remoteBrokerId
-      ? ["federation", "dead-letter", remoteBrokerId]
-      : ["federation", "dead-letter"];
-    const entries: FederationDeadLetter[] = [];
-    for await (const entry of this.kv.list<FederationDeadLetter>({ prefix })) {
-      if (entry.value) entries.push(entry.value);
-    }
-    return entries;
-  }
-
-  async getFederationStats(remoteBrokerId?: string): Promise<FederationStatsSnapshot> {
-    const aggregated = await this.readAggregatedFederationStats(remoteBrokerId);
-    if (aggregated) return aggregated;
-    return await this.scanFederationStats(remoteBrokerId);
-  }
-
-  private emptyDenials(): FederationDenialBreakdown {
-    return {
-      policy: 0,
-      auth: 0,
-      notFound: 0,
-    };
-  }
-
-  private emptySummaryAggregate(): FederationStatsSummaryAggregate {
-    return {
-      successCount: 0,
-      errorCount: 0,
-      denials: this.emptyDenials(),
-      deadLetterBacklog: 0,
-    };
-  }
-
-  private emptyLinkAggregate(
-    remoteBrokerId: string,
-    linkId: string,
-  ): FederationLinkStatsAggregate {
-    return {
-      linkId,
-      remoteBrokerId,
-      successCount: 0,
-      errorCount: 0,
-      denials: this.emptyDenials(),
-      p50LatencyMs: 0,
-      p95LatencyMs: 0,
-      latencySamples: [],
-    };
-  }
-
-  private incrementDenials(
-    denials: FederationDenialBreakdown,
-    kind: FederationDenialEvent["kind"],
-  ): FederationDenialBreakdown {
-    switch (kind) {
-      case "policy":
-        return { ...denials, policy: denials.policy + 1 };
-      case "auth":
-        return { ...denials, auth: denials.auth + 1 };
-      case "not_found":
-        return { ...denials, notFound: denials.notFound + 1 };
-    }
-  }
-
-  private incrementDeadLetterBacklog(
-    summary: FederationStatsSummaryAggregate | null | undefined,
-  ): FederationStatsSummaryAggregate {
-    const current = summary ?? this.emptySummaryAggregate();
-    return {
-      ...current,
-      deadLetterBacklog: current.deadLetterBacklog + 1,
-    };
-  }
-
-  private decrementDeadLetterBacklog(
-    summary: FederationStatsSummaryAggregate | null | undefined,
-  ): FederationStatsSummaryAggregate {
-    const current = summary ?? this.emptySummaryAggregate();
-    return {
-      ...current,
-      deadLetterBacklog: Math.max(0, current.deadLetterBacklog - 1),
-    };
-  }
-
-  private summaryKey(remoteBrokerId?: string): Deno.KvKey {
-    return remoteBrokerId
-      ? ["federation", "stats", "summary", remoteBrokerId]
-      : ["federation", "stats", "summary"];
-  }
-
-  private linkKey(remoteBrokerId: string, linkId: string): Deno.KvKey {
-    return ["federation", "stats", "links", remoteBrokerId, linkId];
-  }
-
-  private linkPrefix(remoteBrokerId?: string): Deno.KvKey {
-    return remoteBrokerId
-      ? ["federation", "stats", "links", remoteBrokerId]
-      : ["federation", "stats", "links"];
-  }
-
-  private async ensureLinkStatsAggregate(link: FederationLink): Promise<void> {
-    await this.updateSummaryAggregate(undefined, (summary) => summary);
-    await this.updateSummaryAggregate(link.remoteBrokerId, (summary) => summary);
-    await this.updateLinkAggregate(link.remoteBrokerId, link.linkId, (current) => ({
-      ...current,
-      lastOccurredAt: current.lastOccurredAt ?? link.lastHeartbeatAt,
-    }));
-  }
-
-  private async updateSummaryAggregate(
-    remoteBrokerId: string | undefined,
-    update: (
-      current: FederationStatsSummaryAggregate,
-    ) => FederationStatsSummaryAggregate,
-  ): Promise<void> {
-    const key = this.summaryKey(remoteBrokerId);
-    await this.updateKvValue(
-      key,
-      () => this.emptySummaryAggregate(),
-      update,
-    );
-  }
-
-  private async updateLinkAggregate(
-    remoteBrokerId: string,
-    linkId: string,
-    update: (
-      current: FederationLinkStatsAggregate,
-    ) => FederationLinkStatsAggregate,
-  ): Promise<void> {
-    const key = this.linkKey(remoteBrokerId, linkId);
-    await this.updateKvValue(
-      key,
-      () => this.emptyLinkAggregate(remoteBrokerId, linkId),
-      update,
-    );
-  }
-
-  private async updateKvValue<T>(
-    key: Deno.KvKey,
-    createEmpty: () => T,
-    update: (current: T) => T,
-  ): Promise<void> {
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const entry = await this.kv.get<T>(key);
-      const current = entry.value ?? createEmpty();
-      const next = update(current);
-      const committed = await this.kv
-        .atomic()
-        .check({ key, versionstamp: entry.versionstamp })
-        .set(key, next)
-        .commit();
-      if (committed.ok) return;
-    }
-    throw new Error(`Failed to update federation aggregate at ${key.join(":")}`);
-  }
-
-  private async persistHopEvent(event: CrossBrokerHopEvent): Promise<void> {
-    const eventKey: Deno.KvKey = [
-      "federation",
-      "events",
-      event.taskId,
-      crypto.randomUUID(),
-    ];
-    const globalSummaryKey = this.summaryKey();
-    const remoteSummaryKey = this.summaryKey(event.remoteBrokerId);
-    const linkAggregateKey = this.linkKey(event.remoteBrokerId, event.linkId);
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const [eventEntry, globalSummaryEntry, remoteSummaryEntry, linkEntry] =
-        await Promise.all([
-          this.kv.get<CrossBrokerHopEvent>(eventKey),
-          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
-          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
-          this.kv.get<FederationLinkStatsAggregate>(linkAggregateKey),
-        ]);
-      const latencySamples = [
-        ...(linkEntry.value?.latencySamples ?? []),
-        event.latencyMs,
-      ];
-      const nextLink: FederationLinkStatsAggregate = {
-        ...(linkEntry.value ??
-          this.emptyLinkAggregate(event.remoteBrokerId, event.linkId)),
-        successCount:
-          (linkEntry.value?.successCount ?? 0) + (event.success ? 1 : 0),
-        errorCount: (linkEntry.value?.errorCount ?? 0) +
-          (!event.success && event.errorKind !== "auth" ? 1 : 0),
-        p50LatencyMs: this.percentile(latencySamples, 50),
-        p95LatencyMs: this.percentile(latencySamples, 95),
-        lastTaskId: event.taskId,
-        lastTraceId: event.traceId,
-        lastOccurredAt: event.occurredAt,
-        latencySamples,
-      };
-      const nextGlobal: FederationStatsSummaryAggregate = {
-        ...(globalSummaryEntry.value ?? this.emptySummaryAggregate()),
-        successCount: (globalSummaryEntry.value?.successCount ?? 0) +
-          (event.success ? 1 : 0),
-        errorCount: (globalSummaryEntry.value?.errorCount ?? 0) +
-          (!event.success && event.errorKind !== "auth" ? 1 : 0),
-      };
-      const nextRemote: FederationStatsSummaryAggregate = {
-        ...(remoteSummaryEntry.value ?? this.emptySummaryAggregate()),
-        successCount: (remoteSummaryEntry.value?.successCount ?? 0) +
-          (event.success ? 1 : 0),
-        errorCount: (remoteSummaryEntry.value?.errorCount ?? 0) +
-          (!event.success && event.errorKind !== "auth" ? 1 : 0),
-      };
-      const committed = await this.kv
-        .atomic()
-        .check({ key: eventKey, versionstamp: eventEntry.versionstamp })
-        .check({
-          key: globalSummaryKey,
-          versionstamp: globalSummaryEntry.versionstamp,
-        })
-        .check({
-          key: remoteSummaryKey,
-          versionstamp: remoteSummaryEntry.versionstamp,
-        })
-        .check({
-          key: linkAggregateKey,
-          versionstamp: linkEntry.versionstamp,
-        })
-        .set(eventKey, event)
-        .set(globalSummaryKey, nextGlobal)
-        .set(remoteSummaryKey, nextRemote)
-        .set(linkAggregateKey, nextLink)
-        .commit();
-      if (committed.ok) return;
-    }
-    throw new Error("Failed to persist federation hop aggregate");
-  }
-
-  private async persistDenialEvent(event: FederationDenialEvent): Promise<void> {
-    const eventKey: Deno.KvKey = [
-      "federation",
-      "denials",
-      event.remoteBrokerId,
-      crypto.randomUUID(),
-    ];
-    const globalSummaryKey = this.summaryKey();
-    const remoteSummaryKey = this.summaryKey(event.remoteBrokerId);
-    const linkAggregateKey = this.linkKey(event.remoteBrokerId, event.linkId);
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const [eventEntry, globalSummaryEntry, remoteSummaryEntry, linkEntry] =
-        await Promise.all([
-          this.kv.get<FederationDenialEvent>(eventKey),
-          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
-          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
-          this.kv.get<FederationLinkStatsAggregate>(linkAggregateKey),
-        ]);
-      const nextLink: FederationLinkStatsAggregate = {
-        ...(linkEntry.value ??
-          this.emptyLinkAggregate(event.remoteBrokerId, event.linkId)),
-        denials: this.incrementDenials(
-          linkEntry.value?.denials ?? this.emptyDenials(),
-          event.kind,
-        ),
-        lastTaskId: event.taskId,
-        lastTraceId: event.traceId,
-        lastOccurredAt: event.occurredAt,
-      };
-      const nextGlobal: FederationStatsSummaryAggregate = {
-        ...(globalSummaryEntry.value ?? this.emptySummaryAggregate()),
-        denials: this.incrementDenials(
-          globalSummaryEntry.value?.denials ?? this.emptyDenials(),
-          event.kind,
-        ),
-      };
-      const nextRemote: FederationStatsSummaryAggregate = {
-        ...(remoteSummaryEntry.value ?? this.emptySummaryAggregate()),
-        denials: this.incrementDenials(
-          remoteSummaryEntry.value?.denials ?? this.emptyDenials(),
-          event.kind,
-        ),
-      };
-      const committed = await this.kv
-        .atomic()
-        .check({ key: eventKey, versionstamp: eventEntry.versionstamp })
-        .check({
-          key: globalSummaryKey,
-          versionstamp: globalSummaryEntry.versionstamp,
-        })
-        .check({
-          key: remoteSummaryKey,
-          versionstamp: remoteSummaryEntry.versionstamp,
-        })
-        .check({
-          key: linkAggregateKey,
-          versionstamp: linkEntry.versionstamp,
-        })
-        .set(eventKey, event)
-        .set(globalSummaryKey, nextGlobal)
-        .set(remoteSummaryKey, nextRemote)
-        .set(linkAggregateKey, nextLink)
-        .commit();
-      if (committed.ok) return;
-    }
-    throw new Error("Failed to persist federation denial aggregate");
-  }
-
-  private async persistDeadLetterEntry(
-    key: Deno.KvKey,
-    entry: FederationDeadLetter,
-  ): Promise<void> {
-    const globalSummaryKey = this.summaryKey();
-    const remoteSummaryKey = this.summaryKey(entry.remoteBrokerId);
-    for (let attempt = 0; attempt < MAX_KV_UPDATE_RETRIES; attempt++) {
-      const [deadLetterEntry, globalSummaryEntry, remoteSummaryEntry] =
-        await Promise.all([
-          this.kv.get<FederationDeadLetter>(key),
-          this.kv.get<FederationStatsSummaryAggregate>(globalSummaryKey),
-          this.kv.get<FederationStatsSummaryAggregate>(remoteSummaryKey),
-        ]);
-      if (deadLetterEntry.value) return;
-      const nextGlobal = this.incrementDeadLetterBacklog(
-        globalSummaryEntry.value,
-      );
-      const nextRemote = this.incrementDeadLetterBacklog(
-        remoteSummaryEntry.value,
-      );
-      const committed = await this.kv
-        .atomic()
-        .check({ key, versionstamp: deadLetterEntry.versionstamp })
-        .check({
-          key: globalSummaryKey,
-          versionstamp: globalSummaryEntry.versionstamp,
-        })
-        .check({
-          key: remoteSummaryKey,
-          versionstamp: remoteSummaryEntry.versionstamp,
-        })
-        .set(key, entry)
-        .set(globalSummaryKey, nextGlobal)
-        .set(remoteSummaryKey, nextRemote)
-        .commit();
-      if (committed.ok) return;
-    }
-    throw new Error("Failed to persist federation dead-letter aggregate");
-  }
-
-  private async readAggregatedFederationStats(
+  async listDeadLetters(
     remoteBrokerId?: string,
-  ): Promise<FederationStatsSnapshot | null> {
-    const summaryEntry = await this.kv.get<FederationStatsSummaryAggregate>(
-      this.summaryKey(remoteBrokerId),
-    );
-    const links: FederationLinkStats[] = [];
-    for await (
-      const entry of this.kv.list<FederationLinkStatsAggregate>({
-        prefix: this.linkPrefix(remoteBrokerId),
-      })
-    ) {
-      if (!entry.value) continue;
-      const { latencySamples: _latencySamples, ...link } = entry.value;
-      links.push(link);
-    }
-    if (!summaryEntry.value && links.length === 0) {
-      return null;
-    }
-    const summary = summaryEntry.value ?? this.emptySummaryAggregate();
-    return {
-      links,
-      successCount: summary.successCount,
-      errorCount: summary.errorCount,
-      denials: summary.denials,
-      deadLetterBacklog: summary.deadLetterBacklog,
-    };
+  ): Promise<FederationDeadLetter[]> {
+    return await this.statsStore.listDeadLetters(remoteBrokerId);
   }
 
-  private async scanFederationStats(
+  async getFederationStats(
     remoteBrokerId?: string,
   ): Promise<FederationStatsSnapshot> {
-    const eventPrefix: Deno.KvKey = ["federation", "events"];
-    const denialPrefix: Deno.KvKey = ["federation", "denials"];
-    const byLink = new Map<string, FederationLinkStatsAggregate>();
-    let successCount = 0;
-    let errorCount = 0;
-    const denials = this.emptyDenials();
-
-    for await (
-      const entry of this.kv.list<CrossBrokerHopEvent>({
-        prefix: eventPrefix,
-      })
-    ) {
-      const event = entry.value;
-      if (!event) continue;
-      if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
-
-      const existing = byLink.get(event.linkId) ??
-        this.emptyLinkAggregate(event.remoteBrokerId, event.linkId);
-      const latencySamples = [...existing.latencySamples, event.latencyMs];
-      const link: FederationLinkStatsAggregate = {
-        ...existing,
-        successCount: existing.successCount + (event.success ? 1 : 0),
-        errorCount: existing.errorCount +
-          (!event.success && event.errorKind !== "auth" ? 1 : 0),
-        p50LatencyMs: this.percentile(latencySamples, 50),
-        p95LatencyMs: this.percentile(latencySamples, 95),
-        latencySamples,
-        lastTaskId: event.taskId,
-        lastTraceId: event.traceId,
-        lastOccurredAt: event.occurredAt,
-      };
-      if (event.success) {
-        successCount += 1;
-      } else if (event.errorKind !== "auth") {
-        errorCount += 1;
-      }
-      byLink.set(event.linkId, link);
-    }
-
-    for await (
-      const entry of this.kv.list<FederationDenialEvent>({
-        prefix: denialPrefix,
-      })
-    ) {
-      const event = entry.value;
-      if (!event) continue;
-      if (remoteBrokerId && event.remoteBrokerId !== remoteBrokerId) continue;
-
-      const existing = byLink.get(event.linkId) ??
-        this.emptyLinkAggregate(event.remoteBrokerId, event.linkId);
-      const link: FederationLinkStatsAggregate = {
-        ...existing,
-        denials: this.incrementDenials(existing.denials, event.kind),
-        lastTaskId: event.taskId,
-        lastTraceId: event.traceId,
-        lastOccurredAt: event.occurredAt,
-      };
-      byLink.set(event.linkId, link);
-      switch (event.kind) {
-        case "policy":
-          denials.policy += 1;
-          break;
-        case "auth":
-          denials.auth += 1;
-          break;
-        case "not_found":
-          denials.notFound += 1;
-          break;
-      }
-    }
-
-    const deadLetters = await this.listDeadLetters(remoteBrokerId);
-    const links = [...byLink.values()].map((entry) => {
-      const { latencySamples: _latencySamples, ...link } = entry;
-      return link;
-    });
-
-    return {
-      links,
-      successCount,
-      errorCount,
-      denials,
-      deadLetterBacklog: deadLetters.length,
-    };
+    return await this.statsStore.getFederationStats(remoteBrokerId);
   }
 
-  private percentile(values: number[], pct: number): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const rank = Math.ceil((pct / 100) * sorted.length) - 1;
-    const index = Math.min(Math.max(rank, 0), sorted.length - 1);
-    return sorted[index];
+  private emitFederationEvent(event: FederationEvent): void {
+    for (const subscriber of this.federationEventSubscribers.values()) {
+      subscriber(event);
+    }
   }
 }

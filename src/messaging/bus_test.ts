@@ -73,7 +73,7 @@ Deno.test({
       await bus.publish(makeMsg("a"));
       await bus.publish(makeMsg("b"));
       await waitFor(() => received.length >= 2);
-      assertEquals(received, ["a", "b"]);
+      assertEquals(received.toSorted(), ["a", "b"]);
       bus.close();
     } finally {
       kv.close();

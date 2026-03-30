@@ -258,7 +258,10 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/worker_entrypoint.ts`: 345 lines
   - `src/agent/worker_runtime_run.ts`: 93 lines
   - `src/agent/worker_runtime_peer_delivery.ts`: 111 lines
-  - `src/agent/worker_pool.ts`: 393 lines
+  - `src/agent/worker_pool.ts`: 221 lines
+  - `src/agent/worker_pool_lifecycle.ts`: 198 lines
+  - `src/agent/worker_pool_approval.ts`: 54 lines
+  - `src/agent/worker_pool_types.ts`: 39 lines
 
 ## Priority order
 
@@ -385,7 +388,8 @@ polish and should be treated as a separate track.
   around link/control-plane wrappers only
 - if desired, continue shrinking `src/agent/worker_entrypoint.ts` around
   worker init/shutdown state only
-- split `src/agent/worker_pool.ts`
+- if desired, continue shrinking `src/agent/worker_pool.ts` around
+  facade ergonomics only
 
 ### Priority C — stronger verification
 

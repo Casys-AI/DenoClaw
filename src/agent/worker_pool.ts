@@ -1,74 +1,54 @@
 import type { AgentResponse } from "./types.ts";
 import type {
-  WorkerAskApprovalMessage,
   WorkerConfig,
-  WorkerPeerSendMessage,
-  WorkerRequest,
   WorkerResponse,
   WorkerRunRequest,
 } from "./worker_protocol.ts";
 import { log } from "../shared/log.ts";
-import {
-  generateId,
-  getAgentMemoryPath,
-  getAgentRuntimeDir,
-} from "../shared/helpers.ts";
-import { ensureDir } from "../shared/helpers.ts";
+import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import type { AgentEntry } from "../shared/types.ts";
-import type { ApprovalReason } from "./sandbox_types.ts";
 import { WorkerPoolObservability } from "./worker_pool_observability.ts";
 import { WorkerPoolRequestTracker } from "./worker_pool_request_tracker.ts";
 import { WorkerPoolPeerRouter } from "./worker_pool_peer_router.ts";
-
-interface AgentWorker {
-  worker: Worker;
-  agentId: string;
-  ready: boolean;
-}
-
-export interface WorkerPoolCallbacks {
-  onWorkerReady?: (agentId: string) => void;
-  onWorkerStopped?: (agentId: string) => void;
-  onAgentMessage?: (
-    fromAgent: string,
-    toAgent: string,
-    message: string,
-  ) => void;
-  onAskApproval?: (
-    agentId: string,
-    requestId: string,
-    command: string,
-    binary: string,
-    reason: ApprovalReason,
-  ) => Promise<{ approved: boolean; allowAlways?: boolean }>;
-}
+import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
+import { WorkerPoolApprovalBridge } from "./worker_pool_approval.ts";
+import type { WorkerPeerSendMessage } from "./worker_protocol.ts";
+import type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
+export type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const INIT_TIMEOUT_MS = 30_000;
-const DATA_DIR = "./data";
 
 /**
  * WorkerPool — spawns and manages one Worker per agent.
  * Communication uses postMessage (typed WorkerRequest/WorkerResponse protocol).
  */
 export class WorkerPool {
-  private config: WorkerConfig;
-  private agents: Map<string, AgentWorker> = new Map();
-  private entrypointUrl: string;
-  private callbacks: WorkerPoolCallbacks;
-  private observability = new WorkerPoolObservability();
-  private requestTracker = new WorkerPoolRequestTracker();
+  private readonly callbacks: WorkerPoolCallbacks;
+  private readonly observability = new WorkerPoolObservability();
+  private readonly requestTracker = new WorkerPoolRequestTracker();
+  private readonly lifecycle: WorkerPoolLifecycle;
+  private readonly approvalBridge: WorkerPoolApprovalBridge;
   private peerRouter: WorkerPoolPeerRouter;
 
-  constructor(config: WorkerConfig, callbacks?: WorkerPoolCallbacks) {
-    this.config = config;
+  constructor(
+    private readonly config: WorkerConfig,
+    callbacks?: WorkerPoolCallbacks,
+  ) {
     this.callbacks = callbacks ?? {};
-    this.entrypointUrl =
-      new URL("./worker_entrypoint.ts", import.meta.url).href;
+    this.lifecycle = new WorkerPoolLifecycle({
+      config: this.config,
+      callbacks: this.callbacks,
+      entrypointUrl: new URL("./worker_entrypoint.ts", import.meta.url).href,
+      onWorkerMessage: (agentId, msg) => this.handleWorkerMessage(agentId, msg),
+    });
+    this.approvalBridge = new WorkerPoolApprovalBridge({
+      getAgent: (agentId) => this.lifecycle.getAgent(agentId),
+      onAskApproval: this.callbacks.onAskApproval,
+    });
     this.peerRouter = new WorkerPoolPeerRouter({
       config: this.config,
-      getAgent: (agentId) => this.agents.get(agentId),
+      getAgent: (agentId) => this.lifecycle.getAgent(agentId),
       onAgentMessage: this.callbacks.onAgentMessage,
     });
   }
@@ -85,90 +65,10 @@ export class WorkerPool {
       );
       return;
     }
-    await Deno.mkdir(DATA_DIR, { recursive: true });
-    // Ensure each agent's workspace dir exists (for memory.db)
-    await Promise.all(agentIds.map((id) => ensureDir(getAgentRuntimeDir(id))));
-
-    const readyPromises: Promise<void>[] = [];
-    for (const agentId of agentIds) {
-      readyPromises.push(this.spawnWorker(agentId));
-    }
-
-    await Promise.all(readyPromises);
-    log.info(`WorkerPool started — ${this.agents.size} agent(s)`);
-  }
-
-  private spawnWorker(agentId: string): Promise<void> {
-    const worker = new Worker(this.entrypointUrl, {
-      type: "module",
-      name: `agent-${agentId}`,
-    });
-
-    const entry: AgentWorker = { worker, agentId, ready: false };
-    this.agents.set(agentId, entry);
-
-    // Fix #1 + #5: use addEventListener (additive), reject on error, timeout on init
-    return new Promise<void>((resolve, reject) => {
-      const initTimer = setTimeout(() => {
-        worker.terminate();
-        this.agents.delete(agentId);
-        reject(
-          new AgentError(
-            "WORKER_INIT_TIMEOUT",
-            { agentId },
-            `Worker ${agentId} failed to start within ${INIT_TIMEOUT_MS}ms`,
-          ),
-        );
-      }, INIT_TIMEOUT_MS);
-
-      const onReady = (e: MessageEvent<WorkerResponse>) => {
-        if (e.data.type === "ready") {
-          clearTimeout(initTimer);
-          entry.ready = true;
-          worker.removeEventListener("message", onReady);
-          // Switch to normal handler for subsequent messages
-          worker.addEventListener(
-            "message",
-            (ev: MessageEvent<WorkerResponse>) => {
-              this.handleWorkerMessage(agentId, ev.data);
-            },
-          );
-          log.info(`Worker ${agentId} ready`);
-          this.callbacks.onWorkerReady?.(agentId);
-          resolve();
-        }
-      };
-
-      worker.addEventListener("message", onReady);
-
-      worker.onerror = (e: ErrorEvent) => {
-        clearTimeout(initTimer);
-        log.error(`Worker ${agentId} error: ${e.message}`);
-        e.preventDefault();
-        if (!entry.ready) {
-          worker.terminate();
-          this.agents.delete(agentId);
-          reject(
-            new AgentError(
-              "WORKER_INIT_FAILED",
-              { agentId, error: e.message },
-              "Check worker entrypoint for import errors",
-            ),
-          );
-        }
-      };
-
-      const initMsg: WorkerRequest = {
-        type: "init",
-        agentId,
-        config: this.config,
-        kvPaths: {
-          private: getAgentMemoryPath(agentId),
-          shared: `${DATA_DIR}/shared.db`,
-        },
-      };
-      worker.postMessage(initMsg);
-    });
+    await this.lifecycle.start(agentIds);
+    log.info(
+      `WorkerPool started — ${this.lifecycle.getAgentIds().length} agent(s)`,
+    );
   }
 
   private handleWorkerMessage(fromAgentId: string, msg: WorkerResponse): void {
@@ -217,7 +117,7 @@ export class WorkerPool {
       }
 
       case "ask_approval": {
-        this.handleAskApproval(fromAgentId, msg).catch((e) => {
+        this.approvalBridge.handleAskApproval(fromAgentId, msg).catch((e) => {
           log.error(
             `handleAskApproval failed for ${fromAgentId}: ${
               (e as Error).message
@@ -233,46 +133,6 @@ export class WorkerPool {
     }
   }
 
-  private async handleAskApproval(
-    agentId: string,
-    msg: WorkerAskApprovalMessage,
-  ): Promise<void> {
-    const entry = this.agents.get(agentId);
-    if (!entry) return;
-
-    let approved = false;
-    let allowAlways = false;
-
-    if (this.callbacks.onAskApproval) {
-      try {
-        const result = await this.callbacks.onAskApproval(
-          agentId,
-          msg.requestId,
-          msg.command,
-          msg.binary,
-          msg.reason,
-        );
-        approved = result.approved;
-        allowAlways = result.allowAlways ?? false;
-      } catch {
-        // Callback error = deny
-        log.debug(`Ask approval callback failed for ${agentId}, denying`);
-      }
-    } else {
-      log.warn(
-        `No onAskApproval callback — denying command '${msg.binary}' for agent ${agentId}`,
-      );
-    }
-
-    const response: WorkerRequest = {
-      type: "ask_response",
-      requestId: msg.requestId,
-      approved,
-      allowAlways,
-    };
-    entry.worker.postMessage(response);
-  }
-
   // Fix #4: check ready flag before sending
   send(
     agentId: string,
@@ -286,7 +146,7 @@ export class WorkerPool {
       traceId?: string;
     },
   ): Promise<AgentResponse> {
-    const entry = this.agents.get(agentId);
+    const entry = this.lifecycle.getAgent(agentId);
     if (!entry) {
       throw new AgentError("NO_WORKER", {
         agentId,
@@ -324,53 +184,21 @@ export class WorkerPool {
   }
 
   shutdown(): void {
-    // Terminate all workers directly
-    for (const [agentId, entry] of this.agents) {
-      try {
-        entry.worker.terminate();
-      } catch {
-        log.debug(`Worker ${agentId} already terminated`);
-      }
-      this.callbacks.onWorkerStopped?.(agentId);
-    }
+    this.lifecycle.shutdown();
     this.requestTracker.shutdown();
     this.peerRouter.shutdown();
-
-    this.agents.clear();
     log.info("WorkerPool stopped");
   }
 
   /** Add an agent dynamically (hot-add, no restart needed). */
   async addAgent(agentId: string, entry: AgentEntry): Promise<void> {
-    if (this.agents.has(agentId)) {
-      throw new AgentError(
-        "AGENT_EXISTS",
-        { agentId },
-        "Agent already running",
-      );
-    }
-    // Update config registry so the worker sees the agent config
-    if (!this.config.agents.registry) this.config.agents.registry = {};
-    this.config.agents.registry[agentId] = entry;
-
-    await Deno.mkdir(DATA_DIR, { recursive: true });
-    await ensureDir(getAgentRuntimeDir(agentId));
-    await this.spawnWorker(agentId);
+    await this.lifecycle.addAgent(agentId, entry);
     log.info(`Agent hot-added: ${agentId}`);
   }
 
   /** Remove an agent dynamically. */
   removeAgent(agentId: string): void {
-    const entry = this.agents.get(agentId);
-    if (!entry) return;
-    try {
-      entry.worker.terminate();
-    } catch { /* already dead */ }
-    this.agents.delete(agentId);
-    if (this.config.agents.registry) {
-      delete this.config.agents.registry[agentId];
-    }
-    this.callbacks.onWorkerStopped?.(agentId);
+    if (!this.lifecycle.removeAgent(agentId)) return;
     log.info(`Agent removed: ${agentId}`);
   }
 
@@ -384,10 +212,10 @@ export class WorkerPool {
   }
 
   getAgentIds(): string[] {
-    return [...this.agents.keys()];
+    return this.lifecycle.getAgentIds();
   }
 
   isReady(agentId: string): boolean {
-    return this.agents.get(agentId)?.ready ?? false;
+    return this.lifecycle.isReady(agentId);
   }
 }

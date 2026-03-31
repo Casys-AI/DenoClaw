@@ -3277,6 +3277,7 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const { messages: socketMessages, socket } = createSocketCollector();
     const broker = new BrokerServer(createConfig(), {
       kv,
       // deno-lint-ignore no-explicit-any
@@ -3287,11 +3288,7 @@ Deno.test(
     Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
 
     try {
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-beta",
-      );
+      registerConnectedAgentSocket(broker, "agent-beta", socket);
 
       const res = await (
         broker as unknown as {
@@ -3357,7 +3354,8 @@ Deno.test(
         },
       });
 
-      const forwarded = (await forwardedPromise) as Extract<
+      assertEquals(socketMessages.length, 1);
+      const forwarded = socketMessages[0] as Extract<
         BrokerMessage,
         { type: "task_submit" }
       >;
@@ -3400,6 +3398,8 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const alphaSocket = createSocketCollector();
+    const betaSocket = createSocketCollector();
     const broker = new BrokerServer(createConfig(), {
       kv,
       // deno-lint-ignore no-explicit-any
@@ -3410,7 +3410,8 @@ Deno.test(
     Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
 
     try {
-      const messages = createQueueCollector(kv);
+      registerConnectedAgentSocket(broker, "agent-alpha", alphaSocket.socket);
+      registerConnectedAgentSocket(broker, "agent-beta", betaSocket.socket);
       const res = await (
         broker as unknown as {
           handleHttpInner(req: Request): Promise<Response>;
@@ -3495,16 +3496,16 @@ Deno.test(
         ],
       });
 
-      const alphaForwarded = (await waitForCollectedMessage(
-        messages,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-alpha",
-      )) as Extract<BrokerMessage, { type: "task_submit" }>;
-      const betaForwarded = (await waitForCollectedMessage(
-        messages,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-beta",
-      )) as Extract<BrokerMessage, { type: "task_submit" }>;
+      assertEquals(alphaSocket.messages.length, 1);
+      assertEquals(betaSocket.messages.length, 1);
+      const alphaForwarded = alphaSocket.messages[0] as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
+      const betaForwarded = betaSocket.messages[0] as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
       assertEquals(
         alphaForwarded.payload.taskId,
         "channel-task-plan-broadcast-1:1:agent-alpha",
@@ -3538,6 +3539,8 @@ Deno.test(
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      attachConnectedAgentInbox(broker, "agent-alpha");
+      attachConnectedAgentInbox(broker, "agent-beta");
 
       const sharedTask = await broker.submitChannelMessage(
         {
@@ -3782,6 +3785,8 @@ Deno.test(
     Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
 
     try {
+      const alphaInbox = attachConnectedAgentInbox(broker, "agent-alpha");
+      attachConnectedAgentInbox(broker, "agent-beta");
       const sharedTask = await broker.submitChannelMessage(
         {
           id: "discord-msg-continue-1",
@@ -3830,14 +3835,6 @@ Deno.test(
         },
       });
 
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_continue" &&
-          message.to === "agent-alpha" &&
-          message.payload.taskId === agentTaskRefs[0].taskId,
-      );
-
       const res = await (
         broker as unknown as {
           handleHttpInner(req: Request): Promise<Response>;
@@ -3878,7 +3875,7 @@ Deno.test(
       assertEquals(body.task.id, "broadcast-continue-task-1");
       assertEquals(body.task.status.state, "INPUT_REQUIRED");
 
-      const forwarded = (await forwardedPromise) as Extract<
+      const forwarded = alphaInbox.at(-1) as Extract<
         BrokerMessage,
         { type: "task_continue" }
       >;

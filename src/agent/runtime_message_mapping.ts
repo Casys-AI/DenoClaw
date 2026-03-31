@@ -10,7 +10,10 @@ import type {
   PrivilegeElevationGrantResource,
   PrivilegeElevationScope,
 } from "../shared/privilege_elevation.ts";
-import { formatPrivilegeElevationPrompt } from "../shared/privilege_elevation.ts";
+import {
+  formatPrivilegeElevationPrompt,
+  pickBroadestPrivilegeElevationScope,
+} from "../shared/privilege_elevation.ts";
 
 export interface RuntimePrivilegeElevationPause {
   grants: PrivilegeElevationGrantResource[];
@@ -90,10 +93,19 @@ export function extractRuntimePrivilegeElevationPause(
     typeof context.privilegeElevationRequestTimeoutSec === "number"
       ? context.privilegeElevationRequestTimeoutSec
       : undefined;
+  const scope = pickBroadestPrivilegeElevationScope(
+    Array.isArray(context.privilegeElevationScopes)
+      ? context.privilegeElevationScopes.filter((
+        value,
+      ): value is PrivilegeElevationScope =>
+        value === "once" || value === "task" || value === "session"
+      )
+      : undefined,
+  );
 
   return {
     grants: suggestedGrants,
-    scope: "task",
+    scope,
     command,
     binary,
     expiresAt: requestTimeoutSec && requestTimeoutSec > 0
@@ -102,7 +114,7 @@ export function extractRuntimePrivilegeElevationPause(
     prompt: result.error.recovery ??
       formatPrivilegeElevationPrompt({
         grants: suggestedGrants,
-        scope: "task",
+        scope,
         tool: typeof context.tool === "string" ? context.tool : undefined,
         binary,
         command,

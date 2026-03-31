@@ -9,6 +9,7 @@ import {
   isPrivilegeElevationExpired,
   isPrivilegeElevationScopeWithin,
   matchesPrivilegeElevationGrantResource,
+  pickBroadestPrivilegeElevationScope,
   resolvePrivilegeElevationExpiry,
 } from "./privilege_elevation.ts";
 
@@ -135,6 +136,25 @@ Deno.test("formatPrivilegeElevationPrompt renders scope and requested resources"
       tool: "write_file",
     }),
     "Temporary privilege elevation required for write_file (this task): write paths=[note.txt]",
+  );
+});
+
+Deno.test("pickBroadestPrivilegeElevationScope prefers the widest supported scope", () => {
+  assertEquals(
+    pickBroadestPrivilegeElevationScope(["once", "task", "session"]),
+    "session",
+  );
+  assertEquals(
+    pickBroadestPrivilegeElevationScope(["once", "task"]),
+    "task",
+  );
+  assertEquals(
+    pickBroadestPrivilegeElevationScope(["once"]),
+    "once",
+  );
+  assertEquals(
+    pickBroadestPrivilegeElevationScope(undefined),
+    "task",
   );
 });
 

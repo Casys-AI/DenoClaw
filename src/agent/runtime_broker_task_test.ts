@@ -349,6 +349,7 @@ Deno.test("AgentRuntime turns broker privilege elevation requirements into canon
           command: "write_file",
           binary: "write_file",
           elevationAvailable: true,
+          privilegeElevationScopes: ["once", "task", "session"],
         },
         recovery: "Temporarily grant write access to continue",
       },
@@ -396,7 +397,7 @@ Deno.test("AgentRuntime turns broker privilege elevation requirements into canon
   assertEquals(awaitedInput?.grants, [
     { permission: "write", paths: ["note.txt"] },
   ]);
-  assertEquals(awaitedInput?.scope, "task");
+  assertEquals(awaitedInput?.scope, "session");
   assertEquals(
     awaitedInput?.prompt,
     "Temporarily grant write access to continue",

@@ -829,6 +829,114 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer inherits channel-backed privilege elevation availability for delegated child tasks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "" }),
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const parent = await broker.submitChannelMessage(
+        {
+          id: "telegram-parent-msg",
+          sessionId: "telegram-parent-session",
+          userId: "999",
+          content: "Ask alice to delegate",
+          channelType: "telegram",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+        {
+          targetAgent: "agent-alpha",
+          taskId: "parent-channel-task",
+        },
+      );
+
+      const child = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "child-delegated-task",
+        parentTaskId: parent.id,
+        taskMessage: createMessage("Write note.txt"),
+      });
+
+      const childBrokerMetadata = child.metadata?.broker as
+        | { parentTaskId?: string; channel?: unknown }
+        | undefined;
+      const parentBrokerMetadata = parent.metadata?.broker as
+        | { channel?: unknown }
+        | undefined;
+      assertEquals(child.contextId, parent.contextId);
+      assertEquals(childBrokerMetadata?.parentTaskId, parent.id);
+      assertEquals(
+        childBrokerMetadata?.channel,
+        parentBrokerMetadata?.channel,
+      );
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "error" && message.to === "agent-beta" &&
+          message.id === "tool-req-child-channel-elevation",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-child-channel-elevation",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+          taskId: child.id,
+          contextId: child.contextId,
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.elevationAvailable, true);
+      assertEquals(reply.payload.context?.elevationReason, undefined);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer disables privilege elevation per agent while keeping structured denials",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
@@ -1006,6 +1114,281 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer inherits elevation channel lineage to delegated child tasks via parentTaskId",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "" }),
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const parent = await broker.submitChannelMessage(
+        {
+          id: "telegram-parent-msg",
+          sessionId: "telegram-parent-session",
+          userId: "999",
+          content: "Delegate this write task",
+          channelType: "telegram",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+        {
+          targetAgent: "agent-alpha",
+          taskId: "channel-parent-task",
+        },
+      );
+
+      const child = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "delegated-child-task",
+        parentTaskId: parent.id,
+        taskMessage: createMessage("Write note.txt"),
+      });
+
+      assertEquals(child.contextId, parent.contextId);
+      assertEquals(child.metadata?.broker, {
+        submittedBy: "agent-alpha",
+        targetAgent: "agent-beta",
+        parentTaskId: parent.id,
+        channel: {
+          channelType: "telegram",
+          sessionId: "telegram-parent-session",
+          userId: "999",
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "error" && message.to === "agent-beta" &&
+          message.id === "tool-req-delegated-channel-elevation",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-delegated-channel-elevation",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+          taskId: child.id,
+          contextId: child.contextId,
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.privilegeElevationSupported, true);
+      assertEquals(reply.payload.context?.elevationAvailable, true);
+      assertEquals(reply.payload.context?.elevationReason, undefined);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer rejects delegated child lineage when parent is owned by another agent",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-beta", "agent-gamma");
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordAgentMessage: async () => {} } as any,
+      });
+
+      const parent = await broker.submitChannelMessage(
+        {
+          id: "telegram-parent-mismatch-msg",
+          sessionId: "telegram-parent-mismatch-session",
+          userId: "999",
+          content: "Parent task for alpha only",
+          channelType: "telegram",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+        {
+          targetAgent: "agent-alpha",
+          taskId: "channel-parent-mismatch-task",
+        },
+      );
+
+      await assertRejects(
+        () =>
+          broker.submitAgentTask("agent-beta", {
+            targetAgent: "agent-gamma",
+            taskId: "delegated-invalid-parent-task",
+            parentTaskId: parent.id,
+            taskMessage: createMessage("Should fail"),
+          }),
+        DenoClawError,
+        "Submit child tasks only from a parent task currently owned by the submitting agent",
+      );
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer preserves elevation availability across delegated child tasks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "" }),
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const parentTask = await broker.submitChannelMessage(
+        {
+          id: "telegram-msg-parent-elevation",
+          sessionId: "telegram-parent-session",
+          userId: "999",
+          content: "Delegate this",
+          channelType: "telegram",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+        {
+          targetAgent: "agent-alpha",
+          taskId: "channel-parent-task",
+        },
+      );
+
+      const childTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "delegated-child-task",
+        parentTaskId: parentTask.id,
+        taskMessage: createMessage("Write delegated.txt"),
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "error" && message.to === "agent-beta" &&
+          message.id === "tool-req-delegated-elevation",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-delegated-elevation",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "delegated.txt", content: "hi" },
+          taskId: childTask.id,
+          contextId: childTask.contextId,
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.privilegeElevationSupported, true);
+      assertEquals(reply.payload.context?.elevationAvailable, true);
+      assertEquals(reply.payload.context?.elevationReason, undefined);
+
+      const persistedChild = await broker.getTask({ taskId: childTask.id });
+      const childBrokerMetadata = persistedChild?.metadata?.broker as
+        | {
+          parentTaskId?: string;
+          channel?: { sessionId?: string; channelType?: string };
+        }
+        | undefined;
+      assertEquals(childBrokerMetadata?.parentTaskId, parentTask.id);
+      assertEquals(
+        childBrokerMetadata?.channel?.sessionId,
+        "telegram-parent-session",
+      );
+      assertEquals(childBrokerMetadata?.channel?.channelType, "telegram");
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer rejects privilege-elevation resume when the target agent disables it",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
@@ -1161,7 +1544,12 @@ Deno.test(
       assertEquals(loadedExpired?.status.state, "FAILED");
 
       await kv.set(
-        ["a2a_contexts", "ctx-expired-elevation", "privilege_elevation_grants"],
+        [
+          "a2a_contexts",
+          "agent-beta",
+          "ctx-expired-elevation",
+          "privilege_elevation_grants",
+        ],
         [{
           kind: "privilege-elevation",
           scope: "session",

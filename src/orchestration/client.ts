@@ -249,6 +249,7 @@ export class BrokerClient
     options: {
       taskId?: string;
       contextId?: string;
+      parentTaskId?: string;
       metadata?: Record<string, unknown>;
     } = {},
   ): Promise<Task> {
@@ -256,6 +257,7 @@ export class BrokerClient
       targetAgent: targetAgentId,
       taskId: options.taskId ?? generateId(),
       contextId: options.contextId,
+      parentTaskId: options.parentTaskId,
       metadata: options.metadata,
       message: {
         messageId: generateId(),

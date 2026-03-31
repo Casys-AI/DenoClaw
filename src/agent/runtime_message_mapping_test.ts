@@ -112,6 +112,28 @@ Deno.test("extractRuntimePrivilegeElevationPause computes an expiration when the
   );
 });
 
+Deno.test("extractRuntimePrivilegeElevationPause prefers session scope when advertised by the broker", () => {
+  const pause = extractRuntimePrivilegeElevationPause({
+    success: false,
+    output: "",
+    error: {
+      code: "PRIVILEGE_ELEVATION_REQUIRED",
+      context: {
+        tool: "write_file",
+        elevationAvailable: true,
+        privilegeElevationScopes: ["once", "task", "session"],
+        suggestedGrants: [{ permission: "write", paths: ["note.txt"] }],
+      },
+    },
+  });
+
+  assertEquals(pause?.scope, "session");
+  assertEquals(
+    pause?.prompt,
+    "Temporary privilege elevation required for write_file (this session): write paths=[note.txt]",
+  );
+});
+
 Deno.test("extractRuntimePrivilegeElevationPause stays non-resumable when privilege elevation is disabled", () => {
   const pause = extractRuntimePrivilegeElevationPause({
     success: false,

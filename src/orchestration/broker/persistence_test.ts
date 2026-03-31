@@ -1,0 +1,57 @@
+import { assertEquals } from "@std/assert";
+import {
+  getPrivilegeElevationGrantSignature,
+  type PrivilegeElevationGrant,
+} from "../../shared/privilege_elevation.ts";
+import { BrokerTaskPersistence } from "./persistence.ts";
+
+Deno.test(
+  "BrokerTaskPersistence appends session-scoped privilege grants atomically under concurrency",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const persistence = new BrokerTaskPersistence({
+        getKv: () => Promise.resolve(kv),
+      });
+      const grants: PrivilegeElevationGrant[] = Array.from(
+        { length: 16 },
+        (_, index) => ({
+          kind: "privilege-elevation",
+          scope: "session",
+          grants: [{
+            permission: "write",
+            paths: [`docs/note-${index}.md`],
+          }],
+          grantedAt: new Date(1_700_000_000_000 + index).toISOString(),
+          source: "broker-resume",
+        }),
+      );
+
+      await Promise.all(
+        grants.map((grant) =>
+          persistence.appendContextPrivilegeElevationGrant(
+            "agent-beta",
+            "ctx-concurrent",
+            grant,
+          )
+        ),
+      );
+
+      const stored = await persistence.getContextPrivilegeElevationGrants(
+        "agent-beta",
+        "ctx-concurrent",
+      );
+
+      assertEquals(stored.length, grants.length);
+      assertEquals(
+        new Set(stored.map(getPrivilegeElevationGrantSignature)),
+        new Set(grants.map(getPrivilegeElevationGrantSignature)),
+      );
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);

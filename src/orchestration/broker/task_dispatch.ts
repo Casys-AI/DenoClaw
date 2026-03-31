@@ -71,16 +71,30 @@ export class BrokerTaskDispatcher {
       payload.targetAgent,
     );
 
+    const parentTask = payload.parentTaskId
+      ? await this.resolveParentTaskForSubmission(
+        fromAgentId,
+        payload.parentTaskId,
+      )
+      : undefined;
+    const parentBrokerMetadata = parentTask
+      ? this.deps.persistence.getTaskBrokerMetadata(parentTask)
+      : undefined;
+
     return await this.submitRoutedTask({
       from: fromAgentId,
       targetAgent: payload.targetAgent,
       taskId: payload.taskId,
-      contextId: payload.contextId,
+      contextId: payload.contextId ?? parentTask?.contextId,
       taskMessage: extractBrokerSubmitTaskMessage(payload),
       forwardedMetadata: payload.metadata,
       brokerMetadata: {
         submittedBy: fromAgentId,
         targetAgent: payload.targetAgent,
+        ...(payload.parentTaskId ? { parentTaskId: payload.parentTaskId } : {}),
+        ...(parentBrokerMetadata?.channel
+          ? { channel: parentBrokerMetadata.channel }
+          : {}),
         ...(payload.metadata ? { request: payload.metadata } : {}),
       },
     });
@@ -396,6 +410,37 @@ export class BrokerTaskDispatcher {
     });
 
     return persistedTask;
+  }
+
+  private async resolveParentTaskForSubmission(
+    fromAgentId: string,
+    parentTaskId: string,
+  ): Promise<Task> {
+    const parentTask = await this.deps.taskStore.get(parentTaskId);
+    if (!parentTask) {
+      throw new DenoClawError(
+        "PARENT_TASK_NOT_FOUND",
+        { parentTaskId, fromAgentId },
+        "Submit the child task from an existing parent task",
+      );
+    }
+
+    const parentBrokerMetadata = this.deps.persistence.getTaskBrokerMetadata(
+      parentTask,
+    );
+    if (parentBrokerMetadata.targetAgent !== fromAgentId) {
+      throw new DenoClawError(
+        "PARENT_TASK_ACCESS_DENIED",
+        {
+          parentTaskId,
+          fromAgentId,
+          parentTargetAgent: parentBrokerMetadata.targetAgent,
+        },
+        "Submit child tasks only from a parent task currently owned by the submitting agent",
+      );
+    }
+
+    return parentTask;
   }
 
   private assertChannelAccess(

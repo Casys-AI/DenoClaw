@@ -11,6 +11,7 @@ import type { AgentEntry } from "../../shared/types.ts";
 export interface BrokerTaskMetadata {
   submittedBy?: string;
   targetAgent?: string;
+  parentTaskId?: string;
   request?: Record<string, unknown>;
   privilegeElevationGrants?: PrivilegeElevationGrant[];
   channel?: BrokerTaskChannelMetadata;
@@ -29,6 +30,15 @@ export interface BrokerTaskPersistenceDeps {
 
 export class BrokerTaskPersistence {
   constructor(private readonly deps: BrokerTaskPersistenceDeps) {}
+
+  private static readonly MAX_CONTEXT_GRANT_APPEND_RETRIES = 64;
+
+  private contextPrivilegeElevationGrantKey(
+    agentId: string,
+    contextId: string,
+  ): Deno.KvKey {
+    return ["a2a_contexts", agentId, contextId, "privilege_elevation_grants"];
+  }
 
   async writeTask(task: Task): Promise<void> {
     const kv = await this.deps.getKv();
@@ -94,12 +104,9 @@ export class BrokerTaskPersistence {
     contextId: string,
   ): Promise<PrivilegeElevationGrant[]> {
     const kv = await this.deps.getKv();
-    const entry = await kv.get<PrivilegeElevationGrant[]>([
-      "a2a_contexts",
-      agentId,
-      contextId,
-      "privilege_elevation_grants",
-    ]);
+    const entry = await kv.get<PrivilegeElevationGrant[]>(
+      this.contextPrivilegeElevationGrantKey(agentId, contextId),
+    );
     return filterActivePrivilegeElevationGrants(entry.value ?? []);
   }
 
@@ -109,16 +116,31 @@ export class BrokerTaskPersistence {
     grant: PrivilegeElevationGrant,
   ): Promise<void> {
     const kv = await this.deps.getKv();
-    const entry = await kv.get<PrivilegeElevationGrant[]>([
-      "a2a_contexts",
-      agentId,
-      contextId,
-      "privilege_elevation_grants",
-    ]);
-    const grants = entry.value ?? [];
-    await kv.set(
-      ["a2a_contexts", agentId, contextId, "privilege_elevation_grants"],
-      [...grants, grant],
+    const key = this.contextPrivilegeElevationGrantKey(agentId, contextId);
+
+    for (
+      let attempt = 0;
+      attempt < BrokerTaskPersistence.MAX_CONTEXT_GRANT_APPEND_RETRIES;
+      attempt++
+    ) {
+      const entry = await kv.get<PrivilegeElevationGrant[]>(key);
+      const grants = filterActivePrivilegeElevationGrants(entry.value ?? []);
+      const result = await kv.atomic().check(entry).set(key, [
+        ...grants,
+        grant,
+      ]).commit();
+      if (result.ok) {
+        return;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(32, 2 ** Math.min(attempt, 5)))
+      );
+    }
+
+    throw new DenoClawError(
+      "PRIVILEGE_ELEVATION_GRANT_APPEND_CONFLICT",
+      { agentId, contextId },
+      "Retry the privilege elevation resume; the broker could not persist the session grant atomically",
     );
   }
 

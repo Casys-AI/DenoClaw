@@ -27,10 +27,15 @@ Target model:
   elevation does not leak across agents that happen to share a logical context
 - broker-backed sandbox ownership can now be keyed by `context`, so parallel
   sessions for the same agent no longer serialize on a single sandbox by default
+- session-grant append is now atomic in KV, so concurrent resumes on the same
+  `agentId + contextId` do not lose grants
 - legacy command-approval vocabulary still exists in compatibility surfaces and
   should continue to be removed from the primary runtime story
-- the current availability rule is intentionally conservative: resumability is
-  attached to channel-backed executions, not to generic A2A tasks
+- delegated A2A child tasks can now inherit operator-channel availability via
+  explicit `parentTaskId` lineage, with validation that the parent task was
+  owned by the submitting agent
+- the runtime now proposes the broadest advertised privilege-elevation scope
+  instead of hard-coding `task`
 - the highest-signal cleanup now sits in config/schema/docs, where `ask` and
   `askFallback` still overstate a deprecated command-approval model
 
@@ -40,14 +45,11 @@ Target model:
    `PRIVILEGE_ELEVATION_REQUIRED`.
 2. Finish removing `ask` / `allowAlways` / `EXEC_APPROVAL_REQUIRED` from docs,
    tests, and schemas where compatibility is no longer needed.
-3. Decide whether `session` should remain an operator-selected scope only or
-   become something the runtime proposes directly when the agent/context model
-   makes that safe.
-4. Add an explicit session-lifecycle cleanup story (`closeSession` or
+3. Add an explicit session-lifecycle cleanup story (`closeSession` or
    equivalent) so broker/runtime state does not rely only on TTL-based expiry.
-5. Keep grants broker-owned, resource-scoped, and temporary; do not reintroduce
+4. Keep grants broker-owned, resource-scoped, and temporary; do not reintroduce
    command approval as a first-class user flow.
-6. Decide whether future non-channel operator/API surfaces should make
+5. Decide whether future non-channel operator/API surfaces should make
    `elevationAvailable` true, without weakening the current conservative rule.
 
 ## Why this migration exists

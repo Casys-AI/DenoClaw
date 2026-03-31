@@ -46,7 +46,9 @@ In practice:
 Today, the broker exposes availability conservatively:
 
 - `elevationAvailable: true`
-  - only for channel-backed tasks with persisted broker channel metadata
+  - for channel-backed tasks with persisted broker channel metadata
+  - for delegated A2A child tasks that inherit the same operator lineage through
+    explicit `parentTaskId`
 - `elevationAvailable: false`
   - direct broker tool requests
   - agent-to-agent tasks with no rooted channel continuation path
@@ -57,6 +59,8 @@ This means:
 - channel-rooted flows may pause into `INPUT_REQUIRED`
 - plain A2A flows do not become resumable just because privilege elevation is
   supported in theory
+- delegated flows only become resumable when the parent lineage is explicit and
+  broker-validated
 
 ## Error context
 

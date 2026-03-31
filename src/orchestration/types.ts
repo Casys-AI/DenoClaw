@@ -57,6 +57,7 @@ export interface BrokerTaskSubmitPayload {
   /** @deprecated Use `taskMessage`. */
   message?: A2AMessage;
   contextId?: string;
+  parentTaskId?: string;
   metadata?: Record<string, unknown>;
 }
 

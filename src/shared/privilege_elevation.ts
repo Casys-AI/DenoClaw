@@ -139,6 +139,20 @@ export function formatPrivilegeElevationScopeLabel(
   }
 }
 
+export function pickBroadestPrivilegeElevationScope(
+  scopes: readonly unknown[] | undefined,
+  fallback: PrivilegeElevationScope = "task",
+): PrivilegeElevationScope {
+  const validScopes =
+    scopes?.filter((scope): scope is PrivilegeElevationScope =>
+      scope === "once" || scope === "task" || scope === "session"
+    ) ?? [];
+  if (validScopes.length === 0) return fallback;
+  return [...validScopes].sort((left, right) =>
+    privilegeElevationScopeRank(right) - privilegeElevationScopeRank(left)
+  )[0];
+}
+
 export function formatPrivilegeElevationPrompt(
   options: {
     grants: PrivilegeElevationGrantResource[];

@@ -1,4 +1,4 @@
-import { join, normalize } from "@std/path";
+import { join, normalize } from "node:path";
 
 export interface WorkspaceContext {
   workspaceDir: string; // absolute path to data/agents/<id>/

@@ -1,4 +1,4 @@
-import { dirname } from "@std/path";
+import { dirname } from "node:path";
 import type { ToolResult } from "../../shared/types.ts";
 
 export function createDryRunWriteResult(

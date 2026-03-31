@@ -1,6 +1,3 @@
 {
-  "nodeModulesDir": "none",
-  "imports": {
-    "@std/path": "jsr:@std/path@^1"
-  }
+  "nodeModulesDir": "none"
 }

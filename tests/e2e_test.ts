@@ -9,6 +9,10 @@ import { assert, assertStringIncludes } from "@std/assert";
 import { getConfigOrDefault } from "../src/config/loader.ts";
 import { WorkerPool } from "../src/agent/worker_pool.ts";
 import { WorkspaceLoader } from "../src/agent/workspace.ts";
+import {
+  getAgentMemoryPath,
+  getAgentRuntimeDir,
+} from "../src/shared/helpers.ts";
 import type { WorkerConfig } from "../src/agent/worker_protocol.ts";
 
 // ── Timeout: 30s per test — LLM calls are slow ──────────
@@ -32,16 +36,24 @@ async function buildWorkerConfig(): Promise<WorkerConfig> {
 async function withTempAgentsDir(
   fn: (tmpDir: string) => Promise<void>,
 ): Promise<void> {
-  const tmpDir = await Deno.makeTempDir({ prefix: "denoclaw_e2e_" });
-  const prev = Deno.env.get("DENOCLAW_AGENTS_DIR");
+  const rootDir = await Deno.makeTempDir({ prefix: "denoclaw_e2e_" });
+  const tmpDir = `${rootDir}/agents`;
+  const tmpHomeDir = `${rootDir}/home`;
+  await Deno.mkdir(tmpDir, { recursive: true });
+  await Deno.mkdir(tmpHomeDir, { recursive: true });
+  const prevAgentsDir = Deno.env.get("DENOCLAW_AGENTS_DIR");
+  const prevHomeDir = Deno.env.get("DENOCLAW_HOME_DIR");
   Deno.env.set("DENOCLAW_AGENTS_DIR", tmpDir);
+  Deno.env.set("DENOCLAW_HOME_DIR", tmpHomeDir);
   try {
     await fn(tmpDir);
   } finally {
-    Deno.env.delete("DENOCLAW_AGENTS_DIR");
-    if (prev) Deno.env.set("DENOCLAW_AGENTS_DIR", prev);
+    if (prevAgentsDir) Deno.env.set("DENOCLAW_AGENTS_DIR", prevAgentsDir);
+    else Deno.env.delete("DENOCLAW_AGENTS_DIR");
+    if (prevHomeDir) Deno.env.set("DENOCLAW_HOME_DIR", prevHomeDir);
+    else Deno.env.delete("DENOCLAW_HOME_DIR");
     try {
-      await Deno.remove(tmpDir, { recursive: true });
+      await Deno.remove(rootDir, { recursive: true });
     } catch {
       /* ignore */
     }
@@ -86,24 +98,11 @@ Deno.test({
         );
 
         // Verify private KV memory.db was created
-        const memPath = `${
-          Deno.env.get(
-            "HOME",
-          )
-        }/.denoclaw/agents/${agentId}/memory.db`;
+        const memPath = getAgentMemoryPath(agentId);
         const stat = await Deno.stat(memPath);
         assert(stat.isFile, "Private KV memory.db should exist after response");
       } finally {
         pool.shutdown();
-        // Clean up runtime dir
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
       }
     });
   },
@@ -155,25 +154,11 @@ Deno.test({
         );
 
         // Verify at least the initiating agent created its private runtime KV
-        const alphaMemPath = `${
-          Deno.env.get(
-            "HOME",
-          )
-        }/.denoclaw/agents/${alphaId}/memory.db`;
+        const alphaMemPath = getAgentMemoryPath(alphaId);
         const alphaStat = await Deno.stat(alphaMemPath).catch(() => null);
         assert(alphaStat?.isFile, "Alpha private KV should exist");
       } finally {
         pool.shutdown();
-        for (const id of [alphaId, betaId]) {
-          try {
-            await Deno.remove(
-              `${Deno.env.get("HOME")}/.denoclaw/agents/${id}`,
-              { recursive: true },
-            );
-          } catch {
-            /* ignore */
-          }
-        }
       }
     });
   },
@@ -223,14 +208,6 @@ Deno.test({
         );
       } finally {
         pool.shutdown();
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
       }
     });
   },
@@ -277,14 +254,6 @@ Deno.test({
         );
       } finally {
         pool.shutdown();
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
       }
     });
   },
@@ -337,14 +306,9 @@ Deno.test({
         );
       } finally {
         pool.shutdown();
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
+        await Deno.remove(getAgentRuntimeDir(agentId), {
+          recursive: true,
+        }).catch(() => {});
       }
     });
   },
@@ -423,14 +387,6 @@ Deno.test({
         } catch {
           /* ignore */
         }
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
       }
     });
   },
@@ -498,14 +454,6 @@ Deno.test({
         } catch {
           /* ignore */
         }
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
       }
     });
   },
@@ -569,14 +517,9 @@ Deno.test({
         }
       } finally {
         pool.shutdown();
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
+        await Deno.remove(getAgentRuntimeDir(agentId), {
+          recursive: true,
+        }).catch(() => {});
       }
     });
   },
@@ -623,14 +566,9 @@ Deno.test({
         assertStringIncludes(result.content.toLowerCase(), "project_notes");
       } finally {
         pool.shutdown();
-        try {
-          await Deno.remove(
-            `${Deno.env.get("HOME")}/.denoclaw/agents/${agentId}`,
-            { recursive: true },
-          );
-        } catch {
-          /* ignore */
-        }
+        await Deno.remove(getAgentRuntimeDir(agentId), {
+          recursive: true,
+        }).catch(() => {});
       }
     });
   },

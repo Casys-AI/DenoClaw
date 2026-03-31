@@ -10,6 +10,7 @@ import type {
   AgentLlmToolPort,
   LLMResponse,
   Message,
+  ToolDefinition,
   ToolResult,
 } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
@@ -19,6 +20,7 @@ type BrokerTaskPortStub = AgentLlmToolPort & AgentCanonicalTaskPort<Task> & {
   reportedTasks: Task[];
   currentTask: Task | null;
   lastExecCorrelation?: { taskId?: string; contextId?: string };
+  lastTools?: ToolDefinition[];
   getTask(taskId: string): Promise<Task | null>;
   reportTaskResult(task: Task): Promise<Task>;
 };
@@ -68,7 +70,14 @@ function createBrokerStub(responseText = "done"): BrokerTaskPortStub {
     startListening(): Promise<void> {
       return Promise.resolve();
     },
-    complete(): Promise<LLMResponse> {
+    complete(
+      _messages: Message[],
+      _model: string,
+      _temperature?: number,
+      _maxTokens?: number,
+      tools?: ToolDefinition[],
+    ): Promise<LLMResponse> {
+      this.lastTools = tools;
       return Promise.resolve({ content: responseText });
     },
     execTool(
@@ -185,6 +194,10 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
     "user",
     "assistant",
   ]);
+  assertEquals(
+    broker.lastTools?.map((tool) => tool.function.name).sort(),
+    ["read_file", "shell", "web_fetch", "write_file"],
+  );
 });
 
 Deno.test("AgentRuntime handles broker task_continue by resuming existing canonical task", async () => {

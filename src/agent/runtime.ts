@@ -33,6 +33,8 @@ import {
 } from "./runtime_message_mapping.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import { AgentRuntimeGrantStore } from "./runtime_capabilities.ts";
+import type { ToolDefinition } from "../shared/types.ts";
+import { createBrokerBackedRuntimeToolDefinitions } from "./runtime_tool_definitions.ts";
 
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
@@ -58,6 +60,7 @@ export class AgentRuntime {
   private cron!: CronManager;
   private maxIterations: number;
   private memories: Map<string, MemoryPort> = new Map();
+  private toolDefinitions: ToolDefinition[];
 
   constructor(
     agentId: string,
@@ -74,6 +77,7 @@ export class AgentRuntime {
     this.context = new ContextBuilder(config, runtimeCapabilities);
     this.skills = new SkillsLoader();
     this.maxIterations = maxIterations;
+    this.toolDefinitions = createBrokerBackedRuntimeToolDefinitions();
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -166,6 +170,7 @@ export class AgentRuntime {
     await executeAgentConversation({
       config: this.config,
       llmToolPort: this.llmToolPort,
+      tools: this.toolDefinitions,
       context: this.context,
       skills: this.skills,
       memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),
@@ -226,6 +231,7 @@ export class AgentRuntime {
     await executeAgentConversation({
       config: this.config,
       llmToolPort: this.llmToolPort,
+      tools: this.toolDefinitions,
       context: this.context,
       skills: this.skills,
       memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),

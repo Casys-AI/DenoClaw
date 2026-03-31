@@ -7,7 +7,7 @@ import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import { log } from "../shared/log.ts";
 import { formatPrivilegeElevationGrantResources } from "../shared/privilege_elevation.ts";
-import type { AgentLlmToolPort } from "../shared/types.ts";
+import type { AgentLlmToolPort, ToolDefinition } from "../shared/types.ts";
 import type { ContextBuilder } from "./context.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import {
@@ -20,6 +20,7 @@ import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 export interface ExecuteAgentConversationInput {
   config: AgentConfig;
   llmToolPort: AgentLlmToolPort;
+  tools: ToolDefinition[];
   context: ContextBuilder;
   skills: SkillsLoader;
   memory: MemoryPort;
@@ -52,7 +53,7 @@ export async function executeAgentConversation(
       const contextMessages = input.context.buildContextMessages(
         input.memory.getMessages(),
         input.skills.getSkills(),
-        [],
+        input.tools,
         undefined,
         undefined,
         input.getRuntimeGrants?.() ?? [],
@@ -63,6 +64,7 @@ export async function executeAgentConversation(
         input.config.model,
         input.config.temperature,
         input.config.maxTokens,
+        input.tools,
       );
 
       if (response.toolCalls?.length) {

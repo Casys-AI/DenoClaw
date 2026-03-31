@@ -18,6 +18,7 @@ import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
+import type { AgentEntry } from "../shared/types.ts";
 import { getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
@@ -152,6 +153,13 @@ const peerMessenger = new WorkerPeerMessenger(
   () => agentId,
 );
 
+export function resolveEffectiveLoopModel(
+  requestedModel?: string,
+  entry?: AgentEntry,
+): string | undefined {
+  return requestedModel ?? entry?.model;
+}
+
 // ── BroadcastChannel — shutdown global ───────────────────
 
 const broadcast = new BroadcastChannel("denoclaw");
@@ -189,6 +197,7 @@ function createAgentLoop(
   const peers = entry?.peers ?? [];
   const sandboxConfig = entry?.sandbox ??
     config.agents.defaults?.sandbox;
+  const effectiveModel = resolveEffectiveLoopModel(model, entry);
   const workspaceDir = getAgentDefDir(agentId);
   const runtimeCapabilities = deriveAgentRuntimeCapabilities({
     sandboxConfig,
@@ -199,7 +208,7 @@ function createAgentLoop(
   return new AgentLoop(
     sessionId,
     config,
-    model ? { model } : undefined,
+    effectiveModel ? { model: effectiveModel } : undefined,
     10,
     {
       memory,

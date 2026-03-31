@@ -3,6 +3,7 @@ import { AgentError } from "../shared/errors.ts";
 import {
   type CanonicalWorkerTaskRequest,
   executeCanonicalWorkerTask,
+  resolveEffectiveLoopModel,
 } from "./worker_entrypoint.ts";
 import type { AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
@@ -98,4 +99,20 @@ Deno.test("executeCanonicalWorkerTask maps runtime errors to FAILED", async () =
   assertEquals(updates, ["SUBMITTED", "WORKING", "FAILED"]);
   assertEquals(result.task.status.state, "FAILED");
   assertEquals(result.error?.code, "AGENT_ERROR");
+});
+
+Deno.test("resolveEffectiveLoopModel prefers explicit request model, then agent entry model", () => {
+  assertEquals(
+    resolveEffectiveLoopModel("openrouter/gpt-5.4", {
+      model: "ollama/nemotron-3-super",
+    }),
+    "openrouter/gpt-5.4",
+  );
+  assertEquals(
+    resolveEffectiveLoopModel(undefined, {
+      model: "ollama/nemotron-3-super",
+    }),
+    "ollama/nemotron-3-super",
+  );
+  assertEquals(resolveEffectiveLoopModel(undefined, {}), undefined);
 });

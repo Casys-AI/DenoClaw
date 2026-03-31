@@ -19,6 +19,35 @@ import type { WorkerConfig } from "../src/agent/worker_protocol.ts";
 
 const TEST_TIMEOUT_MS = 30_000;
 const testOpts = { sanitizeResources: false, sanitizeOps: false };
+const OLLAMA_E2E_ENABLED = await canReachOllamaProvider();
+const providerBackedTestOpts = {
+  ...testOpts,
+  ...(OLLAMA_E2E_ENABLED ? {} : { ignore: true }),
+};
+
+async function canReachOllamaProvider(): Promise<boolean> {
+  const apiKey = Deno.env.get("OLLAMA_API_KEY");
+  if (!apiKey) return false;
+
+  try {
+    const config = await getConfigOrDefault();
+    const apiBase = config.providers.ollama?.apiBase ??
+      "https://api.ollama.com";
+    await fetch(`${apiBase}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      // Any HTTP response proves the provider is reachable from this runtime.
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5_000),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // ── Shared helper: build a WorkerConfig from real config ──
 
@@ -64,7 +93,7 @@ async function withTempAgentsDir(
 
 Deno.test({
   name: "E2E: single agent replies PONG to 'Reply with exactly: PONG'",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async () => {
       const agentId = "test-solo";
@@ -112,7 +141,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: test-alpha requests an exact PONG reply from test-beta",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async () => {
       const alphaId = "test-alpha";
@@ -168,7 +197,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: shell tool executes 'echo E2E_SUCCESS' and reports output",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async () => {
       const agentId = "test-exec";
@@ -216,7 +245,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: shell tool denied when agent has no 'run' permission",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async (tmpDir) => {
       const agentId = "test-readonly";
@@ -262,7 +291,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: exec policy blocks unauthorized shell commands",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async (tmpDir) => {
       const agentId = "test-policy";
@@ -315,7 +344,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: shared KV receives active_task and task_observation entries",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     const sharedKvPath = await Deno.makeTempFile({
       prefix: "denoclaw_e2e_shared_",
@@ -393,7 +422,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: write_file dry_run default prevents actual write",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     const targetFile = "/tmp/denoclaw-e2e-dryrun.txt";
 
@@ -460,7 +489,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: agent writes a memory file via scoped write_file",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async (tmpDir) => {
       const agentId = `test-mem-${crypto.randomUUID().slice(0, 6)}`;
@@ -526,7 +555,7 @@ Deno.test({
 
 Deno.test({
   name: "E2E: agent sees its memory files in context",
-  ...testOpts,
+  ...providerBackedTestOpts,
   async fn() {
     await withTempAgentsDir(async (tmpDir) => {
       const agentId = `test-ctx-${crypto.randomUUID().slice(0, 6)}`;

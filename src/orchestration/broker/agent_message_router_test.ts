@@ -25,31 +25,8 @@ function createTaskSubmitMessage(): BrokerTaskSubmitMessage {
   };
 }
 
-function waitForQueuedMessage(
-  kv: Deno.Kv,
-  predicate: (message: BrokerTaskSubmitMessage) => boolean,
-): Promise<BrokerTaskSubmitMessage> {
-  let settled = false;
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      settled = true;
-      reject(new Error("Timed out waiting for queued message"));
-    }, 5_000);
-
-    kv.listenQueue((raw: unknown) => {
-      if (settled) return;
-      const message = raw as BrokerTaskSubmitMessage;
-      if (!predicate(message)) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(message);
-    });
-  });
-}
-
 Deno.test(
-  "BrokerAgentMessageRouter posts to a registered agent endpoint before KV fallback",
+  "BrokerAgentMessageRouter posts to a registered agent endpoint",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
@@ -64,7 +41,6 @@ Deno.test(
       );
 
       const router = new BrokerAgentMessageRouter({
-        getKv: () => Promise.resolve(kv),
         metrics: {
           recordAgentMessage: () => Promise.resolve(),
         },
@@ -113,21 +89,13 @@ Deno.test(
 );
 
 Deno.test(
-  "BrokerAgentMessageRouter falls back to KV queue when no live route exists",
+  "BrokerAgentMessageRouter returns a structured error when no live route exists",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
 
     try {
-      const queuedMessage = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_submit" &&
-          message.payload.taskId === "task-123",
-      );
-
       const router = new BrokerAgentMessageRouter({
-        getKv: () => Promise.resolve(kv),
         metrics: {
           recordAgentMessage: () => Promise.resolve(),
         },
@@ -137,15 +105,15 @@ Deno.test(
         }),
         tunnelRegistry: new TunnelRegistry(),
         routeToTunnel: () => {
-          throw new Error("routeToTunnel should not run for KV fallback");
+          throw new Error("routeToTunnel should not run without a live route");
         },
       });
 
-      await router.routeTaskMessage("agent-beta", createTaskSubmitMessage());
-
-      const queued = await queuedMessage;
-      assertEquals(queued.type, "task_submit");
-      assertEquals(queued.to, "agent-beta");
+      await assertRejects(
+        () => router.routeTaskMessage("agent-beta", createTaskSubmitMessage()),
+        Error,
+        "AGENT_ROUTE_UNAVAILABLE",
+      );
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -166,7 +134,6 @@ Deno.test(
       );
 
       const router = new BrokerAgentMessageRouter({
-        getKv: () => Promise.resolve(kv),
         metrics: {
           recordAgentMessage: () => Promise.resolve(),
         },

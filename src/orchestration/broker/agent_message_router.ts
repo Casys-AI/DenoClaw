@@ -1,4 +1,3 @@
-import { ConfigError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 import type {
   BrokerMessage,
@@ -8,11 +7,14 @@ import type {
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
 import type { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
+import {
+  createAgentRouteUnavailableError,
+  postBrokerMessageToAgentEndpoint,
+} from "./agent_endpoint_delivery.ts";
 
 type BrokerTaskEnvelope = BrokerTaskSubmitMessage | BrokerTaskContinueMessage;
 
 export interface BrokerAgentMessageRouterDeps {
-  getKv(): Promise<Deno.Kv>;
   metrics: {
     recordAgentMessage(
       fromAgentId: string,
@@ -57,47 +59,21 @@ export class BrokerAgentMessageRouter {
       targetAgentId,
     );
     if (endpoint) {
-      await this.postMessageToAgentEndpoint(endpoint, message);
+      await postBrokerMessageToAgentEndpoint(
+        endpoint,
+        message,
+        this.deps.fetchFn,
+      );
       log.info(
         `A2A routed via HTTP wake-up: ${message.from} -> ${targetAgentId} (${message.type})`,
       );
       return;
     }
 
-    const kv = await this.deps.getKv();
-    await kv.enqueue(message);
-    log.info(
-      `A2A routed via KV Queue: ${message.from} -> ${targetAgentId} (${message.type})`,
+    throw createAgentRouteUnavailableError(
+      message.from,
+      targetAgentId,
+      message.type,
     );
-  }
-
-  private async postMessageToAgentEndpoint(
-    endpoint: string,
-    message: BrokerTaskEnvelope,
-  ): Promise<void> {
-    const token = Deno.env.get("DENOCLAW_API_TOKEN");
-    const fetchFn = this.deps.fetchFn ?? fetch;
-    const response = await fetchFn(new URL("/tasks", endpoint), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(message),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new ConfigError(
-        "AGENT_ENDPOINT_DELIVERY_FAILED",
-        {
-          endpoint,
-          status: response.status,
-          body: body.slice(0, 300),
-          targetAgent: message.to,
-        },
-        "Check agent deployment health and broker registration",
-      );
-    }
   }
 }

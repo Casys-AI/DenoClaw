@@ -59,9 +59,11 @@ export async function publishAgent(): Promise<void> {
     };
     const entrypoint = generateAgentEntrypoint(agentName, entry);
     const assets = await buildDeployAssets(entrypoint);
+    const endpoint = getDeployAppEndpoint(app, config.deploy?.org);
     const envVars = createDeployEnvVars({
       DENOCLAW_AGENT_ID: agentName,
       DENOCLAW_BROKER_URL: brokerUrl,
+      DENOCLAW_AGENT_URL: endpoint,
       ...(brokerOidcAudience && brokerOidcAudience !== brokerUrl
         ? { DENOCLAW_BROKER_OIDC_AUDIENCE: brokerOidcAudience }
         : {}),
@@ -74,7 +76,6 @@ export async function publishAgent(): Promise<void> {
       envVars,
       headers,
     });
-    const endpoint = getDeployAppEndpoint(app, config.deploy?.org);
 
     success(`Agent deployed: ${revision.id}`);
     print(`  URL: ${endpoint}`);

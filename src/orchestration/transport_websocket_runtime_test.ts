@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { WebSocketBrokerConnectionRuntime } from "./transport_websocket_runtime.ts";
+import { isAgentSocketRegisterMessage } from "./agent_socket_protocol.ts";
 
 class FakeSocket {
   readyState: number = WebSocket.CONNECTING;
@@ -91,4 +92,9 @@ Deno.test("WebSocketBrokerConnectionRuntime retries after a failed socket open",
     reason: "Retrying broker connection",
   }]);
   assertEquals(sockets[1].sent.length, 1);
+  const registerMessage = JSON.parse(sockets[1].sent[0]);
+  if (!isAgentSocketRegisterMessage(registerMessage)) {
+    throw new Error("expected register_agent message");
+  }
+  assertEquals(registerMessage.endpoint, "https://agent.example.test");
 });

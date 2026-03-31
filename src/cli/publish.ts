@@ -181,6 +181,7 @@ export async function publishAgents(agentName?: string): Promise<void> {
     const envVars = createDeployEnvVars({
       DENOCLAW_AGENT_ID: id,
       DENOCLAW_BROKER_URL: brokerUrl,
+      DENOCLAW_AGENT_URL: getDeployAppEndpoint(app, resolvedDeployOrg),
       ...(brokerOidcAudience && brokerOidcAudience !== brokerUrl
         ? { DENOCLAW_BROKER_OIDC_AUDIENCE: brokerOidcAudience }
         : {}),

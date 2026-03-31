@@ -91,7 +91,6 @@ export { LocalRelay } from "./src/orchestration/relay.ts";
 export { Gateway } from "./src/orchestration/gateway/server.ts";
 export type { GatewayDeps } from "./src/orchestration/gateway/server.ts";
 export {
-  KvQueueTransport,
   resolveAgentSocketUrl,
   WebSocketBrokerTransport,
 } from "./src/orchestration/transport.ts";

@@ -28,10 +28,6 @@ export interface BrokerTransport {
   close(): void;
 }
 
-export interface KvQueueTransportDeps {
-  kv?: Deno.Kv;
-}
-
 export interface WebSocketBrokerTransportDeps {
   brokerUrl: string;
   authToken?: string;

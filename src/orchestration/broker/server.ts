@@ -55,8 +55,8 @@ import { BrokerSandboxManager } from "./sandbox_manager.ts";
  * - Tunnel hub (WebSocket connections to local machines)
  * - Agent lifecycle (Subhosting + Sandbox CRUD)
  *
- * Transport: KV Queue locally, HTTP/SSE on the network.
- * KV Queue is the current local transport — not the canonical model.
+ * Transport: active sockets/tunnels first, HTTP wake-up second.
+ * The broker does not fall back to KV Queue for broker↔agent routing.
  */
 export interface BrokerServerDeps {
   providers?: ProviderManager;
@@ -65,6 +65,7 @@ export interface BrokerServerDeps {
   kv?: Deno.Kv;
   taskStore?: TaskStore;
   tunnelRegistry?: TunnelRegistry;
+  fetchFn?: typeof fetch;
 }
 
 export class BrokerServer {
@@ -105,20 +106,21 @@ export class BrokerServer {
       getKv: () => this.getKv(),
     });
     this.agentMessageRouter = new BrokerAgentMessageRouter({
-      getKv: () => this.getKv(),
       metrics: this.metrics,
       connectedAgents: this.connectedAgents,
       agentRegistry: this.agentRegistry,
       tunnelRegistry: this.tunnelRegistry,
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
+      fetchFn: deps?.fetchFn,
     });
     this.taskPersistence = new BrokerTaskPersistence({
       getKv: () => this.getKv(),
     });
     this.replyDispatcher = new BrokerReplyDispatcher({
-      getKv: () => this.getKv(),
-      findReplySocket: (agentId) => this.findAgentSocket(agentId),
+      findReplySocket: (agentId) => this.findReplySocket(agentId),
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
+      agentRegistry: this.agentRegistry,
+      fetchFn: deps?.fetchFn,
     });
     this.federationRuntime = new BrokerFederationRuntime({
       getKv: () => this.getKv(),
@@ -411,17 +413,19 @@ export class BrokerServer {
   // ── Helpers ─────────────────────────────────────────
 
   /**
-   * Send a broker reply to an agent.
-   * Prefer an active WebSocket tunnel; otherwise fall back to the local KV Queue transport.
+   * Send a broker reply to an agent or peer broker.
+   * Prefer an active WebSocket/tunnel route, then HTTP wake-up for agents.
    */
   private async sendReply(reply: BrokerMessage): Promise<void> {
     await this.replyDispatcher.sendReply(reply);
   }
 
-  private findAgentSocket(agentId: string): WebSocket | null {
+  private findReplySocket(agentId: string): WebSocket | null {
     const connectedAgentSocket = this.connectedAgents.getSocket(agentId);
     if (connectedAgentSocket) return connectedAgentSocket;
-    return this.tunnelRegistry.findReplySocket(agentId);
+    const tunnelSocket = this.tunnelRegistry.findReplySocket(agentId);
+    if (tunnelSocket) return tunnelSocket;
+    return this.tunnelRegistry.findRemoteBrokerConnection(agentId)?.ws ?? null;
   }
 
   private async sendStructuredError(

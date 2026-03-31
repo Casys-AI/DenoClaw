@@ -18,35 +18,32 @@ import type {
 } from "../shared/types.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 import type { BrokerTransport } from "./transport.ts";
-import { KvQueueTransport } from "./transport.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
 
 export interface BrokerClientDeps {
-  kv?: Deno.Kv;
-  transport?: BrokerTransport;
+  transport: BrokerTransport;
 }
 
 /**
  * BrokerClient — used by agents to communicate with the Broker.
  *
- * Transport is pluggable via BrokerTransport (KV Queue locally, HTTP/SSE on network).
+ * Transport is pluggable via BrokerTransport.
  * The client operates in canonical task terms above the transport layer.
  */
 export class BrokerClient
   implements AgentLlmToolPort, AgentCanonicalTaskPort<Task> {
   private transport: BrokerTransport;
 
-  constructor(agentId: string, deps: BrokerClientDeps = {}) {
-    if (deps.kv && deps.transport) {
+  constructor(agentId: string, deps: BrokerClientDeps) {
+    if (!deps.transport) {
       throw new DenoClawError(
         "INVALID_BROKER_CLIENT_DEPS",
-        {},
-        "Provide either 'kv' or 'transport', not both",
+        { agentId },
+        "Provide an explicit broker transport",
       );
     }
-    this.transport = deps.transport ??
-      new KvQueueTransport(agentId, { kv: deps.kv });
+    this.transport = deps.transport;
   }
 
   private unwrapOrThrow(

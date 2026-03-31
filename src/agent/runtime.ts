@@ -23,7 +23,6 @@ import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
 import {
   assertRuntimeTaskMessage,
-  isRuntimeTaskMessage,
   type RuntimeTaskContinueMessage,
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
@@ -38,15 +37,14 @@ import { AgentRuntimeGrantStore } from "./runtime_capabilities.ts";
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
  *
- * HTTP-reactive, task-oriented runtime:
+ * Task-oriented runtime:
  * - Receives work via handleIncomingMessage() (transport-agnostic)
  * - Calls LLM via AgentBrokerPort (never directly)
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
  * - Persists state via MemoryPort (KvdexMemory by default)
  *
- * Transport is decided by the caller: HTTP handler in a deployed agent app,
- * KV Queue listener in local mode. The runtime does not assume any
- * specific transport mechanism.
+ * Transport is decided by the caller. The runtime does not assume any
+ * specific delivery mechanism.
  */
 
 export class AgentRuntime {
@@ -119,25 +117,8 @@ export class AgentRuntime {
   }
 
   /**
-   * Start receiving work via KV Queue (local mode convenience).
-   * In a deployed agent app, call handleIncomingMessage() from the HTTP
-   * handler instead.
-   */
-  async startKvQueueIntake(): Promise<void> {
-    const kv = await this.getKv();
-    kv.listenQueue(async (raw: unknown) => {
-      const msg = raw as BrokerEnvelope;
-      if (msg.to !== this.agentId) return;
-      if (!isRuntimeTaskMessage(msg)) return;
-      await this.handleIncomingMessage(msg);
-    });
-    log.info(`AgentRuntime: KV Queue intake started (${this.agentId})`);
-  }
-
-  /**
    * Handle an incoming broker message (transport-agnostic).
-   * Called by KV Queue listener locally, or HTTP handler in a deployed agent
-   * app.
+   * Called by the runtime-specific transport layer.
    */
   async handleIncomingMessage(msg: BrokerEnvelope): Promise<void> {
     assertRuntimeTaskMessage(msg);

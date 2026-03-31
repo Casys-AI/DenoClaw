@@ -6,7 +6,6 @@ export type { BrokerServerDeps } from "./broker/server.ts";
 export { BrokerClient } from "./client.ts";
 export type { BrokerTransport } from "./transport.ts";
 export {
-  KvQueueTransport,
   resolveAgentSocketUrl,
   WebSocketBrokerTransport,
 } from "./transport.ts";

@@ -24,12 +24,14 @@ export async function startDeployedAgentRuntime(
   const brokerUrl = getRequiredBrokerUrl();
   const oidcAudience = Deno.env.get("DENOCLAW_BROKER_OIDC_AUDIENCE") ||
     brokerUrl;
+  const agentEndpoint = Deno.env.get("DENOCLAW_AGENT_URL");
   const runtimeConfig = resolveRuntimeConfig(agentId, options.entry);
 
   let runtime: AgentRuntime | null = null;
 
   const brokerTransport = new WebSocketBrokerTransport(agentId, {
     brokerUrl,
+    endpoint: agentEndpoint,
     config: options.entry,
     getAuthToken: async () =>
       await resolveBrokerAuthToken({ brokerUrl, oidcAudience }),

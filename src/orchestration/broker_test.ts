@@ -6,7 +6,7 @@ import {
 } from "@std/assert";
 import { DenoClawError } from "../shared/errors.ts";
 import { DENOCLAW_AGENT_PROTOCOL } from "./agent_socket_protocol.ts";
-import { BrokerServer } from "./broker/server.ts";
+import { BrokerServer, type BrokerServerDeps } from "./broker/server.ts";
 import { AuthManager } from "./auth.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { TunnelRegistry } from "./broker/tunnel_registry.ts";
@@ -52,6 +52,44 @@ async function seedPeerPolicy(
   });
   await kv.set(["agents", targetAgentId, "config"], {
     acceptFrom: [fromAgentId],
+  });
+  await seedAgentEndpoint(kv, fromAgentId);
+  await seedAgentEndpoint(kv, targetAgentId);
+}
+
+async function seedAgentEndpoint(
+  kv: Deno.Kv,
+  agentId: string,
+): Promise<void> {
+  await kv.set(["agents", agentId, "endpoint"], `https://${agentId}.example`);
+}
+
+function createQueueBackedFetchBridge(kv: Deno.Kv): typeof fetch {
+  return ((
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const raw = init?.body;
+    if (typeof raw !== "string") {
+      throw new Error("Expected JSON broker message body for test HTTP bridge");
+    }
+    const message = JSON.parse(raw) as BrokerMessage;
+    return kv.enqueue(message).then(() =>
+      Response.json({ ok: true }, { status: 202 })
+    );
+  }) as typeof fetch;
+}
+
+function createTestBroker(
+  config: Config,
+  deps: BrokerServerDeps,
+): BrokerServer {
+  if (!deps.kv || deps.fetchFn) {
+    return new BrokerServer(config, deps);
+  }
+  return new BrokerServer(config, {
+    ...deps,
+    fetchFn: createQueueBackedFetchBridge(deps.kv),
   });
 }
 
@@ -111,24 +149,105 @@ function waitForQueuedMessage(
   });
 }
 
+function createAgentEndpointFetchCollector(
+  status = 202,
+): {
+  calls: Array<{ url: string; init?: RequestInit }>;
+  fetch: typeof globalThis.fetch;
+} {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  return {
+    calls,
+    fetch: ((
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url = input instanceof Request ? input.url : String(input);
+      calls.push({ url, init });
+      return Promise.resolve(Response.json({ ok: true }, { status }));
+    }) as typeof fetch,
+  };
+}
+
+function createSocketCollector(): {
+  messages: BrokerMessage[];
+  socket: WebSocket;
+} {
+  const messages: BrokerMessage[] = [];
+  return {
+    messages,
+    socket: {
+      readyState: WebSocket.OPEN,
+      bufferedAmount: 0,
+      send(raw: string) {
+        messages.push(JSON.parse(raw) as BrokerMessage);
+      },
+      close() {},
+    } as unknown as WebSocket,
+  };
+}
+
+function registerConnectedAgentSocket(
+  broker: BrokerServer,
+  agentId: string,
+  socket: WebSocket,
+): void {
+  (
+    broker as unknown as {
+      connectedAgents: {
+        register(
+          agentId: string,
+          socket: WebSocket,
+          authIdentity: string,
+        ): void;
+      };
+    }
+  ).connectedAgents.register(agentId, socket, "test");
+}
+
+function attachConnectedAgentInbox(
+  broker: BrokerServer,
+  agentId: string,
+): BrokerMessage[] {
+  const { messages, socket } = createSocketCollector();
+  registerConnectedAgentSocket(broker, agentId, socket);
+  return messages;
+}
+
+function attachRemoteBrokerTunnelInbox(
+  tunnelRegistry: TunnelRegistry,
+  brokerId: string,
+): BrokerMessage[] {
+  const { messages, socket } = createSocketCollector();
+  tunnelRegistry.register(brokerId, socket, {
+    tunnelId: brokerId,
+    type: "instance",
+    tools: [],
+    agents: [],
+    allowedAgents: [],
+  });
+  return messages;
+}
+
 Deno.test(
   "BrokerServer.submitAgentTask persists canonical task and forwards canonical task submit",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const { messages: socketMessages, socket } = createSocketCollector();
+    const tunnelRegistry = new TunnelRegistry();
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      attachRemoteBrokerTunnelInbox(tunnelRegistry, "broker-remote");
+      const broker = createTestBroker(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-beta",
-      );
+      attachConnectedAgentInbox(broker, "agent-beta");
+      registerConnectedAgentSocket(broker, "agent-beta", socket);
 
       const task = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
@@ -151,7 +270,8 @@ Deno.test(
       assertExists(persisted);
       assertEquals(persisted?.metadata?.broker, task.metadata?.broker);
 
-      const forwarded = (await forwardedPromise) as Extract<
+      assertEquals(socketMessages.length, 1);
+      const forwarded = socketMessages[0] as Extract<
         BrokerMessage,
         { type: "task_submit" }
       >;
@@ -181,11 +301,12 @@ Deno.test(
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      attachConnectedAgentInbox(broker, "agent-beta");
 
       const submitted = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
@@ -258,11 +379,12 @@ Deno.test(
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      attachConnectedAgentInbox(broker, "agent-beta");
 
       const submitted = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
@@ -298,14 +420,16 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const { messages: socketMessages, socket } = createSocketCollector();
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      registerConnectedAgentSocket(broker, "agent-beta", socket);
 
       const submitted = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
@@ -329,12 +453,6 @@ Deno.test(
       };
       await kv.set(["a2a_tasks", paused.id], paused);
 
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_continue" && message.to === "agent-beta",
-      );
-
       const resumed = await broker.continueAgentTask("agent-alpha", {
         taskId: paused.id,
         continuationMessage: createMessage("Confirmed, continue"),
@@ -347,10 +465,10 @@ Deno.test(
       assertExists(resumed);
       assertEquals(resumed?.status.state, "INPUT_REQUIRED");
 
-      const forwarded = (await forwardedPromise) as Extract<
-        BrokerMessage,
-        { type: "task_continue" }
-      >;
+      assertEquals(socketMessages.length, 2);
+      const forwarded = JSON.parse(
+        JSON.stringify(socketMessages[1]),
+      ) as Extract<BrokerMessage, { type: "task_continue" }>;
       assertEquals(forwarded.payload.taskId, paused.id);
       assertEquals(forwarded.payload.continuationMessage?.parts[0], {
         kind: "text",
@@ -373,15 +491,21 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const tunnelRegistry = new TunnelRegistry();
+    const remoteMessages = attachRemoteBrokerTunnelInbox(
+      tunnelRegistry,
+      "broker-remote",
+    );
 
     try {
       const broker = new BrokerServer(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
-      const ackPromise = waitForQueuedMessage(
-        kv,
+      const ackPromise = waitForCollectedMessage(
+        remoteMessages,
         (message) =>
           message.type === "federation_link_ack" &&
           message.to === "broker-remote",
@@ -427,10 +551,16 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const tunnelRegistry = new TunnelRegistry();
+    const remoteMessages = attachRemoteBrokerTunnelInbox(
+      tunnelRegistry,
+      "broker-origin",
+    );
 
     try {
       const broker = new BrokerServer(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
@@ -455,8 +585,8 @@ Deno.test(
         allowAgentIds: ["agent-x"],
       });
 
-      const ackPromise = waitForQueuedMessage(
-        kv,
+      const ackPromise = waitForCollectedMessage(
+        remoteMessages,
         (message) =>
           message.type === "federation_link_ack" &&
           message.to === "broker-origin",
@@ -499,10 +629,16 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const tunnelRegistry = new TunnelRegistry();
+    const remoteMessages = attachRemoteBrokerTunnelInbox(
+      tunnelRegistry,
+      "broker-origin",
+    );
 
     try {
       const broker = new BrokerServer(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
@@ -536,8 +672,8 @@ Deno.test(
         allowAgentIds: ["agent-denied-by-remote"],
       });
 
-      const ackPromise = waitForQueuedMessage(
-        kv,
+      const ackPromise = waitForCollectedMessage(
+        remoteMessages,
         (message) =>
           message.type === "federation_link_ack" &&
           message.to === "broker-origin",
@@ -580,14 +716,19 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const { messages: socketMessages, socket } = createSocketCollector();
+    const tunnelRegistry = new TunnelRegistry();
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      attachRemoteBrokerTunnelInbox(tunnelRegistry, "broker-remote");
+      const broker = createTestBroker(createConfig(), {
         kv,
+        tunnelRegistry,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      registerConnectedAgentSocket(broker, "agent-beta", socket);
 
       await broker.handleIncomingMessage({
         id: "fed-open-a2a-1",
@@ -603,8 +744,6 @@ Deno.test(
         timestamp: new Date().toISOString(),
       });
 
-      const queuedMessages = createQueueCollector(kv);
-
       const submitted = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
         taskId: "task-a2a-regression",
@@ -612,13 +751,9 @@ Deno.test(
       });
 
       assertEquals(submitted.status.state, "SUBMITTED");
-      const submitForwarded = (await waitForCollectedMessage(
-        queuedMessages,
-        (message) =>
-          message.type === "task_submit" &&
-          message.to === "agent-beta" &&
-          message.payload.taskId === "task-a2a-regression",
-      )) as Extract<BrokerMessage, { type: "task_submit" }>;
+      const submitForwarded = JSON.parse(
+        JSON.stringify(socketMessages[0]),
+      ) as Extract<BrokerMessage, { type: "task_submit" }>;
       assertEquals(submitForwarded.payload.targetAgent, "agent-beta");
 
       await kv.set(["a2a_tasks", submitted.id], {
@@ -634,13 +769,9 @@ Deno.test(
         message: createMessage("Continue please"),
       });
 
-      const continuedForwarded = (await waitForCollectedMessage(
-        queuedMessages,
-        (message) =>
-          message.type === "task_continue" &&
-          message.to === "agent-beta" &&
-          message.payload.taskId === submitted.id,
-      )) as Extract<BrokerMessage, { type: "task_continue" }>;
+      const continuedForwarded = JSON.parse(
+        JSON.stringify(socketMessages[1]),
+      ) as Extract<BrokerMessage, { type: "task_continue" }>;
       assertEquals(continuedForwarded.payload.taskId, submitted.id);
 
       await broker.cancelTask({ taskId: submitted.id });
@@ -663,7 +794,7 @@ Deno.test(
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
@@ -754,7 +885,7 @@ Deno.test(
       };
 
       let sandboxCalls = 0;
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => {
@@ -768,9 +899,10 @@ Deno.test(
         // deno-lint-ignore no-explicit-any
         metrics: { recordToolCall: async () => {} } as any,
       });
+      const alphaMessages = attachConnectedAgentInbox(broker, "agent-alpha");
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        alphaMessages,
         (message) => message.type === "error" && message.to === "agent-alpha",
       );
 
@@ -842,7 +974,7 @@ Deno.test(
         allowedPermissions: ["read"],
       };
 
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "" }),
@@ -852,6 +984,8 @@ Deno.test(
         },
         metrics: new MetricsCollector(kv),
       });
+      attachConnectedAgentInbox(broker, "agent-alpha");
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
 
       const parent = await broker.submitChannelMessage(
         {
@@ -893,8 +1027,8 @@ Deno.test(
         parentBrokerMetadata?.channel,
       );
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        betaMessages,
         (message) =>
           message.type === "error" && message.to === "agent-beta" &&
           message.id === "tool-req-child-channel-elevation",
@@ -949,7 +1083,7 @@ Deno.test(
       };
 
       let sandboxCalls = 0;
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => {
@@ -963,6 +1097,7 @@ Deno.test(
         // deno-lint-ignore no-explicit-any
         metrics: { recordToolCall: async () => {} } as any,
       });
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
 
       await kv.set(["agents", "agent-beta", "config"], {
         sandbox: {
@@ -973,8 +1108,8 @@ Deno.test(
         },
       });
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        betaMessages,
         (message) => message.type === "error" && message.to === "agent-beta",
       );
 
@@ -1034,7 +1169,7 @@ Deno.test(
         allowedPermissions: ["read"],
       };
 
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "" }),
@@ -1044,6 +1179,7 @@ Deno.test(
         },
         metrics: new MetricsCollector(kv),
       });
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
 
       const submitted = await broker.submitChannelMessage(
         {
@@ -1065,8 +1201,8 @@ Deno.test(
         },
       );
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        betaMessages,
         (message) =>
           message.type === "error" && message.to === "agent-beta" &&
           message.id === "tool-req-channel-elevation",
@@ -1126,7 +1262,7 @@ Deno.test(
         allowedPermissions: ["read"],
       };
 
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "" }),
@@ -1136,6 +1272,8 @@ Deno.test(
         },
         metrics: new MetricsCollector(kv),
       });
+      attachConnectedAgentInbox(broker, "agent-alpha");
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
 
       const parent = await broker.submitChannelMessage(
         {
@@ -1181,8 +1319,8 @@ Deno.test(
         },
       });
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        betaMessages,
         (message) =>
           message.type === "error" && message.to === "agent-beta" &&
           message.id === "tool-req-delegated-channel-elevation",
@@ -1233,11 +1371,12 @@ Deno.test(
 
     try {
       await seedPeerPolicy(kv, "agent-beta", "agent-gamma");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
       });
+      attachConnectedAgentInbox(broker, "agent-alpha");
 
       const parent = await broker.submitChannelMessage(
         {
@@ -1292,7 +1431,7 @@ Deno.test(
       };
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
 
-      const broker = new BrokerServer(config, {
+      const broker = createTestBroker(config, {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "" }),
@@ -1302,6 +1441,8 @@ Deno.test(
         },
         metrics: new MetricsCollector(kv),
       });
+      attachConnectedAgentInbox(broker, "agent-alpha");
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
 
       const parentTask = await broker.submitChannelMessage(
         {
@@ -1330,8 +1471,8 @@ Deno.test(
         taskMessage: createMessage("Write delegated.txt"),
       });
 
-      const replyPromise = waitForQueuedMessage(
-        kv,
+      const replyPromise = waitForCollectedMessage(
+        betaMessages,
         (message) =>
           message.type === "error" && message.to === "agent-beta" &&
           message.id === "tool-req-delegated-elevation",
@@ -1406,7 +1547,7 @@ Deno.test(
         },
       });
 
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
@@ -1480,7 +1621,7 @@ Deno.test(
       });
 
       const queueMessages = createQueueCollector(kv);
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "ok" }),
@@ -1623,7 +1764,7 @@ Deno.test(
 
       const executedTools: string[] = [];
       const queueMessages = createQueueCollector(kv);
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: (request) => {
@@ -1873,7 +2014,7 @@ Deno.test(
 
       const queueMessages = createQueueCollector(kv);
       const executedUrls: string[] = [];
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: (request) => {
@@ -2015,7 +2156,7 @@ Deno.test(
 
       const queueMessages = createQueueCollector(kv);
       const executedTools: string[] = [];
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: (request) => {
@@ -2161,6 +2302,8 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-beta");
+      await seedAgentEndpoint(kv, "agent-gamma");
       await kv.set(["agents", "agent-alpha", "config"], {
         peers: ["agent-beta", "agent-gamma"],
       });
@@ -2177,7 +2320,7 @@ Deno.test(
         },
       });
 
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: () => Promise.resolve({ success: true, output: "ok" }),
@@ -2282,7 +2425,7 @@ Deno.test(
 
     try {
       await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         // deno-lint-ignore no-explicit-any
         metrics: { recordAgentMessage: async () => {} } as any,
@@ -2354,6 +2497,7 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-alpha");
       await kv.set(["agents", "agent-alpha", "config"], {
         sandbox: {
           allowedPermissions: ["run"],
@@ -2365,7 +2509,7 @@ Deno.test(
       });
 
       let sandboxCalls = 0;
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: () => {
@@ -2441,6 +2585,7 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-alpha");
       await kv.set(["agents", "agent-alpha", "config"], {
         sandbox: {
           allowedPermissions: ["run"],
@@ -2452,7 +2597,7 @@ Deno.test(
       });
 
       let sandboxCalls = 0;
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: () => {
@@ -2528,6 +2673,7 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-alpha");
       await kv.set(["agents", "agent-alpha", "config"], {
         sandbox: {
           allowedPermissions: ["run"],
@@ -2556,7 +2702,7 @@ Deno.test(
       });
 
       let executeCalls = 0;
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         tunnelRegistry,
         toolExecution: {
@@ -2624,6 +2770,7 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-alpha");
       await kv.set(["agents", "agent-alpha", "config"], {
         sandbox: {
           allowedPermissions: ["run"],
@@ -2710,6 +2857,7 @@ Deno.test(
     const kv = await Deno.openKv(kvPath);
 
     try {
+      await seedAgentEndpoint(kv, "agent-alpha");
       await kv.set(["agents", "agent-alpha", "config"], {
         sandbox: {
           allowedPermissions: ["run"],
@@ -2721,7 +2869,7 @@ Deno.test(
       });
 
       let capturedRequest: Record<string, unknown> | undefined;
-      const broker = new BrokerServer(createConfig(), {
+      const broker = createTestBroker(createConfig(), {
         kv,
         toolExecution: {
           executeTool: (request) => {
@@ -2943,7 +3091,7 @@ Deno.test(
 );
 
 Deno.test(
-  "BrokerServer.submitAgentTask posts to registered agent endpoint before KV fallback",
+  "BrokerServer.submitAgentTask posts to registered agent endpoint when no live route is available",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
@@ -3016,6 +3164,7 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const { messages: socketMessages, socket } = createSocketCollector();
     const broker = new BrokerServer(createConfig(), {
       kv,
       // deno-lint-ignore no-explicit-any
@@ -3026,11 +3175,7 @@ Deno.test(
     Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
 
     try {
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_submit" && message.to === "agent-beta",
-      );
+      registerConnectedAgentSocket(broker, "agent-beta", socket);
 
       const res = await (
         broker as unknown as {
@@ -3092,7 +3237,8 @@ Deno.test(
         },
       });
 
-      const forwarded = (await forwardedPromise) as Extract<
+      assertEquals(socketMessages.length, 1);
+      const forwarded = socketMessages[0] as Extract<
         BrokerMessage,
         { type: "task_submit" }
       >;
@@ -3120,6 +3266,8 @@ Deno.test(
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
+    const originalFetch = globalThis.fetch;
+    const { calls, fetch } = createAgentEndpointFetchCollector();
     const broker = new BrokerServer(createConfig(), {
       kv,
       // deno-lint-ignore no-explicit-any
@@ -3130,6 +3278,11 @@ Deno.test(
     Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
 
     try {
+      await kv.set(
+        ["agents", "agent-beta", "endpoint"],
+        "https://agent-beta.example",
+      );
+      globalThis.fetch = fetch;
       const initialMessage = {
         id: "telegram-msg-2",
         sessionId: "telegram-999",
@@ -3162,12 +3315,6 @@ Deno.test(
         },
       });
 
-      const forwardedPromise = waitForQueuedMessage(
-        kv,
-        (message) =>
-          message.type === "task_continue" && message.to === "agent-beta",
-      );
-
       const res = await (
         broker as unknown as {
           handleHttpInner(req: Request): Promise<Response>;
@@ -3194,10 +3341,10 @@ Deno.test(
       assertEquals(body.task.id, "channel-task-2");
       assertEquals(body.task.status.state, "INPUT_REQUIRED");
 
-      const forwarded = (await forwardedPromise) as Extract<
-        BrokerMessage,
-        { type: "task_continue" }
-      >;
+      assertEquals(calls.length, 2);
+      const forwarded = JSON.parse(
+        String(calls[1].init?.body),
+      ) as Extract<BrokerMessage, { type: "task_continue" }>;
       assertEquals(forwarded.from, "channel:telegram");
       assertEquals(forwarded.payload.taskId, "channel-task-2");
       assertEquals(forwarded.payload.continuationMessage?.parts[0], {
@@ -3205,6 +3352,7 @@ Deno.test(
         text: "Approved, continue",
       });
     } finally {
+      globalThis.fetch = originalFetch;
       if (previousStaticToken === undefined) {
         Deno.env.delete("DENOCLAW_API_TOKEN");
       } else {

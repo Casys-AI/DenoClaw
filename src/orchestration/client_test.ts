@@ -1,6 +1,9 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { BrokerClient } from "./client.ts";
-import type { BrokerMessage } from "./types.ts";
+import type { BrokerTransport } from "./transport.ts";
+import { DenoClawError } from "../shared/errors.ts";
+import { createBrokerRequestMessage } from "./transport_message_factory.ts";
+import type { BrokerRequestMessage, BrokerResponseMessage } from "./types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 
 function createTask(taskId: string): Task {
@@ -22,16 +25,51 @@ function createTask(taskId: string): Task {
   };
 }
 
-function startBrokerResponder(kv: Deno.Kv): void {
-  kv.listenQueue(async (raw: unknown) => {
-    const message = raw as BrokerMessage;
-    if (message.to !== "broker") return;
+class FakeBrokerTransport implements BrokerTransport {
+  #started = false;
 
-    let response: BrokerMessage | null = null;
+  constructor(
+    private readonly agentId: string,
+    private readonly responder: (
+      request: BrokerRequestMessage,
+    ) => Promise<BrokerResponseMessage> | BrokerResponseMessage,
+  ) {}
+
+  start(): Promise<void> {
+    this.#started = true;
+    return Promise.resolve();
+  }
+
+  async send(
+    message: Omit<BrokerRequestMessage, "id" | "from" | "timestamp">,
+  ): Promise<BrokerResponseMessage> {
+    if (!this.#started) {
+      throw new DenoClawError(
+        "TRANSPORT_NOT_STARTED",
+        { agentId: this.agentId },
+        "Call start() before send()",
+      );
+    }
+
+    return await this.responder(
+      createBrokerRequestMessage(this.agentId, message),
+    );
+  }
+
+  close(): void {
+    this.#started = false;
+  }
+}
+
+function createBrokerResponder(
+  expectedAgentId: string,
+): (request: BrokerRequestMessage) => BrokerResponseMessage {
+  return (message: BrokerRequestMessage): BrokerResponseMessage => {
+    assertEquals(message.from, expectedAgentId);
 
     switch (message.type) {
       case "task_submit":
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -39,9 +77,8 @@ function startBrokerResponder(kv: Deno.Kv): void {
           payload: { task: createTask(message.payload.taskId) },
           timestamp: new Date().toISOString(),
         };
-        break;
       case "task_get":
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -49,9 +86,8 @@ function startBrokerResponder(kv: Deno.Kv): void {
           payload: { task: createTask(message.payload.taskId) },
           timestamp: new Date().toISOString(),
         };
-        break;
       case "task_continue":
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -68,9 +104,8 @@ function startBrokerResponder(kv: Deno.Kv): void {
           },
           timestamp: new Date().toISOString(),
         };
-        break;
       case "task_cancel":
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -86,9 +121,8 @@ function startBrokerResponder(kv: Deno.Kv): void {
           },
           timestamp: new Date().toISOString(),
         };
-        break;
       case "task_result":
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -96,9 +130,8 @@ function startBrokerResponder(kv: Deno.Kv): void {
           payload: { task: message.payload.task },
           timestamp: new Date().toISOString(),
         };
-        break;
       default:
-        response = {
+        return {
           id: message.id,
           from: "broker",
           to: message.from,
@@ -111,100 +144,90 @@ function startBrokerResponder(kv: Deno.Kv): void {
           timestamp: new Date().toISOString(),
         };
     }
-
-    await kv.enqueue(response);
-  });
+  };
 }
 
 Deno.test("BrokerClient submit/get/continue/cancel use canonical task operations", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
+  const client = new BrokerClient("agent-alpha", {
+    transport: new FakeBrokerTransport(
+      "agent-alpha",
+      createBrokerResponder("agent-alpha"),
+    ),
+  });
+  await client.startListening();
 
-  try {
-    startBrokerResponder(kv);
-    const client = new BrokerClient("agent-alpha", { kv });
-    await client.startListening();
+  const submitted = await client.submitTask({
+    targetAgent: "agent-beta",
+    taskId: "task-1",
+    message: {
+      messageId: crypto.randomUUID(),
+      role: "user",
+      parts: [{ kind: "text", text: "hello" }],
+    },
+  });
+  assertEquals(submitted.id, "task-1");
+  assertEquals(submitted.status.state, "SUBMITTED");
 
-    const submitted = await client.submitTask({
-      targetAgent: "agent-beta",
-      taskId: "task-1",
-      message: {
-        messageId: crypto.randomUUID(),
-        role: "user",
-        parts: [{ kind: "text", text: "hello" }],
+  const fetched = await client.getTask("task-1");
+  assertExists(fetched);
+  assertEquals(fetched?.id, "task-1");
+
+  const resumed = await client.continueTask({
+    taskId: "task-1",
+    message: {
+      messageId: crypto.randomUUID(),
+      role: "user",
+      parts: [{ kind: "text", text: "continue" }],
+    },
+    metadata: {
+      resume: {
+        kind: "privilege-elevation",
+        approved: true,
+        scope: "task",
+        grants: [{ permission: "write", paths: ["docs"] }],
       },
-    });
-    assertEquals(submitted.id, "task-1");
-    assertEquals(submitted.status.state, "SUBMITTED");
+    },
+  });
+  assertExists(resumed);
+  assertEquals(resumed?.status.state, "WORKING");
 
-    const fetched = await client.getTask("task-1");
-    assertExists(fetched);
-    assertEquals(fetched?.id, "task-1");
+  const canceled = await client.cancelTask("task-1");
+  assertExists(canceled);
+  assertEquals(canceled?.status.state, "CANCELED");
 
-    const resumed = await client.continueTask({
-      taskId: "task-1",
-      message: {
-        messageId: crypto.randomUUID(),
-        role: "user",
-        parts: [{ kind: "text", text: "continue" }],
-      },
-      metadata: {
-        resume: {
-          kind: "privilege-elevation",
-          approved: true,
-          scope: "task",
-          grants: [{ permission: "write", paths: ["docs"] }],
-        },
-      },
-    });
-    assertExists(resumed);
-    assertEquals(resumed?.status.state, "WORKING");
-
-    const canceled = await client.cancelTask("task-1");
-    assertExists(canceled);
-    assertEquals(canceled?.status.state, "CANCELED");
-
-    client.close();
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
+  client.close();
 });
 
 Deno.test("BrokerClient.reportTaskResult round-trips canonical task updates", async () => {
-  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-  const kv = await Deno.openKv(kvPath);
+  const client = new BrokerClient("agent-beta", {
+    transport: new FakeBrokerTransport(
+      "agent-beta",
+      createBrokerResponder("agent-beta"),
+    ),
+  });
+  await client.startListening();
 
-  try {
-    startBrokerResponder(kv);
-    const client = new BrokerClient("agent-beta", { kv });
-    await client.startListening();
-
-    const completed = await client.reportTaskResult({
-      ...createTask("task-report"),
-      status: {
-        state: "COMPLETED",
-        timestamp: new Date().toISOString(),
+  const completed = await client.reportTaskResult({
+    ...createTask("task-report"),
+    status: {
+      state: "COMPLETED",
+      timestamp: new Date().toISOString(),
+    },
+    artifacts: [
+      {
+        artifactId: "task-report:result",
+        name: "result",
+        parts: [{ kind: "text", text: "done" }],
       },
-      artifacts: [
-        {
-          artifactId: "task-report:result",
-          name: "result",
-          parts: [{ kind: "text", text: "done" }],
-        },
-      ],
-    });
+    ],
+  });
 
-    assertEquals(completed.id, "task-report");
-    assertEquals(completed.status.state, "COMPLETED");
-    assertEquals(completed.artifacts[0]?.parts[0], {
-      kind: "text",
-      text: "done",
-    });
+  assertEquals(completed.id, "task-report");
+  assertEquals(completed.status.state, "COMPLETED");
+  assertEquals(completed.artifacts[0]?.parts[0], {
+    kind: "text",
+    text: "done",
+  });
 
-    client.close();
-  } finally {
-    kv.close();
-    await Deno.remove(kvPath);
-  }
+  client.close();
 });

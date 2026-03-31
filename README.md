@@ -130,7 +130,9 @@ not the local KV transport.
 ```bash
 deno task dev       # Backend with watch
 deno task dashboard # Dashboard dev server
-deno task test      # Test suite
+deno task test      # Source test suite (default)
+deno task test:e2e  # End-to-end tests
+deno task test:all  # Source + tests/ suites
 deno task check     # Type-check
 deno task lint      # Lint
 deno task fmt       # Format

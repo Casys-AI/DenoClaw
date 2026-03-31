@@ -102,6 +102,8 @@ Operational loop: **Plan -> Scope -> Act -> Verify -> Recover**.
 
 - Minimum bar before shipping code changes: `deno task test`, `deno task lint`,
   `deno task check`.
+- Run `deno task test:all` or `deno task test:e2e` when touching the `tests/`
+  suite or provider-backed end-to-end flows.
 - Prefer narrow tests close to the changed behavior.
 - Test invariants and edge cases before optimizing happy-path ergonomics.
 

@@ -107,6 +107,20 @@ Operational loop: **Plan -> Scope -> Act -> Verify -> Recover**.
 - Prefer narrow tests close to the changed behavior.
 - Test invariants and edge cases before optimizing happy-path ergonomics.
 
+## Skills
+
+Deno-specific skills live in `skills/` (from [denoland/skills](https://github.com/denoland/skills)).
+When working on this project, consult the relevant skill SKILL.md for best practices:
+
+| Skill | When to use |
+|---|---|
+| `deno-guidance` | JSR imports, deno.json config, CLI commands, permissions |
+| `deno-deploy` | Deployment to Deno Deploy, KV in production, `deno deploy` CLI |
+| `deno-frontend` | Fresh 2.x, Preact islands, Tailwind CSS |
+| `deno-sandbox` | `@deno/sandbox` for untrusted/AI-generated code execution |
+| `deno-expert` | Code review, debugging, advanced patterns |
+| `deno-project-templates` | Scaffolding new projects or modules |
+
 ## What This File Should Not Become
 
 - Not an ADR index.

@@ -1767,6 +1767,126 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer does not leak session-scoped privilege grants across agents sharing a context",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await kv.set(["agents", "agent-alpha", "config"], {
+        peers: ["agent-beta", "agent-gamma"],
+      });
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+      await kv.set(["agents", "agent-gamma", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "ok" }),
+          resolveToolPermissions: (tool) => {
+            switch (tool) {
+              case "write_file":
+                return ["write"];
+              default:
+                return [];
+            }
+          },
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const firstTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-session-grant-beta",
+        contextId: "ctx-shared-session-grant",
+        taskMessage: createMessage("Task one"),
+      });
+
+      await kv.set(["a2a_tasks", firstTask.id], {
+        ...firstTask,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["session.txt"] }],
+            scope: "session",
+            prompt: "Need session write access",
+          }),
+        },
+      });
+
+      await broker.continueAgentTask("agent-alpha", {
+        taskId: firstTask.id,
+        continuationMessage: createMessage("Grant write for session"),
+        metadata: createResumePayloadMetadata({
+          kind: "privilege-elevation",
+          approved: true,
+          scope: "session",
+        }),
+      });
+
+      const secondTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-gamma",
+        taskId: "task-session-grant-gamma",
+        contextId: "ctx-shared-session-grant",
+        taskMessage: createMessage("Task two"),
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "error" &&
+          message.id === "tool-session-write-cross-agent",
+      );
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-session-write-cross-agent",
+        from: "agent-gamma",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "session.txt", content: "hello" },
+          taskId: secondTask.id,
+          contextId: "ctx-shared-session-grant",
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.denied, ["write"]);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer rejects privilege-elevation resumes that broaden requested grants or scope",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
@@ -2268,7 +2388,7 @@ Deno.test(
         agentId: "agent-alpha",
         taskId: "task-context",
         contextId: "ctx-context",
-        ownershipScope: "agent",
+        ownershipScope: "context",
       });
 
       await broker.stop();

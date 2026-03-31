@@ -14,6 +14,7 @@ export interface BrokerSandboxManagerOptions {
   createBackend(
     config: SandboxConfig,
     context: Required<Pick<ToolExecutionContext, "agentId">> & {
+      contextId?: string;
       ownershipScope: SandboxOwnershipScope;
     },
     labels: Record<string, string>,
@@ -158,15 +159,24 @@ export class BrokerSandboxManager {
   private requireOwnedContext(
     context?: ToolExecutionContext,
   ): Required<Pick<ToolExecutionContext, "agentId">> & {
+    contextId?: string;
     ownershipScope: SandboxOwnershipScope;
   } {
     const agentId = context?.agentId?.trim();
     if (!agentId) {
       throw new Error("SandboxManager requires executionContext.agentId");
     }
+    const ownershipScope = context?.ownershipScope ?? "agent";
+    const contextId = context?.contextId?.trim();
+    if (ownershipScope === "context" && !contextId) {
+      throw new Error(
+        "SandboxManager requires executionContext.contextId for context-scoped ownership",
+      );
+    }
     return {
       agentId,
-      ownershipScope: context?.ownershipScope ?? "agent",
+      ...(contextId ? { contextId } : {}),
+      ownershipScope,
     };
   }
 
@@ -182,9 +192,13 @@ export class BrokerSandboxManager {
 
   private createOwnerKey(
     context: Required<Pick<ToolExecutionContext, "agentId">> & {
+      contextId?: string;
       ownershipScope: SandboxOwnershipScope;
     },
   ): string {
+    if (context.ownershipScope === "context") {
+      return `${context.ownershipScope}:${context.agentId}:${context.contextId}`;
+    }
     return `${context.ownershipScope}:${context.agentId}`;
   }
 
@@ -198,15 +212,19 @@ export class BrokerSandboxManager {
 
   private createLabels(
     context: Required<Pick<ToolExecutionContext, "agentId">> & {
+      contextId?: string;
       ownershipScope: SandboxOwnershipScope;
     },
   ): Record<string, string> {
+    const ownerId = context.ownershipScope === "context"
+      ? `${context.agentId}:${context.contextId}`
+      : context.agentId;
     return {
       app: "denoclaw",
       runtime: "broker",
       backend: "cloud",
       owner_scope: context.ownershipScope,
-      owner_id: this.truncateLabelValue(context.agentId),
+      owner_id: this.truncateLabelValue(ownerId),
     };
   }
 

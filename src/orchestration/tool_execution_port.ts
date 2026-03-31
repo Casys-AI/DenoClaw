@@ -12,7 +12,7 @@ export interface ExecPolicyCheckResult {
   recovery?: string;
 }
 
-export type SandboxOwnershipScope = "agent";
+export type SandboxOwnershipScope = "agent" | "context";
 
 export interface ToolExecutionContext {
   agentId?: string;

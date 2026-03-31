@@ -534,6 +534,7 @@ export class BrokerTaskDispatcher {
       };
       if (grant.scope === "session") {
         await this.deps.persistence.appendContextPrivilegeElevationGrant(
+          targetAgentId,
           existing.contextId ?? existing.id,
           grant,
         );

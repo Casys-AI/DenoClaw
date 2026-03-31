@@ -90,11 +90,13 @@ export class BrokerTaskPersistence {
   }
 
   async getContextPrivilegeElevationGrants(
+    agentId: string,
     contextId: string,
   ): Promise<PrivilegeElevationGrant[]> {
     const kv = await this.deps.getKv();
     const entry = await kv.get<PrivilegeElevationGrant[]>([
       "a2a_contexts",
+      agentId,
       contextId,
       "privilege_elevation_grants",
     ]);
@@ -102,18 +104,20 @@ export class BrokerTaskPersistence {
   }
 
   async appendContextPrivilegeElevationGrant(
+    agentId: string,
     contextId: string,
     grant: PrivilegeElevationGrant,
   ): Promise<void> {
     const kv = await this.deps.getKv();
     const entry = await kv.get<PrivilegeElevationGrant[]>([
       "a2a_contexts",
+      agentId,
       contextId,
       "privilege_elevation_grants",
     ]);
     const grants = entry.value ?? [];
     await kv.set(
-      ["a2a_contexts", contextId, "privilege_elevation_grants"],
+      ["a2a_contexts", agentId, contextId, "privilege_elevation_grants"],
       [...grants, grant],
     );
   }

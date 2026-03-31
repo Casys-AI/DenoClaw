@@ -112,6 +112,72 @@ Deno.test("BrokerSandboxManager does not reuse sandboxes across agents", async (
   await manager.close();
 });
 
+Deno.test("BrokerSandboxManager reuses the same sandbox for the same agent context", async () => {
+  const created: FakeSandboxBackend[] = [];
+  const manager = new BrokerSandboxManager({
+    createBackend: () => {
+      const backend = new FakeSandboxBackend(`sandbox-${created.length + 1}`);
+      created.push(backend);
+      return backend;
+    },
+  });
+
+  const first = await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-1",
+      ownershipScope: "context",
+    },
+  }));
+  const second = await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-1",
+      ownershipScope: "context",
+      taskId: "task-2",
+    },
+  }));
+
+  assertEquals(first.output, "sandbox-1");
+  assertEquals(second.output, "sandbox-1");
+  assertEquals(created.length, 1);
+  assertEquals(created[0].executeCalls, 2);
+
+  await manager.close();
+});
+
+Deno.test("BrokerSandboxManager does not reuse sandboxes across contexts for the same agent", async () => {
+  const created: FakeSandboxBackend[] = [];
+  const manager = new BrokerSandboxManager({
+    createBackend: () => {
+      const backend = new FakeSandboxBackend(`sandbox-${created.length + 1}`);
+      created.push(backend);
+      return backend;
+    },
+  });
+
+  await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-1",
+      ownershipScope: "context",
+    },
+  }));
+  await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-2",
+      ownershipScope: "context",
+    },
+  }));
+
+  assertEquals(created.length, 2);
+  assertEquals(created[0].executeCalls, 1);
+  assertEquals(created[1].executeCalls, 1);
+
+  await manager.close();
+});
+
 Deno.test("BrokerSandboxManager recycles a sandbox when the network policy changes", async () => {
   const created: FakeSandboxBackend[] = [];
   const configs: SandboxConfig[] = [];
@@ -156,6 +222,34 @@ Deno.test("BrokerSandboxManager attaches truthful owner labels", async () => {
     backend: "cloud",
     owner_scope: "agent",
     owner_id: "bob",
+  }]);
+
+  await manager.close();
+});
+
+Deno.test("BrokerSandboxManager attaches context ownership labels when context-scoped", async () => {
+  const labelSets: Record<string, string>[] = [];
+  const manager = new BrokerSandboxManager({
+    createBackend: (_config, _context, labels) => {
+      labelSets.push(labels);
+      return new FakeSandboxBackend("sandbox-1");
+    },
+  });
+
+  await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-1",
+      ownershipScope: "context",
+    },
+  }));
+
+  assertEquals(labelSets, [{
+    app: "denoclaw",
+    runtime: "broker",
+    backend: "cloud",
+    owner_scope: "context",
+    owner_id: "bob:ctx-1",
   }]);
 
   await manager.close();
@@ -251,6 +345,55 @@ Deno.test("BrokerSandboxManager serializes same-agent executions on one sandbox"
   assertEquals(firstResult.output, "sandbox-1");
   assertEquals(secondResult.output, "sandbox-1");
   assertEquals(created[0].executeCalls, 2);
+
+  await manager.close();
+});
+
+Deno.test("BrokerSandboxManager allows same-agent executions to proceed in parallel across contexts", async () => {
+  const firstExecution = createDeferred<{ success: true; output: string }>();
+  const created: FakeSandboxBackend[] = [];
+
+  class BlockingBackend extends FakeSandboxBackend {
+    override execute() {
+      this.executeCalls++;
+      if (this.id === "sandbox-1") return firstExecution.promise;
+      return Promise.resolve({ success: true, output: this.id });
+    }
+  }
+
+  const manager = new BrokerSandboxManager({
+    createBackend: () => {
+      const backend = new BlockingBackend(`sandbox-${created.length + 1}`);
+      created.push(backend);
+      return backend;
+    },
+  });
+
+  const first = manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-1",
+      ownershipScope: "context",
+    },
+  }));
+  await waitFor(() => created.length === 1 && created[0].executeCalls === 1);
+
+  const second = await manager.executeTool(toolRequest("bob", {
+    executionContext: {
+      agentId: "bob",
+      contextId: "ctx-2",
+      ownershipScope: "context",
+      taskId: "task-2",
+    },
+  }));
+
+  assertEquals(second.output, "sandbox-2");
+  assertEquals(created.length, 2);
+  assertEquals(created[1].executeCalls, 1);
+
+  firstExecution.resolve({ success: true, output: "sandbox-1" });
+  const firstResult = await first;
+  assertEquals(firstResult.output, "sandbox-1");
 
   await manager.close();
 });

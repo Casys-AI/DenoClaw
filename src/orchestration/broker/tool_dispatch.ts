@@ -93,6 +93,7 @@ export class BrokerToolDispatcher {
       : [];
     const contextPrivilegeGrants = contextId
       ? await this.deps.persistence.getContextPrivilegeElevationGrants(
+        msg.from,
         contextId,
       )
       : [];
@@ -195,8 +196,8 @@ export class BrokerToolDispatcher {
         executionContext: {
           agentId: msg.from,
           taskId: req.taskId,
-          contextId: req.contextId,
-          ownershipScope: "agent",
+          contextId,
+          ownershipScope: contextId ? "context" : "agent",
         },
       });
 

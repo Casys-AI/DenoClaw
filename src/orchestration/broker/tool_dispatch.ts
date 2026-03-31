@@ -113,6 +113,12 @@ export class BrokerToolDispatcher {
         timeoutSec: maxDuration,
         execPolicy,
         toolsConfig: { agentId: msg.from },
+        executionContext: {
+          agentId: msg.from,
+          taskId: req.taskId,
+          contextId: req.contextId,
+          ownershipScope: "agent",
+        },
       });
 
       this.deps.metrics.recordToolCall(

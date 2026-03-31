@@ -39,8 +39,12 @@ import { BrokerToolDispatcher } from "./tool_dispatch.ts";
 import type { ToolExecutionPort } from "../tool_execution_port.ts";
 import { LocalToolExecutionAdapter } from "../adapters/tool_execution_local.ts";
 import { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
-import { getSandboxAccessToken } from "../../shared/deploy_credentials.ts";
+import {
+  getMaxSandboxesPerBroker,
+  getSandboxAccessToken,
+} from "../../shared/deploy_credentials.ts";
 import { BrokerMessageRuntime } from "./message_runtime.ts";
+import { BrokerSandboxManager } from "./sandbox_manager.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -208,12 +212,14 @@ export class BrokerServer {
 
   private createDefaultToolExecutionAdapter(): ToolExecutionPort {
     const sandboxToken = getSandboxAccessToken() ?? "";
-    const defaultSandboxConfig = this.config.agents?.defaults?.sandbox ?? {
-      allowedPermissions: [],
-    };
     const sandbox = sandboxToken
-      ? new DenoSandboxBackend(defaultSandboxConfig, sandboxToken, {
-        trustGrantedPermissions: true,
+      ? new BrokerSandboxManager({
+        maxSandboxes: getMaxSandboxesPerBroker(),
+        createBackend: (sandboxConfig, _context, labels) =>
+          new DenoSandboxBackend(sandboxConfig, sandboxToken, {
+            trustGrantedPermissions: true,
+            labels,
+          }),
       })
       : null;
     return new LocalToolExecutionAdapter({
@@ -423,5 +429,6 @@ export class BrokerServer {
 
   async stop(): Promise<void> {
     await this.lifecycleRuntime.stop();
+    await this.toolExecution.close?.();
   }
 }

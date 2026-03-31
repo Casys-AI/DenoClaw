@@ -10,6 +10,15 @@ export interface ExecPolicyCheckResult {
   binary?: string;
 }
 
+export type SandboxOwnershipScope = "agent";
+
+export interface ToolExecutionContext {
+  agentId?: string;
+  taskId?: string;
+  contextId?: string;
+  ownershipScope?: SandboxOwnershipScope;
+}
+
 export interface ExecuteToolRequest {
   tool: string;
   args: Record<string, unknown>;
@@ -18,6 +27,7 @@ export interface ExecuteToolRequest {
   timeoutSec?: number;
   execPolicy?: ExecPolicy;
   toolsConfig?: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
 }
 
 export interface ToolExecutionPort {
@@ -28,4 +38,5 @@ export interface ToolExecutionPort {
   ): SandboxPermission[];
   checkExecPolicy(command: string, policy: ExecPolicy): ExecPolicyCheckResult;
   getToolPermissions(): Record<string, SandboxPermission[]>;
+  close?(): Promise<void>;
 }

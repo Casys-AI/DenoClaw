@@ -50,6 +50,7 @@ export class DenoSandboxBackend implements SandboxBackend {
   private sandboxConfig: SandboxConfig;
   private token: string;
   private trustGrantedPermissions: boolean;
+  private labels?: Record<string, string>;
   // deno-lint-ignore no-explicit-any
   private sandbox: any = null;
   private initPromise: Promise<void> | null = null;
@@ -57,11 +58,15 @@ export class DenoSandboxBackend implements SandboxBackend {
   constructor(
     sandboxConfig: SandboxConfig,
     token: string,
-    options?: { trustGrantedPermissions?: boolean },
+    options?: {
+      trustGrantedPermissions?: boolean;
+      labels?: Record<string, string>;
+    },
   ) {
     this.sandboxConfig = sandboxConfig;
     this.token = token;
     this.trustGrantedPermissions = options?.trustGrantedPermissions ?? false;
+    this.labels = options?.labels;
   }
 
   async execute(req: SandboxExecRequest): Promise<ToolResult> {
@@ -214,6 +219,7 @@ export class DenoSandboxBackend implements SandboxBackend {
       token: this.token,
       allowNet: this.sandboxConfig.networkAllow,
       timeout: `${Math.min(timeoutMin, 30)}m`,
+      ...(this.labels ? { labels: this.labels } : {}),
       env: {
         LOG_LEVEL: Deno.env.get("LOG_LEVEL") ?? "info",
         DENOCLAW_EXEC: "1",

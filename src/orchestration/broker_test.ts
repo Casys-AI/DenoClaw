@@ -825,6 +825,86 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer forwards execution context for broker-backed tool execution",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await kv.set(["agents", "agent-alpha", "config"], {
+        sandbox: {
+          allowedPermissions: ["run"],
+          execPolicy: {
+            security: "allowlist",
+            allowedCommands: ["echo"],
+            ask: "off",
+          },
+        },
+      });
+
+      let capturedRequest: Record<string, unknown> | undefined;
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: (request) => {
+            capturedRequest = request as unknown as Record<string, unknown>;
+            return Promise.resolve({ success: true, output: "ok" });
+          },
+          resolveToolPermissions: () => ["run"],
+          checkExecPolicy: () => ({ allowed: true, binary: "echo" }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "tool_response" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-context",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "shell",
+          args: { command: "echo hi", dry_run: false },
+          taskId: "task-context",
+          contextId: "ctx-context",
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(reply.payload.success, true);
+      assertEquals(capturedRequest?.executionContext, {
+        agentId: "agent-alpha",
+        taskId: "task-context",
+        contextId: "ctx-context",
+        ownershipScope: "agent",
+      });
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer consumes one approved continuation to allow the next broker-backed shell execution",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });

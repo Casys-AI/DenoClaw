@@ -15,11 +15,10 @@ import { ToolRegistry } from "../../agent/tools/registry.ts";
 import { ShellTool } from "../../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../../agent/tools/file.ts";
 import { WebFetchTool } from "../../agent/tools/web.ts";
-import type { DenoSandboxBackend } from "../../agent/tools/backends/cloud.ts";
 
 export interface LocalToolExecutionAdapterOptions {
   registry?: ToolRegistry;
-  sandbox?: DenoSandboxBackend | null;
+  sandbox?: Pick<ToolExecutionPort, "executeTool" | "close"> | null;
   requireSandboxForPermissionedTools?: boolean;
 }
 
@@ -29,7 +28,7 @@ function isBuiltinTool(tool: string): tool is BuiltinToolName {
 
 export class LocalToolExecutionAdapter implements ToolExecutionPort {
   private registry: ToolRegistry;
-  private sandbox: DenoSandboxBackend | null;
+  private sandbox: Pick<ToolExecutionPort, "executeTool" | "close"> | null;
   private requireSandboxForPermissionedTools: boolean;
 
   constructor(options?: LocalToolExecutionAdapterOptions) {
@@ -60,15 +59,7 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
 
   executeTool(request: ExecuteToolRequest): Promise<ToolResult> {
     if (this.sandbox && request.permissions && request.execPolicy) {
-      return this.sandbox.execute({
-        tool: request.tool,
-        args: request.args,
-        permissions: request.permissions,
-        networkAllow: request.networkAllow,
-        timeoutSec: request.timeoutSec,
-        execPolicy: request.execPolicy,
-        toolsConfig: request.toolsConfig,
-      });
+      return this.sandbox.executeTool(request);
     }
     if (
       this.requireSandboxForPermissionedTools &&
@@ -111,5 +102,9 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
 
   getToolPermissions(): Record<string, SandboxPermission[]> {
     return this.registry.getToolPermissions();
+  }
+
+  async close(): Promise<void> {
+    await this.sandbox?.close?.();
   }
 }

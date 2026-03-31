@@ -71,9 +71,55 @@ Both changes align with a potential ADK integration:
   related discussion — KV private stays for lightweight workspace state, heavy
   conversation history moves to a proper DB.
 
+## 4. Persistence architecture for Deno Deploy
+
+### Constraint
+
+On Deno Deploy, available persistence options are:
+- **Deno KV** (native, zero-config)
+- **Prisma Postgres** (Deno Deploy managed)
+- **External HTTP services** (Turso remote, Supabase, etc.)
+
+LibSQL/SQLite embedded is **not available** on Deploy.
+
+### Proposed split
+
+**Deno KV — control plane (lightweight state):**
+- Auth tokens (invite, session, agent)
+- Agent status / heartbeat / monitoring
+- Workspace files (soul, skills, config — see §2)
+- Caches, flags, coordination
+
+**Prisma Postgres — data plane (conversational + memory):**
+- Session history (messages, events, full conversation)
+- Session state (ADK-style key-value with prefixes: session/user/app/temp)
+- Long-term memory (cross-session, searchable)
+- **Embeddings via pgvector** — semantic recall, vector search natively in Postgres
+
+### Why this split
+
+- KV excels at small key-value lookups, bad at large serialized blobs and
+  partial queries on conversation history.
+- Prisma Postgres gives SQL queries, pagination, partial reads, relational
+  joins, and pgvector for embeddings — all in one backend.
+- Both are Deno Deploy native. No external infra needed.
+
+### ADK alignment
+
+- `SessionService` adapter → Prisma Postgres (sessions + state + events)
+- `MemoryService` adapter → Prisma Postgres (pgvector for semantic search)
+- Workspace/config loading → Deno KV (private per-agent)
+- Control plane coordination → Deno KV (shared)
+
+This gives the full ADK memory model (session state, conversation history,
+long-term semantic memory) on Deploy-compatible infra.
+
 ## TODO
 
 - [ ] Verify cron jobs currently registered by agents — what schedules exist
 - [ ] Design broker-side scheduling API (or reuse existing broker cron if any)
 - [ ] Prototype KvWorkspaceLoader adapter
 - [ ] Decide: traces stay on shared KV or route through broker
+- [ ] Design Prisma schema for sessions + state + memory + embeddings
+- [ ] Prototype DenoKvSessionService (lightweight) vs PrismaSessionService (full)
+- [ ] Evaluate pgvector embedding dimensions (OpenAI 1536 vs smaller models)

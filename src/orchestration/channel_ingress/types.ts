@@ -1,11 +1,24 @@
 import type { Task } from "../../messaging/a2a/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 
-export interface ChannelRouteHint {
+export interface DirectChannelIngressRouteInput {
   agentId?: string;
   contextId?: string;
   metadata?: Record<string, unknown>;
 }
+
+export interface DirectChannelIngressRoute {
+  agentId: string;
+  contextId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Legacy compatibility alias for the current direct-only ingress seam.
+ * Prefer `DirectChannelIngressRoute` in new code.
+ */
+export type ChannelRouteHint = DirectChannelIngressRoute;
 
 export interface ChannelIngressSubmission {
   task: Task;
@@ -15,9 +28,14 @@ export interface ChannelIngressSubmission {
 
 export interface BrokerChannelIngressClient {
   start(): Promise<void>;
+  /**
+   * Accepts an ingress route plan at the seam boundary.
+   * Current runtimes may still reject non-direct delivery explicitly until
+   * shared ingress execution is implemented.
+   */
   submit(
     message: ChannelMessage,
-    route?: ChannelRouteHint,
+    route?: ChannelRoutePlan,
   ): Promise<ChannelIngressSubmission>;
   getTask(taskId: string): Promise<Task | null>;
   continueTask(

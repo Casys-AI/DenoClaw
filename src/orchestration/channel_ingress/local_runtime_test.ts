@@ -3,6 +3,10 @@ import { AgentError } from "../../shared/errors.ts";
 import { createAwaitedInputMetadata } from "../../messaging/a2a/input_metadata.ts";
 import { TaskStore } from "../../messaging/a2a/tasks.ts";
 import { transitionTask } from "../../messaging/a2a/internal_contract.ts";
+import {
+  createBroadcastChannelRoutePlan,
+  createDirectChannelRoutePlan,
+} from "../channel_routing/types.ts";
 import { createChannelTaskMessage } from "./task_message.ts";
 import { LocalChannelIngressRuntime } from "./local_runtime.ts";
 
@@ -61,10 +65,15 @@ Deno.test({
     });
 
     try {
-      const submission = await runtime.submit(createMessage(), {
-        agentId: "agent-alpha",
-        metadata: { model: "openai/gpt-5.4", source: "http" },
-      });
+      const submission = await runtime.submit(
+        createMessage(),
+        createDirectChannelRoutePlan(
+          "agent-alpha",
+          {
+            metadata: { model: "openai/gpt-5.4", source: "http" },
+          },
+        ),
+      );
 
       assertEquals(submission.task.status.state, "COMPLETED");
       assertEquals(submission.task.artifacts[0]?.parts[0], {
@@ -74,7 +83,9 @@ Deno.test({
       assertEquals(
         submission.task.metadata?.channelIngress,
         {
-          targetAgent: "agent-alpha",
+          delivery: "direct",
+          targetAgentIds: ["agent-alpha"],
+          primaryAgentId: "agent-alpha",
           channelType: "telegram",
           sessionId: "session-1",
           userId: "user-1",
@@ -124,9 +135,10 @@ Deno.test({
     });
 
     try {
-      const submission = await runtime.submit(createMessage(), {
-        agentId: "agent-alpha",
-      });
+      const submission = await runtime.submit(
+        createMessage(),
+        createDirectChannelRoutePlan("agent-alpha"),
+      );
       assertEquals(submission.task.status.state, "REJECTED");
     } finally {
       runtime.close();
@@ -171,7 +183,9 @@ Deno.test({
       paused.metadata = {
         ...(paused.metadata ?? {}),
         channelIngress: {
-          targetAgent: "agent-alpha",
+          delivery: "direct",
+          targetAgentIds: ["agent-alpha"],
+          primaryAgentId: "agent-alpha",
           channelType: message.channelType,
           sessionId: message.sessionId,
           userId: message.userId,
@@ -189,6 +203,101 @@ Deno.test({
       assertEquals(resumed?.artifacts[0]?.parts[0], {
         kind: "text",
         text: "continued",
+      });
+    } finally {
+      runtime.close();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name:
+    "LocalChannelIngressRuntime aggregates broadcast delivery into one shared task",
+  async fn() {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const taskStore = new TaskStore(kv);
+    const observed: string[] = [];
+    const runtime = new LocalChannelIngressRuntime({
+      taskStore,
+      workerPool: {
+        send: (agentId) => {
+          observed.push(agentId);
+          return Promise.resolve({ content: `reply from ${agentId}` });
+        },
+      },
+    });
+
+    try {
+      const submission = await runtime.submit(
+        createMessage(),
+        createBroadcastChannelRoutePlan(["agent-alpha", "agent-beta"]),
+      );
+
+      assertEquals(submission.task.status.state, "COMPLETED");
+      assertEquals(observed, ["agent-alpha", "agent-beta"]);
+      assertEquals(submission.task.metadata?.channelIngress, {
+        delivery: "broadcast",
+        targetAgentIds: ["agent-alpha", "agent-beta"],
+        channelType: "telegram",
+        sessionId: "session-1",
+        userId: "user-1",
+        address: {
+          channelType: "telegram",
+          userId: "user-1",
+          roomId: "user-1",
+        },
+      });
+      assertEquals(submission.task.artifacts.length, 3);
+      assertEquals(submission.task.artifacts[0]?.name, "agent-alpha:completed");
+      assertEquals(submission.task.artifacts[1]?.name, "agent-beta:completed");
+      assertEquals(submission.task.artifacts[2]?.name, "broadcast-summary");
+      assertEquals(submission.task.artifacts[2]?.parts[0], {
+        kind: "text",
+        text:
+          "[agent-alpha] reply from agent-alpha\n\n[agent-beta] reply from agent-beta",
+      });
+    } finally {
+      runtime.close();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+  ...testOpts,
+});
+
+Deno.test({
+  name:
+    "LocalChannelIngressRuntime keeps partial broadcast failures explicit in the summary",
+  async fn() {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const taskStore = new TaskStore(kv);
+    const runtime = new LocalChannelIngressRuntime({
+      taskStore,
+      workerPool: {
+        send: (agentId) =>
+          agentId === "agent-beta"
+            ? Promise.reject(new AgentError("USER_DENIED", {}, "denied"))
+            : Promise.resolve({ content: `reply from ${agentId}` }),
+      },
+    });
+
+    try {
+      const submission = await runtime.submit(
+        createMessage(),
+        createBroadcastChannelRoutePlan(["agent-alpha", "agent-beta"]),
+      );
+
+      assertEquals(submission.task.status.state, "COMPLETED");
+      assertEquals(submission.task.artifacts[0]?.name, "agent-alpha:completed");
+      assertEquals(submission.task.artifacts[1]?.name, "agent-beta:rejected");
+      assertEquals(submission.task.artifacts[2]?.parts[0], {
+        kind: "text",
+        text: "[agent-alpha] reply from agent-alpha\n\n[agent-beta] denied",
       });
     } finally {
       runtime.close();

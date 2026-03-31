@@ -15,7 +15,7 @@ export async function runInitWizard(): Promise<void> {
   await setupProvider();
 
   const wantChannel = await confirm(
-    "Step 2/3 — Configure a channel (Telegram, webhook)?",
+    "Step 2/3 — Configure a channel (Telegram, Discord, webhook)?",
     false,
   );
   if (wantChannel) {
@@ -35,6 +35,7 @@ export async function runInitWizard(): Promise<void> {
 
 Next steps:
   denoclaw dev                  Work locally (gateway + agents + dashboard)
+  denoclaw channel route        Add room/thread-specific ingress routing scopes
   denoclaw dev --agent <name>   Interactive chat with an agent
   denoclaw deploy               Deploy the broker to Deno Deploy
   denoclaw status               Show system status

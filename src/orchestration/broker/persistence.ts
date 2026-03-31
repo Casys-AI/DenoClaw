@@ -1,7 +1,9 @@
 import type { Task } from "../../messaging/a2a/types.ts";
+import type { TaskState } from "../../messaging/a2a/types.ts";
 import type { ChannelAddress } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import type { AgentEntry } from "../../shared/types.ts";
+import type { ChannelDeliveryMode } from "../channel_routing/types.ts";
 
 export interface ApprovalGrant {
   kind: "approval";
@@ -15,10 +17,14 @@ export type PendingResumes = Record<string, ApprovalGrant>;
 
 export interface BrokerTaskMetadata {
   submittedBy?: string;
+  delivery?: ChannelDeliveryMode;
   targetAgent?: string;
+  targetAgentIds?: string[];
+  sharedTaskId?: string;
   request?: Record<string, unknown>;
   pendingResumes?: PendingResumes;
   channel?: BrokerTaskChannelMetadata;
+  shared?: BrokerSharedTaskMetadata;
 }
 
 export interface BrokerTaskChannelMetadata {
@@ -26,6 +32,16 @@ export interface BrokerTaskChannelMetadata {
   sessionId: string;
   userId: string;
   address: ChannelAddress;
+}
+
+export interface BrokerSharedTaskMetadata {
+  agentTasks: BrokerAgentTaskRef[];
+}
+
+export interface BrokerAgentTaskRef {
+  agentId: string;
+  taskId: string;
+  state: TaskState;
 }
 
 export interface BrokerTaskPersistenceDeps {

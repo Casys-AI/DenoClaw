@@ -11,6 +11,7 @@ import {
   createChannelIngressMessage,
   getChannelTaskResponseText,
 } from "../channel_ingress/mod.ts";
+import { resolveGatewayInteractiveRoutePlan } from "./interactive_route.ts";
 import { getDashboardAuthMode } from "./dashboard_auth.ts";
 import { handleGatewayAgentRoute } from "./agent_routes.ts";
 import { handleGatewayMonitoringRoute } from "./monitoring_routes.ts";
@@ -113,7 +114,9 @@ async function handleGatewayChatRoute(
       message: string;
       sessionId?: string;
       model?: string;
-      agentId: string;
+      agentId?: string;
+      agentIds?: string[];
+      delivery?: "direct" | "broadcast";
     };
 
     if (!body.message || typeof body.message !== "string") {
@@ -128,21 +131,9 @@ async function handleGatewayChatRoute(
         { status: 400 },
       );
     }
-    if (!body.agentId || typeof body.agentId !== "string") {
-      return Response.json(
-        {
-          error: {
-            code: "INVALID_INPUT",
-            context: { field: "agentId" },
-            recovery: "Provide 'agentId' in the JSON body",
-          },
-        },
-        { status: 400 },
-      );
-    }
-
     const sessionId = body.sessionId || crypto.randomUUID();
     await ctx.session.getOrCreate(sessionId, "api", "http");
+    const routePlan = resolveGatewayInteractiveRoutePlan(body);
     const submission = await ctx.channelIngress.submit(
       createChannelIngressMessage({
         channelType: "http",
@@ -150,12 +141,7 @@ async function handleGatewayChatRoute(
         userId: "api",
         content: body.message,
       }),
-      {
-        agentId: body.agentId,
-        ...(typeof body.model === "string" && body.model.trim().length > 0
-          ? { metadata: { model: body.model } }
-          : {}),
-      },
+      routePlan,
     );
     return Response.json({
       sessionId,

@@ -5,13 +5,21 @@ export type OnMessage = (message: ChannelMessage) => void | Promise<void>;
 
 export interface ChannelAdapter {
   readonly channelType: string;
+  readonly adapterId: string;
+  readonly accountId?: string;
   enabled: boolean;
   initialize(): Promise<void>;
   start(onMessage: OnMessage): Promise<void> | void;
   stop(): Promise<void>;
   send(message: OutboundChannelMessage): Promise<void>;
   isConnected(): boolean;
-  getStatus(): { type: string; enabled: boolean; connected: boolean };
+  getStatus(): {
+    type: string;
+    adapterId: string;
+    accountId?: string;
+    enabled: boolean;
+    connected: boolean;
+  };
 }
 
 /**
@@ -20,11 +28,18 @@ export interface ChannelAdapter {
  */
 export abstract class BaseChannel implements ChannelAdapter {
   readonly channelType: string;
+  readonly adapterId: string;
   enabled: boolean;
   protected onMessage?: OnMessage;
+  protected routingAccountId?: string;
 
-  constructor(channelType: string) {
+  constructor(
+    channelType: string,
+    options: { adapterId?: string; accountId?: string } = {},
+  ) {
     this.channelType = channelType;
+    this.adapterId = options.adapterId ?? channelType;
+    this.routingAccountId = options.accountId;
     this.enabled = false;
   }
 
@@ -34,9 +49,21 @@ export abstract class BaseChannel implements ChannelAdapter {
   abstract send(message: OutboundChannelMessage): Promise<void>;
   abstract isConnected(): boolean;
 
-  getStatus(): { type: string; enabled: boolean; connected: boolean } {
+  get accountId(): string | undefined {
+    return this.routingAccountId;
+  }
+
+  getStatus(): {
+    type: string;
+    adapterId: string;
+    accountId?: string;
+    enabled: boolean;
+    connected: boolean;
+  } {
     return {
       type: this.channelType,
+      adapterId: this.adapterId,
+      ...(this.accountId ? { accountId: this.accountId } : {}),
       enabled: this.enabled,
       connected: this.isConnected(),
     };
@@ -49,5 +76,9 @@ export abstract class BaseChannel implements ChannelAdapter {
       log.warn(`Unauthorized user: ${userId} on ${this.channelType}`);
     }
     return ok;
+  }
+
+  protected setRoutingAccountId(accountId?: string): void {
+    this.routingAccountId = accountId;
   }
 }

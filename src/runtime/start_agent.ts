@@ -13,6 +13,7 @@ import {
   InProcessBrokerChannelIngressClient,
   LocalChannelIngressRuntime,
 } from "../orchestration/channel_ingress/mod.ts";
+import { createDirectChannelRoutePlan } from "../orchestration/channel_routing/types.ts";
 import { log } from "../shared/log.ts";
 
 export async function startAgentRuntime(
@@ -72,10 +73,10 @@ export async function startAgentRuntime(
           userId: "cli",
           content: args.message,
         }),
-        {
+        createDirectChannelRoutePlan(
           agentId,
-          ...(args.model ? { metadata: { model: args.model } } : {}),
-        },
+          args.model ? { metadata: { model: args.model } } : {},
+        ),
       );
       console.log(
         getChannelTaskResponseText(submission.task) ??
@@ -101,7 +102,10 @@ export async function startAgentRuntime(
   bus.subscribeAll(async (msg) => {
     await session.getOrCreate(msg.sessionId, msg.userId, msg.channelType);
     try {
-      const submission = await channelIngress.submit(msg, { agentId });
+      const submission = await channelIngress.submit(
+        msg,
+        createDirectChannelRoutePlan(agentId),
+      );
       await channels.send(
         msg.channelType,
         msg.userId,

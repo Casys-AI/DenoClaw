@@ -24,6 +24,7 @@ export class SessionManager {
     sessionId: string,
     userId: string,
     channelType = "cli",
+    metadata?: Record<string, unknown>,
   ): Promise<Session> {
     const kv = await this.getKv();
     const entry = await kv.get<Session>(this.key(sessionId));
@@ -32,6 +33,7 @@ export class SessionManager {
       const session = {
         ...entry.value,
         lastActivity: new Date().toISOString(),
+        metadata: mergeSessionMetadata(entry.value.metadata, metadata),
       };
       await kv.set(this.key(sessionId), session);
       return session;
@@ -43,7 +45,7 @@ export class SessionManager {
       channelType,
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
-      metadata: {},
+      metadata: mergeSessionMetadata(undefined, metadata),
     };
 
     await kv.set(this.key(sessionId), session);
@@ -99,4 +101,14 @@ export class SessionManager {
       this.kv = null;
     }
   }
+}
+
+function mergeSessionMetadata(
+  current?: Record<string, unknown>,
+  next?: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!current && !next) return {};
+  if (!current) return { ...(next ?? {}) };
+  if (!next) return { ...current };
+  return { ...current, ...next };
 }

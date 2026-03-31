@@ -17,7 +17,9 @@ export async function showStatus(config: Config): Promise<void> {
   const channels = Object.entries(config.channels)
     .filter(([_, value]) => value && "enabled" in value && value.enabled)
     .map(([key]) => key);
+  const routeScopes = config.channels.routing?.scopes ?? [];
   print(`Channels     : ${channels.join(", ") || "none"}`);
+  print(`Route scopes : ${routeScopes.length}`);
 
   print(
     `Workspace    : ${
@@ -75,6 +77,7 @@ export async function showStatus(config: Config): Promise<void> {
     providers,
     model: config.agents.defaults.model,
     channels,
+    routeScopes: routeScopes.length,
     deploy: deploy ?? null,
   });
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Open design follow-up after the first `channel_ingress` unification pass.
+Decision captured after the first `channel_ingress` unification pass.
 
 ## What is now true
 
@@ -15,22 +15,12 @@ The runtime is moving toward one canonical human-ingress boundary:
 Local human traffic now enters through the same conceptual task-ingress seam as
 broker-backed human traffic.
 
-## What remains open
-
-When a human-facing channel receives a message and multiple agents exist, the
-runtime still needs a clear routing model.
-
-The unresolved product question is:
-
-- does one channel message target exactly one agent
-- or should one message fan out to multiple agents by default
-
-## Current recommendation
+## Decision captured
 
 Default to **one channel message -> one owning agent**.
 
-If multiple agents need to collaborate, that should happen through
-orchestration after ingress:
+If multiple agents need to collaborate, that should happen through orchestration
+after ingress:
 
 1. channel message enters the system
 2. one agent is selected as the task owner
@@ -38,6 +28,13 @@ orchestration after ingress:
 4. the channel still sees one coherent conversation
 
 Do **not** default to fan-out/broadcast for normal channel traffic.
+
+Concrete decisions so far:
+
+- Telegram is effectively `1:1`, so implicit single-owner routing is fine there
+- Discord/shared channels should not fan out by default
+- Discord/shared channels can use explicit mention-based routing when multiple
+  bots or multiple agents coexist in the same room
 
 ## Why this matters
 
@@ -71,11 +68,12 @@ That is a different product mode, not standard routing.
 
 ## What to study next
 
-- whether channel routing should be configured per channel, per session, or per
-  thread
-- whether mention-based routing is enough for the first multi-agent UX
+- whether Telegram should pin directly by session, by bot identity, or by a
+  trivial default-agent mapping
+- whether mention-based routing is enough for the first Discord/shared-channel
+  multi-agent UX
 - whether a dedicated front/router agent is the best default for shared human
-  channels such as Telegram
+  channels beyond Telegram
 - whether broadcast mode belongs in the core channel router or in a higher
   orchestration layer
 

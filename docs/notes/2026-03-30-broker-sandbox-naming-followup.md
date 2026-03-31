@@ -118,8 +118,8 @@ In other words:
 - sandbox-level labels must not imply ownership that the runtime does not honor
 - cross-agent sandbox reuse weakens isolation guarantees and should be treated
   as a conscious architecture choice, not an incidental implementation detail
-- if we want real isolation between agents, the baseline should move to at
-  least one sandbox per agent, and possibly one sandbox per task/session
+- if we want real isolation between agents, the baseline should move to at least
+  one sandbox per agent, and possibly one sandbox per task/session
 
 ## Rule for later
 

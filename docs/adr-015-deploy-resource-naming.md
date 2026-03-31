@@ -1,8 +1,6 @@
 # ADR-015: Deploy Resource Naming
 
-**Status:** Accepted
-**Date:** 2026-03-30
-**Related:** ADR-008, ADR-013
+**Status:** Accepted **Date:** 2026-03-30 **Related:** ADR-008, ADR-013
 
 ## Context
 
@@ -53,8 +51,7 @@ Adopt the following canonical naming convention for DenoClaw deploy resources.
 ### Rules
 
 - deploy resource names must not be bare agent ids like `alice`
-- deploy resource names must not rely on ambiguous generic names like
-  `denoclaw`
+- deploy resource names must not rely on ambiguous generic names like `denoclaw`
 - the role must always be visible in the name: `broker`, `agent`, `sandbox`,
   `kv`
 - hostnames follow directly from app slugs and therefore inherit the same

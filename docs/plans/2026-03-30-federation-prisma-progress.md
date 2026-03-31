@@ -23,8 +23,8 @@ _Date: 2026-03-30_
 - Dashboard federation degrade proprement en `unavailable` quand les stats sont
   indisponibles.
 - KPI dashboard renomme en `Worst Link P95` pour refleter la metrique reelle.
-- Correlation federation standardisee puis durcie:
-  `taskId`, `contextId`, `linkId`, `remoteBrokerId`, `traceId`.
+- Correlation federation standardisee puis durcie: `taskId`, `contextId`,
+  `linkId`, `remoteBrokerId`, `traceId`.
 - Propagation de la derniere trace federation dans `overview`, `network`,
   `activity` et `tunnels`.
 - Refus `policy/auth` exposes dans les stats federation et surfacés dans le
@@ -40,11 +40,11 @@ _Date: 2026-03-30_
 
 ## Remaining
 
-- Ajouter un endpoint ou une vue d'inspection/replay du dead-letter backlog
-  pour l'operabilite.
-- Demarrer le plan Prisma/Postgres analytics:
-  `prisma/schema.prisma`, `src/db/client.ts`, `docker-compose.yml`, hooks
-  d'ecriture et endpoints `/api/stats/*`.
+- Ajouter un endpoint ou une vue d'inspection/replay du dead-letter backlog pour
+  l'operabilite.
+- Demarrer le plan Prisma/Postgres analytics: `prisma/schema.prisma`,
+  `src/db/client.ts`, `docker-compose.yml`, hooks d'ecriture et endpoints
+  `/api/stats/*`.
 - Ajouter les tests de contrat/integration encore absents:
   `src/orchestration/federation/types_test.ts`,
   `src/orchestration/federation/ports_test.ts`,

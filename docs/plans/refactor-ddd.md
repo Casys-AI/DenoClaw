@@ -126,8 +126,8 @@ Rules:
 - Each domain may only import from the domains listed above
 - `orchestration/` must NEVER import from `cli/`
 - `agent/` must NEVER import from `orchestration/`
-- Cross-domain imports go through the `mod.ts` barrel
-  (except `shared/`, which is direct)
+- Cross-domain imports go through the `mod.ts` barrel (except `shared/`, which
+  is direct)
 
 ## DI: removing singletons
 
@@ -212,8 +212,8 @@ Affected modules:
 
 ### Phase 0: Preparation
 
-- [x] Create the target directories (`shared/`, `messaging/`,
-      `orchestration/`, `llm/`)
+- [x] Create the target directories (`shared/`, `messaging/`, `orchestration/`,
+      `llm/`)
 - [x] Clean git snapshot (commit current state before refactor)
 
 ### Phase 1: Shared Kernel
@@ -248,15 +248,16 @@ Affected modules:
 - [x] Move `src/providers/base.ts` → `src/llm/base.ts`
 - [x] Move `src/providers/ollama.ts` → `src/llm/ollama.ts`
 - [x] Move `src/providers/cli.ts` → `src/llm/cli.ts`
-- [x] Move `src/providers/manager.ts` → `src/llm/manager.ts`
-      (takes `ProvidersConfig`, not `Config`)
+- [x] Move `src/providers/manager.ts` → `src/llm/manager.ts` (takes
+      `ProvidersConfig`, not `Config`)
 - [x] Create `src/llm/mod.ts` (barrel with `OllamaProvider`)
 - [x] Delete `src/providers/`
 - [x] Tests: `deno task check` + `deno task test`
 
 ### Phase 4: Messaging domain
 
-- [x] Create `src/messaging/types.ts` — `ChannelMessage`, `Session`, channel configs
+- [x] Create `src/messaging/types.ts` — `ChannelMessage`, `Session`, channel
+      configs
 - [x] Move `src/bus/mod.ts` → `src/messaging/bus.ts`
 - [x] Move `src/session/mod.ts` → `src/messaging/session.ts`
 - [x] Move `src/channels/*` → `src/messaging/channels/*`
@@ -268,13 +269,13 @@ Affected modules:
 ### Phase 5: Orchestration domain
 
 - [x] Move `src/broker/server.ts` → `src/orchestration/broker.ts`
-- [x] Move `src/broker/client.ts` → `src/orchestration/client.ts`
-      (implements `AgentBrokerPort`)
+- [x] Move `src/broker/client.ts` → `src/orchestration/client.ts` (implements
+      `AgentBrokerPort`)
 - [x] Move `src/broker/auth.ts` → `src/orchestration/auth.ts`
 - [x] Move `src/broker/types.ts` → `src/orchestration/types.ts`
 - [x] Move `src/relay/local.ts` → `src/orchestration/relay.ts`
-- [x] Move `src/gateway/mod.ts` → `src/orchestration/gateway.ts`
-      (DI + `AuthManager` + `close()`)
+- [x] Move `src/gateway/mod.ts` → `src/orchestration/gateway.ts` (DI +
+      `AuthManager` + `close()`)
 - [x] Move `src/sandbox/mod.ts` → `src/orchestration/sandbox.ts`
       (`SandboxApiConfig`)
 - [x] Create `src/orchestration/mod.ts` (barrel with `BrokerServerDeps`,
@@ -313,8 +314,8 @@ Affected modules:
 
 ### Phase 9: Cleanup
 
-- [x] Delete all old directories (utils, `types.ts`, providers, broker,
-      bus, session, channels, a2a, gateway, sandbox, subhosting, cron, relay)
+- [x] Delete all old directories (utils, `types.ts`, providers, broker, bus,
+      session, channels, a2a, gateway, sandbox, subhosting, cron, relay)
 - [x] Delete `src/config/new_mod.ts` (orphaned artifact)
 - [x] Ensure all `*_test.ts` files are in the right place
 - [x] `deno task check` + `deno task lint` + `deno task test` + `deno task fmt`
@@ -338,22 +339,22 @@ Affected modules:
 
 ## Tests to move
 
-| Before                             | After                           |
-| ---------------------------------- | ------------------------------- |
-| `src/utils/errors_test.ts`         | `src/shared/errors_test.ts`     |
-| `src/utils/helpers_test.ts`        | `src/shared/helpers_test.ts`    |
-| `src/agent/context_test.ts`        | Unchanged                       |
-| `src/agent/memory_test.ts`         | Unchanged                       |
-| `src/agent/skills_test.ts`         | Unchanged                       |
-| `src/agent/tools/registry_test.ts` | Unchanged                       |
-| `src/agent/tools/shell_test.ts`    | Unchanged                       |
-| `src/agent/tools/file_test.ts`     | Unchanged                       |
-| `src/agent/tools/web_test.ts`      | Unchanged                       |
-| `src/bus/bus_test.ts`              | `src/messaging/bus_test.ts`     |
-| `src/session/session_test.ts`      | `src/messaging/session_test.ts` |
-| `src/config/config_test.ts`        | `src/config/loader_test.ts`     |
-| `src/providers/base_test.ts`       | `src/llm/base_test.ts`          |
-| `src/providers/manager_test.ts`    | `src/llm/manager_test.ts`       |
+| Before                             | After                            |
+| ---------------------------------- | -------------------------------- |
+| `src/utils/errors_test.ts`         | `src/shared/errors_test.ts`      |
+| `src/utils/helpers_test.ts`        | `src/shared/helpers_test.ts`     |
+| `src/agent/context_test.ts`        | Unchanged                        |
+| `src/agent/memory_test.ts`         | Unchanged                        |
+| `src/agent/skills_test.ts`         | Unchanged                        |
+| `src/agent/tools/registry_test.ts` | Unchanged                        |
+| `src/agent/tools/shell_test.ts`    | Unchanged                        |
+| `src/agent/tools/file_test.ts`     | Unchanged                        |
+| `src/agent/tools/web_test.ts`      | Unchanged                        |
+| `src/bus/bus_test.ts`              | `src/messaging/bus_test.ts`      |
+| `src/session/session_test.ts`      | `src/messaging/session_test.ts`  |
+| `src/config/config_test.ts`        | `src/config/loader_test.ts`      |
+| `src/providers/base_test.ts`       | `src/llm/base_test.ts`           |
+| `src/providers/manager_test.ts`    | `src/llm/manager_test.ts`        |
 | `src/broker/auth_test.ts`          | `src/orchestration/auth_test.ts` |
 
 ## Notes

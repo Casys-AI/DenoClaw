@@ -10,8 +10,8 @@ receive?
 
 ## Decision
 
-**Tool × agent intersection.** Each tool declares the permissions it needs.
-Each agent declares the maximum permissions it allows. The Sandbox receives the
+**Tool × agent intersection.** Each tool declares the permissions it needs. Each
+agent declares the maximum permissions it allows. The Sandbox receives the
 intersection of the two.
 
 ## Available Permissions

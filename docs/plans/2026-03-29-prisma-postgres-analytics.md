@@ -1,6 +1,8 @@
 # Plan: Prisma Postgres Analytics + Dashboard Integration
 
-**Goal:** Add persistent SQL storage for historical analytics, conversation history, and dashboard stats. KV stays for real-time; Prisma Postgres handles queryable historical data.
+**Goal:** Add persistent SQL storage for historical analytics, conversation
+history, and dashboard stats. KV stays for real-time; Prisma Postgres handles
+queryable historical data.
 
 ---
 
@@ -9,12 +11,14 @@
 ### Task 1.1: Add Prisma dependencies and schema
 
 **Files:**
+
 - Modify: `deno.json` (add prisma imports)
 - Create: `prisma/schema.prisma`
 - Create: `src/db/client.ts` (Prisma client singleton)
 - Create: `docker-compose.yml` (local Postgres)
 
 **Schema:**
+
 ```prisma
 generator client {
   provider = "prisma-client"
@@ -104,6 +108,7 @@ model DailyMetrics {
 ```
 
 **docker-compose.yml:**
+
 ```yaml
 services:
   postgres:
@@ -122,6 +127,7 @@ volumes:
 ```
 
 **deno.json imports:**
+
 ```json
 "@prisma/client": "npm:@prisma/client@^7",
 "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7",
@@ -129,6 +135,7 @@ volumes:
 ```
 
 **deno.json tasks:**
+
 ```json
 "db:generate": "deno run -A npm:prisma generate",
 "db:push": "deno run -A npm:prisma db push",
@@ -173,28 +180,39 @@ export async function closeDb(): Promise<void> {
 **File:** Modify `src/orchestration/broker.ts` (handleLLMRequest)
 
 After a successful LLM call, write to Postgres:
+
 ```typescript
 await getDb().llmCall.create({
-  data: { agentId: msg.from, model, provider, promptTokens, completionTokens, latencyMs }
+  data: {
+    agentId: msg.from,
+    model,
+    provider,
+    promptTokens,
+    completionTokens,
+    latencyMs,
+  },
 });
 ```
 
-Optional: wrap in try/catch — SQL write failure should not block the LLM response.
+Optional: wrap in try/catch — SQL write failure should not block the LLM
+response.
 
 ### Task 2.2: Record tool executions
 
 **File:** Modify `src/orchestration/broker.ts` (handleToolRequest)
 
 After tool execution:
+
 ```typescript
 await getDb().toolExecution.create({
-  data: { agentId: msg.from, toolName, success, durationMs, errorCode }
+  data: { agentId: msg.from, toolName, success, durationMs, errorCode },
 });
 ```
 
 ### Task 2.3: Record task lifecycle
 
-**File:** Modify `src/orchestration/broker.ts` (submitAgentTask, recordTaskResult)
+**File:** Modify `src/orchestration/broker.ts` (submitAgentTask,
+recordTaskResult)
 
 On task submit → create row. On task result → update state + completedAt.
 
@@ -202,7 +220,8 @@ On task submit → create row. On task result → update state + completedAt.
 
 **File:** Modify `src/agent/runtime.ts` or `src/agent/loop.ts`
 
-Each `memory.addMessage()` also writes to Postgres. Or: batch-write at the end of a conversation turn.
+Each `memory.addMessage()` also writes to Postgres. Or: batch-write at the end
+of a conversation turn.
 
 ---
 
@@ -213,8 +232,10 @@ Each `memory.addMessage()` also writes to Postgres. Or: batch-write at the end o
 **File:** Modify `src/orchestration/gateway.ts`
 
 Add REST endpoints:
+
 - `GET /api/stats/overview` — total LLM calls, tokens, tasks today/week/month
-- `GET /api/stats/agent/:id` — per-agent stats (calls, tokens, errors, avg latency)
+- `GET /api/stats/agent/:id` — per-agent stats (calls, tokens, errors, avg
+  latency)
 - `GET /api/stats/daily` — daily metrics time series (for charts)
 - `GET /api/conversations/:agentId` — conversation history browser
 - `GET /api/tasks/history` — task lifecycle history with filtering
@@ -232,6 +253,7 @@ Add REST endpoints:
 **File:** Create `src/db/aggregate.ts`
 
 Daily cron job (`Deno.cron`) that:
+
 1. Reads LlmCall/ToolExecution/AgentTask from last 24h
 2. Aggregates into DailyMetrics row
 3. Optionally prunes raw data older than 30 days
@@ -250,6 +272,7 @@ deno deploy database assign denoclaw-db --app denoclaw-broker --org casys
 ### Task 4.2: Run migrations on Deploy
 
 Build command in Deploy dashboard:
+
 ```
 deno run -A npm:prisma migrate deploy
 ```

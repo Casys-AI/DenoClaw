@@ -19,8 +19,8 @@ Important:
 
 As of 2026-03-30, these statements are true:
 
-- The broker deployment path is source-controlled and targets
-  `main.ts broker` on Deno Deploy.
+- The broker deployment path is source-controlled and targets `main.ts broker`
+  on Deno Deploy.
 - Agent publication should use the public Deno Deploy REST API at
   `https://api.deno.com/v2`.
 - The public `v2` contract is `apps` + `revisions`, authenticated by an
@@ -54,9 +54,8 @@ pick the dashboard preset instead of the broker runtime.
 
 `deno.json` must not point at an agent app.
 
-For the current live setup, it should stay broker-oriented.
-For the canonical long-term naming convention, the broker app slug should be
-`denoclaw-broker`.
+For the current live setup, it should stay broker-oriented. For the canonical
+long-term naming convention, the broker app slug should be `denoclaw-broker`.
 
 Current broker-oriented example:
 

@@ -67,5 +67,5 @@ Add a canonical deployed ingress path for Telegram so that:
 
 - local/dev still supports lightweight channel testing
 - deployed mode supports Telegram as the real human-facing channel
-- the human/machine/runtime separation already described in the docs is
-  actually enforced by the production runtime
+- the human/machine/runtime separation already described in the docs is actually
+  enforced by the production runtime

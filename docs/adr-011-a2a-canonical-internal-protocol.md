@@ -67,8 +67,8 @@ The sentence that should remain true everywhere is:
 
 Examples:
 
-- **Local:** A2A over `postMessage`, persisted in KV, correlated by
-  task/context ids.
+- **Local:** A2A over `postMessage`, persisted in KV, correlated by task/context
+  ids.
 - **Deploy:** A2A over HTTP + SSE, persisted in KV, correlated by task/context
   ids.
 
@@ -97,8 +97,8 @@ Deno KV remains the durable layer for:
 - idempotence
 - checkpoints and leases when needed
 
-**KV Queue is not the canonical broker↔agent model.** If it exists at all, it
-is only a local or broker-internal implementation detail.
+**KV Queue is not the canonical broker↔agent model.** If it exists at all, it is
+only a local or broker-internal implementation detail.
 
 ### 5. The mental model is no longer RPC-centric
 
@@ -114,14 +114,14 @@ A synchronous fast path is still an optimization, not the core contract.
 
 ## Responsibility comparison
 
-| Topic                        | Canonical                                  | Notes                                                                      |
-| ---------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
-| canonical task contract      | **A2A Task / Message / Artifact lifecycle** | Single source of truth for agent work                                      |
-| runtime/infra protocol       | **internal worker protocol**               | `init`, `ready`, `shutdown`, approval transport, low-level wiring          |
-| storage layer                | **Deno KV**                                | Persistence, traces, idempotence, history                                  |
-| local transport              | **`postMessage` / worker bridge**          | A2A over local transport, persisted in KV, correlated by task/context ids  |
-| network transport            | **HTTP + SSE**                             | A2A over network transport, persisted in KV, correlated by task/context ids |
-| observability correlation ids | **`taskId` + `contextId`**                | Correlate broker, worker, agent, artifacts, and traces                     |
+| Topic                         | Canonical                                   | Notes                                                                       |
+| ----------------------------- | ------------------------------------------- | --------------------------------------------------------------------------- |
+| canonical task contract       | **A2A Task / Message / Artifact lifecycle** | Single source of truth for agent work                                       |
+| runtime/infra protocol        | **internal worker protocol**                | `init`, `ready`, `shutdown`, approval transport, low-level wiring           |
+| storage layer                 | **Deno KV**                                 | Persistence, traces, idempotence, history                                   |
+| local transport               | **`postMessage` / worker bridge**           | A2A over local transport, persisted in KV, correlated by task/context ids   |
+| network transport             | **HTTP + SSE**                              | A2A over network transport, persisted in KV, correlated by task/context ids |
+| observability correlation ids | **`taskId` + `contextId`**                  | Correlate broker, worker, agent, artifacts, and traces                      |
 
 ## Implementation notes
 

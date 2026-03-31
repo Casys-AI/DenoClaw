@@ -6,13 +6,13 @@ Planned as the next minimal-risk sandbox refactor.
 
 ## Goal
 
-Make broker-backed sandboxes honest and safe enough for multi-agent use
-without widening scope into snapshots, volumes, or agent-driven provisioning.
+Make broker-backed sandboxes honest and safe enough for multi-agent use without
+widening scope into snapshots, volumes, or agent-driven provisioning.
 
 ## Why this plan exists
 
-The current cloud sandbox wiring is sufficient for bring-up and smoke tests,
-but it is not a sound long-term isolation model for multiple agents.
+The current cloud sandbox wiring is sufficient for bring-up and smoke tests, but
+it is not a sound long-term isolation model for multiple agents.
 
 Today, the broker can reuse a cloud sandbox too broadly. That creates a gap
 between:
@@ -193,5 +193,5 @@ Implement in this order:
 
 Do not optimize before the ownership model is correct.
 
-The first priority is not startup speed or persistence. The first priority is
-to make sandbox reuse explicit, bounded, and safe.
+The first priority is not startup speed or persistence. The first priority is to
+make sandbox reuse explicit, bounded, and safe.

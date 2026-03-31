@@ -1,7 +1,6 @@
 # ADR-016: Broker Sandbox Ownership and Lifecycle
 
-**Status:** Accepted **Date:** 2026-03-31 **Related:** ADR-001, ADR-005,
-ADR-010
+**Status:** Accepted **Date:** 2026-03-31 **Related:** ADR-001, ADR-005, ADR-010
 
 ## Context
 
@@ -10,12 +9,12 @@ ADR-010 introduced the dual sandbox backend model:
 - local subprocess backend for dev/offline execution
 - Deno Sandbox backend for cloud execution
 
-That ADR intentionally focused on execution policy and backend shape, but it
-did not fully settle the **ownership** and **lifecycle** model of broker-backed
+That ADR intentionally focused on execution policy and backend shape, but it did
+not fully settle the **ownership** and **lifecycle** model of broker-backed
 cloud sandboxes.
 
-With real broker-backed sandbox execution now working, several missing
-decisions became explicit:
+With real broker-backed sandbox execution now working, several missing decisions
+became explicit:
 
 1. A broker-wide shared sandbox weakens isolation between agents.
 2. Labels such as `agent=bob` are only truthful if ownership is actually
@@ -24,8 +23,8 @@ decisions became explicit:
 4. Snapshots and volumes are promising, but they are not required to fix the
    current ownership problem.
 
-The architecture therefore needs a broker-side sandbox lifecycle model, not
-just a raw cloud backend.
+The architecture therefore needs a broker-side sandbox lifecycle model, not just
+a raw cloud backend.
 
 ## Decision
 
@@ -99,8 +98,8 @@ These belong in broker logs, traces, and telemetry.
 
 ### 5. Broker capacity is explicit and bounded
 
-The broker must enforce a configurable upper bound on the number of active
-cloud sandboxes.
+The broker must enforce a configurable upper bound on the number of active cloud
+sandboxes.
 
 The environment variable is:
 
@@ -180,8 +179,8 @@ The broker runtime should have:
 
 ### Required lifecycle hardening
 
-This ADR also implies that lifecycle safety matters as much as the ownership
-key itself.
+This ADR also implies that lifecycle safety matters as much as the ownership key
+itself.
 
 The model must ultimately account for:
 

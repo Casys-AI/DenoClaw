@@ -262,7 +262,8 @@ After landing the refactor into the local checkpoint branch:
   - `src/orchestration/gateway/http_routes.ts`
   - `src/orchestration/gateway/agent_routes.ts`
   - `src/orchestration/gateway/monitoring_routes.ts`
-  - `src/orchestration/gateway/http_router.ts` remains only as a compatibility shim
+  - `src/orchestration/gateway/http_router.ts` remains only as a compatibility
+    shim
 - agent publish flow now isolates:
   - `src/cli/publish.ts`
   - `src/cli/publish_entry.ts`
@@ -293,8 +294,7 @@ After landing the refactor into the local checkpoint branch:
   - `src/agent/tools/file_workspace.ts`
 - `src/orchestration/broker/server.ts` has since been reduced again by
   extracting:
-  - broker message dispatch in
-    `src/orchestration/broker/message_runtime.ts`
+  - broker message dispatch in `src/orchestration/broker/message_runtime.ts`
   - `src/orchestration/broker/llm_proxy.ts`
   - `src/orchestration/broker/agent_message_router.ts`
   - slimmer federation wiring in
@@ -495,10 +495,10 @@ polish and should be treated as a separate track.
 - if desired, continue shrinking
   `src/orchestration/federation/adapters/kv_adapter_stats.ts` around aggregate
   scanning and persistence helpers only
-- if desired, continue shrinking `src/agent/worker_entrypoint.ts` around
-  worker init/shutdown state only
-- if desired, continue shrinking `src/agent/worker_pool.ts` around
-  facade ergonomics only
+- if desired, continue shrinking `src/agent/worker_entrypoint.ts` around worker
+  init/shutdown state only
+- if desired, continue shrinking `src/agent/worker_pool.ts` around facade
+  ergonomics only
 
 ### Priority C — stronger verification
 

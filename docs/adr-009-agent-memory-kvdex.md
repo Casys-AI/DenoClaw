@@ -13,8 +13,7 @@ OpenClaw, NanoClaw, PicoClaw, Mem0, Zep, Letta, CrewAI), the decision is a
 **dual model**:
 
 - **Short-term (conversations)** → structured KV through kvdex
-- **Long-term (knowledge)** → Markdown files
-  (OpenClaw/Serena/NanoClaw pattern)
+- **Long-term (knowledge)** → Markdown files (OpenClaw/Serena/NanoClaw pattern)
 
 ## Decision
 
@@ -26,11 +25,12 @@ kvdex (`@olli/kvdex@^3`) structures conversations in each agent's private KV:
 - Sorted by `seq`, trimmed to `maxMessages` while preserving system messages
 - Synchronous in-memory cache for `getMessages()` on the loop hot path
 - Automatic compression/segmentation when exceeding the 64 KB limit
-- `MemoryPort` DDD interface, so the loop depends on the interface, not the implementation
+- `MemoryPort` DDD interface, so the loop depends on the interface, not the
+  implementation
 
-**Why kvdex instead of raw KV:** conversations are structured data
-(session × seq × role) and benefit directly from secondary indexes and
-compression. kvdex adds little surface area and high value for this workload.
+**Why kvdex instead of raw KV:** conversations are structured data (session ×
+seq × role) and benefit directly from secondary indexes and compression. kvdex
+adds little surface area and high value for this workload.
 
 ### Long-term: dual backend (files locally, KV in Deploy) ⏳ TO IMPLEMENT
 
@@ -52,10 +52,10 @@ Each agent has a `memories/` directory inside its workspace:
 
 **Dual backend by environment:**
 
-| Environment      | Backend                                  | Source of truth |
-| ---------------- | ---------------------------------------- | --------------- |
-| Local (dev/VPS)  | `.md` files (`data/agents/<id>/memories/`) | Filesystem      |
-| Deploy (deployed agents) | KV (`["memories", agentId, filename]`) | KV              |
+| Environment              | Backend                                    | Source of truth |
+| ------------------------ | ------------------------------------------ | --------------- |
+| Local (dev/VPS)          | `.md` files (`data/agents/<id>/memories/`) | Filesystem      |
+| Deploy (deployed agents) | KV (`["memories", agentId, filename]`)     | KV              |
 
 Locally, the `.md` files are git-friendly, editable, and reviewable in PRs. On
 Deploy there is no filesystem, so everything lives in KV. The content remains
@@ -77,8 +77,8 @@ Agent: write_file("memories/user_prefs.md", "Prefers French")
 → Deploy: kv.set(["workspace", "alice", "memories/user_prefs.md"], ...)
 ```
 
-**At startup:** the system prompt receives the list of memory files so the
-agent knows what it has already stored.
+**At startup:** the system prompt receives the list of memory files so the agent
+knows what it has already stored.
 
 ## Why this dual model
 
@@ -93,14 +93,16 @@ agent knows what it has already stored.
 ### Why Markdown for long-term memory
 
 - **Human-readable** — you can open `user_preferences.md` and fix a wrong fact
-- **Git-friendly** — memories diff cleanly, can be committed, and can be reviewed
+- **Git-friendly** — memories diff cleanly, can be committed, and can be
+  reviewed
 - **Natural consolidation** — the agent can summarize by rewriting a paragraph
   instead of requiring a bi-temporal fact system
 - **Established pattern** — OpenClaw (`MEMORY.md` + `memory/YYYY-MM-DD.md`),
-  NanoClaw (`CLAUDE.md` per group), Serena (`.serena/memories/`), Claude Code (`memory/`)
+  NanoClaw (`CLAUDE.md` per group), Serena (`.serena/memories/`), Claude Code
+  (`memory/`)
 - **No automatic eviction** — long-term memory should not disappear by itself
-- **Extensible** — vector search can be layered on top later
-  (embeddings, memsearch, LanceDB)
+- **Extensible** — vector search can be layered on top later (embeddings,
+  memsearch, LanceDB)
 
 ### Why not put everything in KV
 
@@ -150,11 +152,11 @@ Deno KV TTL) and `count()`, but:
 
 ### Raw bi-temporal KV (FactRecord, versionstamp CAS)
 
-Explored in depth using ordered keys
-`["facts", agentId, topic, timestampMs]`, active/by-id/by-tx indexes, and
-atomic consolidation through `kv.atomic().check()`. Technically correct, but
-**over-engineered** for the actual need. A single `project.md` file edited by
-the agent does the same job with 10x less code.
+Explored in depth using ordered keys `["facts", agentId, topic, timestampMs]`,
+active/by-id/by-tx indexes, and atomic consolidation through
+`kv.atomic().check()`. Technically correct, but **over-engineered** for the
+actual need. A single `project.md` file edited by the agent does the same job
+with 10x less code.
 
 ### Symbolic search (SWC / LSP)
 
@@ -181,8 +183,8 @@ tool, not for long-term memory.**
 
 1. **Tiered memory** — everyone separates short-term (structured/DB) from
    long-term (documents/files)
-2. **Markdown as source of truth** — OpenClaw, NanoClaw, Serena, and Claude
-   Code all use `.md`
+2. **Markdown as source of truth** — OpenClaw, NanoClaw, Serena, and Claude Code
+   all use `.md`
 3. **Vector search as an additional layer** — added on top of documents, not as
    the primary storage layer
 4. **No hard delete for long-term memory** — either soft decay or explicit edit
@@ -193,13 +195,13 @@ tool, not for long-term memory.**
 
 ### Relevant Deno primitives for later
 
-| Primitive                          | Potential use                                                                 |
-| ---------------------------------- | ----------------------------------------------------------------------------- |
+| Primitive                          | Potential use                                                                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `Deno.cron()`                      | Sleep-time consolidation (background memory maintenance). Note: `kv.enqueue()` is deprecated on new Deploy, so use cron directly. |
-| `kv.watch()`                       | Cross-agent memory events (max 10 keys, sentinels)                            |
-| `.sum()` / `.max()` (atomics CRDT) | Fact counters without locks                                                   |
-| `@jsz/swc` / `@deco/deno-ast-wasm` | Future `code_analyze` tool (parse TS AST in WASM)                             |
-| `kv-toolbox` blob + crypto         | Future at-rest encryption, artifacts > 64 KB                                  |
+| `kv.watch()`                       | Cross-agent memory events (max 10 keys, sentinels)                                                                                |
+| `.sum()` / `.max()` (atomics CRDT) | Fact counters without locks                                                                                                       |
+| `@jsz/swc` / `@deco/deno-ast-wasm` | Future `code_analyze` tool (parse TS AST in WASM)                                                                                 |
+| `kv-toolbox` blob + crypto         | Future at-rest encryption, artifacts > 64 KB                                                                                      |
 
 ## Current implementation state
 
@@ -235,7 +237,8 @@ tool, not for long-term memory.**
 - Cross-agent memory events through `kv.watch()` sentinels on shared KV
 - `code_analyze` tool built on SWC WASM (`@jsz/swc`)
 - Memory encryption through `kv-toolbox` crypto
-- Automatic onboarding (Serena pattern: the agent analyzes the project on first launch)
+- Automatic onboarding (Serena pattern: the agent analyzes the project on first
+  launch)
 
 ## Consequences
 
@@ -243,6 +246,7 @@ tool, not for long-term memory.**
 - The dual model (KV + `.md`) covers both use cases without over-engineering
 - The architecture can grow into vector search without a storage rewrite
 - Compatible with local mode (filesystem) and Deploy (KV behind the same tools)
-- `deploy:agent` syncs local workspace → remote KV (`soul.md`, `skills/`, `memories/`)
+- `deploy:agent` syncs local workspace → remote KV (`soul.md`, `skills/`,
+  `memories/`)
 - No special memory tool is required; `read_file` / `write_file` are enough
 - Follows the Claude Code pattern: the agent manages its memories as files

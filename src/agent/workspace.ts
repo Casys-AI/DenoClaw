@@ -121,7 +121,9 @@ export class WorkspaceLoader {
     agentId: string,
     parsed: unknown,
   ): AgentEntry {
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+    ) {
       throw new DenoClawError(
         "INVALID_AGENT_CONFIG",
         { agentId },
@@ -140,6 +142,9 @@ export class WorkspaceLoader {
         "agent.json requires sandbox.allowedPermissions array",
       );
     }
-    return obj as unknown as AgentEntry;
+    const normalized: Record<string, unknown> = { ...obj };
+    delete normalized.channels;
+    delete normalized.channelRouting;
+    return normalized as unknown as AgentEntry;
   }
 }

@@ -20,7 +20,9 @@ function withTempAgentsDir(
     } finally {
       Deno.env.delete("DENOCLAW_AGENTS_DIR");
       if (prev) Deno.env.set("DENOCLAW_AGENTS_DIR", prev);
-      try { await Deno.remove(tmpDir, { recursive: true }); } catch { /* ok */ }
+      try {
+        await Deno.remove(tmpDir, { recursive: true });
+      } catch { /* ok */ }
     }
   };
 }
@@ -122,6 +124,41 @@ Deno.test({
 
     await WorkspaceLoader.delete(id);
     assertEquals(await WorkspaceLoader.exists(id), false);
+  }),
+  ...testOpts,
+});
+
+Deno.test({
+  name:
+    "WorkspaceLoader.load strips legacy channel routing fields from agent.json",
+  fn: withTempAgentsDir(async () => {
+    const id = `test-ws-legacy-${crypto.randomUUID().slice(0, 8)}`;
+    try {
+      await WorkspaceLoader.create(id, {
+        sandbox: { allowedPermissions: ["read"] },
+      });
+
+      await Deno.writeTextFile(
+        getAgentConfigPath(id),
+        JSON.stringify(
+          {
+            model: "test/model",
+            sandbox: { allowedPermissions: ["read"] },
+            channels: ["telegram"],
+            channelRouting: "broadcast",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const ws = await WorkspaceLoader.load(id);
+      assertEquals(ws?.entry.model, "test/model");
+      assertEquals("channels" in (ws?.entry ?? {}), false);
+      assertEquals("channelRouting" in (ws?.entry ?? {}), false);
+    } finally {
+      await WorkspaceLoader.delete(id);
+    }
   }),
   ...testOpts,
 });

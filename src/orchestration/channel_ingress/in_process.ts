@@ -1,15 +1,15 @@
 import type { Task } from "../../messaging/a2a/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 import type {
   BrokerChannelIngressClient,
   ChannelIngressSubmission,
-  ChannelRouteHint,
 } from "./types.ts";
 
 export interface InProcessBrokerChannelIngressClientDeps {
   submit(
     message: ChannelMessage,
-    route?: ChannelRouteHint,
+    route?: ChannelRoutePlan,
   ): Promise<ChannelIngressSubmission>;
   getTask(taskId: string): Promise<Task | null>;
   continueTask(
@@ -28,7 +28,7 @@ export class InProcessBrokerChannelIngressClient
 
   async submit(
     message: ChannelMessage,
-    route?: ChannelRouteHint,
+    route?: ChannelRoutePlan,
   ): Promise<ChannelIngressSubmission> {
     return await this.deps.submit(message, route);
   }

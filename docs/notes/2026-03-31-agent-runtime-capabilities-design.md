@@ -115,20 +115,11 @@ Used by the agent to answer questions like:
 - should I expect approval flows?
 - do I have any network capability?
 
-### `ApprovalGrant`
-
-Ephemeral runtime authorization.
-
-Used by the broker to answer questions like:
-
-- has `git` been approved for this task?
-- does this session currently carry a temporary grant?
-
 ### `PrivilegeElevationGrant`
 
 Future stronger mechanism for structural privilege changes.
 
-This must remain broker-owned and more heavily governed than command approval.
+This remains broker-owned and is the canonical temporary authorization model.
 
 ## Injection Strategy
 

@@ -1,10 +1,10 @@
 import type { Task } from "../../messaging/a2a/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 import type {
   BrokerChannelIngressClient,
   ChannelIngressSubmission,
-  ChannelRouteHint,
 } from "./types.ts";
 
 export interface HttpBrokerChannelIngressClientDeps {
@@ -43,7 +43,7 @@ export class HttpBrokerChannelIngressClient
 
   async submit(
     message: ChannelMessage,
-    route?: ChannelRouteHint,
+    route?: ChannelRoutePlan,
   ): Promise<ChannelIngressSubmission> {
     const response = await this.request("/ingress/messages", {
       method: "POST",

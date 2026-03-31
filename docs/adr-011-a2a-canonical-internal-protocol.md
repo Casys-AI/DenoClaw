@@ -125,14 +125,13 @@ A synchronous fast path is still an optimization, not the core contract.
 
 ## Implementation notes
 
-### Atomic TOCTOU-safe approval grants
+### Atomic TOCTOU-safe privilege-elevation grants
 
-Human approval grants are scoped to the exact command + exact binary and stored
-inside the task's broker metadata record under `pendingResumes`. Each grant is
-consumed atomically through `kv.atomic().check().set()`, so only one execution
-can use a given grant. That prevents races between two simultaneous approval
-requests for the same task. The wildcard `"*"` covers a global grant, while the
-exact command-level grant is checked first.
+Privilege-elevation grants are stored in broker-owned metadata, with task-scoped
+grants on the task record and session-scoped grants on the shared context
+record. One-shot grants are consumed atomically through `kv.atomic().check().set()`,
+so only one execution can use a given grant. That prevents races between two
+simultaneous resumptions for the same task or context.
 
 ## Consequences
 

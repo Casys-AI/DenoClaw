@@ -54,7 +54,6 @@ Deno.test("buildSystemPrompt includes runtime capabilities summary", () => {
         execPolicy: {
           security: "allowlist",
           allowedCommands: ["git"],
-          ask: "on-miss",
         },
       },
       availablePeers: ["bob"],

@@ -1,5 +1,9 @@
 # ADR-010 — Review Fixes
 
+> Historical review notes for the older command-approval model that existed
+> around ADR-010. The live runtime now uses policy-first execution plus
+> broker-owned privilege elevation.
+
 **Date:** 2026-03-27 **Source:** Cross-review by 5 agents (code reviewer, silent
 failure hunter, type design, test coverage, architecture)
 

@@ -28,8 +28,6 @@ import type { TunnelRegistry } from "./tunnel_registry.ts";
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
   allowedCommands: [],
-  ask: "off",
-  askFallback: "deny",
 };
 
 export interface BrokerToolDispatcherDeps {

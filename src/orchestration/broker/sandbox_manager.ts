@@ -127,7 +127,6 @@ export class BrokerSandboxManager {
           timeoutSec: request.timeoutSec,
           execPolicy: request.execPolicy ?? {
             security: "deny",
-            ask: "off",
           },
           shell: request.shell,
           toolsConfig: request.toolsConfig,

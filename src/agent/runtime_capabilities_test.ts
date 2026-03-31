@@ -13,7 +13,6 @@ Deno.test("deriveAgentRuntimeCapabilities projects sandbox policy for planning",
       execPolicy: {
         security: "allowlist",
         allowedCommands: ["git", "deno"],
-        ask: "on-miss",
       },
     },
     availablePeers: ["bob", "alice"],
@@ -58,7 +57,6 @@ Deno.test("deriveAgentRuntimeCapabilities reflects explicit shell settings", () 
       allowedPermissions: ["run"],
       execPolicy: {
         security: "full",
-        ask: "off",
       },
       shell: {
         mode: "system-shell",
@@ -78,7 +76,6 @@ Deno.test("deriveAgentRuntimeCapabilities reflects disabled shell tool", () => {
       execPolicy: {
         security: "allowlist",
         allowedCommands: ["git"],
-        ask: "off",
       },
       shell: {
         enabled: false,
@@ -136,7 +133,6 @@ Deno.test("deriveAgentRuntimeCapabilitiesFromEntry applies defaults fallback", (
       execPolicy: {
         security: "allowlist",
         allowedCommands: ["git"],
-        ask: "on-miss",
       },
     },
   );

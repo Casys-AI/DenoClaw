@@ -15,30 +15,16 @@ export interface ShellConfig {
   warnOnLocalSystemShell?: boolean;
 }
 
-interface ExecPolicyBase {
-  /**
-   * Legacy compatibility knob from the old command-approval flow.
-   * The current runtime is policy-first and does not rely on interactive
-   * per-command approvals.
-   */
-  ask?: "off" | "on-miss" | "always";
-  /**
-   * Legacy compatibility fallback paired with `ask`.
-   * Kept for config compatibility only.
-   */
-  askFallback?: "deny" | "allowlist";
-}
-
-interface ExecPolicyDeny extends ExecPolicyBase {
+interface ExecPolicyDeny {
   security: "deny";
 }
 
-interface ExecPolicyFull extends ExecPolicyBase {
+interface ExecPolicyFull {
   security: "full";
   envFilter?: string[];
 }
 
-interface ExecPolicyAllowlist extends ExecPolicyBase {
+interface ExecPolicyAllowlist {
   security: "allowlist";
   allowedCommands?: string[];
   deniedCommands?: string[];

@@ -16,8 +16,6 @@ function toolRequest(
     execPolicy: {
       security: "allowlist",
       allowedCommands: ["echo"],
-      ask: "off",
-      askFallback: "deny",
     },
     executionContext: {
       agentId,

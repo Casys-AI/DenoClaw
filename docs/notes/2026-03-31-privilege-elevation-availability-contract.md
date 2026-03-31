@@ -96,7 +96,7 @@ the denial in-band as a normal tool error.
 
 ## Consequences
 
-- `ask` / command approval is not the control surface anymore
+- legacy command approval is not the control surface anymore
 - broker support and channel availability are separate concerns
 - “no channel” is now an explicit structured denial, not an implicit fallback
 - resumability is attached to the execution context, not just to global broker

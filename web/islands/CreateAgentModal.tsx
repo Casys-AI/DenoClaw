@@ -51,8 +51,6 @@ export default function CreateAgentModal() {
           execPolicy: {
             security: "allowlist",
             allowedCommands: ALLOWED_COMMANDS,
-            ask: "on-miss",
-            askFallback: "deny",
           },
         },
       },

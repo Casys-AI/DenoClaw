@@ -36,15 +36,15 @@ Target model:
   owned by the submitting agent
 - the runtime now proposes the broadest advertised privilege-elevation scope
   instead of hard-coding `task`
-- the highest-signal cleanup now sits in config/schema/docs, where `ask` and
-  `askFallback` still overstate a deprecated command-approval model
+- the highest-signal cleanup now sits in remaining user-facing docs and
+  historical notes that still describe the removed command-approval model
 
 ## Next steps
 
 1. Keep `elevationAvailable` as the only resumability gate for
    `PRIVILEGE_ELEVATION_REQUIRED`.
-2. Finish removing `ask` / `allowAlways` / `EXEC_APPROVAL_REQUIRED` from docs,
-   tests, and schemas where compatibility is no longer needed.
+2. Finish removing stale command-approval vocabulary from docs and remaining
+   compatibility notes where it no longer reflects the runtime.
 3. Add an explicit session-lifecycle cleanup story (`closeSession` or
    equivalent) so broker/runtime state does not rely only on TTL-based expiry.
 4. Keep grants broker-owned, resource-scoped, and temporary; do not reintroduce
@@ -54,13 +54,11 @@ Target model:
 
 ## Why this migration exists
 
-The current runtime still carries command-approval plumbing inherited from an
+The runtime previously carried command-approval plumbing inherited from an
 interactive copilot model:
 
-- `ask`
-- `allowAlways`
-- `EXEC_APPROVAL_REQUIRED`
-- command approval resume metadata
+- per-command approval states
+- command-approval resume metadata
 - remembered command approvals
 
 That model is not a good fit for autonomous agents.
@@ -114,7 +112,7 @@ v1, but the design should leave room for it.
   agent-facing outcomes
 - backend permission denials are normalized into `PRIVILEGE_ELEVATION_REQUIRED`
 - backend exec denials are normalized into `EXEC_POLICY_DENIED`
-- default exec policy now prefers `ask: "off"`
+- default exec policy is now static and policy-first
 - awaited input and resume metadata already use `kind: "privilege-elevation"` in
   [input_metadata.ts](/Users/erwanpesle/Documents/GitHub/denoclaw/src/messaging/a2a/input_metadata.ts)
 - runtime mapping already turns resumable privilege elevation into canonical
@@ -138,18 +136,14 @@ v1, but the design should leave room for it.
 
 ### What still reflects the old model
 
-- `ExecPolicy` still carries `ask` and `askFallback` in
-  [sandbox_types.ts](/Users/erwanpesle/Documents/GitHub/denoclaw/src/agent/sandbox_types.ts),
-  even though the current shared backend guard is now static-policy only in
-  [exec_policy_guard.ts](/Users/erwanpesle/Documents/GitHub/denoclaw/src/agent/tools/backends/exec_policy_guard.ts)
-- docs and schema still expose legacy command-approval vocabulary in places,
-  especially around `askFallback`
-- some tests and fixtures still configure `ask` / `askFallback` for
-  compatibility, even though they are no longer the conceptual center of the
-  runtime
+- historical ADRs and notes still describe the old command-approval model for
+  context and migration history
+- some user-facing docs still need a final sweep so examples only show
+  policy-first execution plus privilege elevation
 - the runtime now models elevation-channel availability separately from broker
   support; resumability is gated by effective `privilegeElevation.supported`
-  plus `elevationAvailable`
+  plus `elevationAvailable`, including delegated child tasks that inherit
+  operator lineage through `parentTaskId`
 
 ## Migration strategy
 
@@ -174,7 +168,8 @@ Stabilize the runtime meanings before changing storage and resume payloads.
 
 - `EXEC_POLICY_DENIED` stays a hard refusal
 - `PRIVILEGE_ELEVATION_REQUIRED` becomes the only resumable policy failure
-- legacy `EXEC_APPROVAL_REQUIRED` remains compatibility-only, not a target
+- legacy command-approval-required states remain compatibility-only, not a
+  target
 
 ### Concrete work
 
@@ -182,8 +177,8 @@ Stabilize the runtime meanings before changing storage and resume payloads.
    path.
 2. Advertise `privilegeElevation.supported` only when broker support is active
    and effective agent policy allows resumable elevation.
-3. Ensure new code paths never introduce fresh dependencies on `ask` /
-   `allowAlways`.
+3. Ensure new code paths never introduce fresh dependencies on legacy
+   command-approval concepts.
 
 ## Track 2 — Introduce privilege grant payloads
 
@@ -357,23 +352,24 @@ system.
 - [sandbox_types.ts](/Users/erwanpesle/Documents/GitHub/denoclaw/src/agent/sandbox_types.ts)
 - [agent.schema.json](/Users/erwanpesle/Documents/GitHub/denoclaw/schemas/agent.schema.json)
 - [agent-sandbox-user-guide.md](/Users/erwanpesle/Documents/GitHub/denoclaw/docs/agent-sandbox-user-guide.md)
-- tests referencing `allowAlways` / `EXEC_APPROVAL_REQUIRED`
+- tests referencing legacy command-approval states
 
 ### Cleanup order
 
-1. Mark `ask`, `allowAlways`, and command approval grants as legacy.
+1. Remove legacy command-approval fields from live config types, schema,
+   defaults, and fixtures.
 2. Stop adding new coverage around command approval.
 3. Remove any remaining command-approval-oriented storage or protocol fields.
 4. Remove command approval request/response protocol once privilege elevation
    flow is complete.
-5. Simplify docs and schema.
+5. Simplify remaining user-facing docs.
 
 ## Recommended implementation order
 
 1. Finish Track 1 cleanup: recovery text, docs, and explicit semantics around
    broker support vs resumability
-2. Finish Track 6: remove legacy command-approval vocabulary and dead config
-   paths
+2. Finish Track 6: remove remaining command-approval vocabulary from live docs
+   and dead config paths
 3. Add any final audit/logging polish around denied/non-resumable elevation
    outcomes
 
@@ -403,7 +399,7 @@ Still worth adding or tightening:
 1. existing broker tool execution still behaves the same when no elevation is
    involved
 2. normalized agent-facing errors remain stable
-3. legacy `ask` / `askFallback` config still parses safely until removed
+3. config/schema/tool defaults no longer expose command-approval fields
 
 ## Cleanup checkpoints
 
@@ -413,7 +409,7 @@ Current state:
 
 - privilege grant model exists
 - broker can apply temporary structural grants
-- no broad command-approval removal yet
+- live config/types/schema no longer expose command approval knobs
 
 ### Checkpoint B
 
@@ -422,12 +418,13 @@ Current state:
 - `PRIVILEGE_ELEVATION_REQUIRED` is the real resumable policy failure
 - broker continuation path works end-to-end
 - per-agent enable/disable gate is enforced consistently
+- legacy command-approval fields have been removed from the live policy model
 
 ### Checkpoint C
 
 Remaining target:
 
-- `ask` / `allowAlways` are legacy or removed
+- command approval is legacy or removed
 - command approval no longer shapes the runtime design
 
 ## Success criteria

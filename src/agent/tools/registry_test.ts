@@ -186,8 +186,6 @@ Deno.test("ToolRegistry normalizes backend permission denials to PRIVILEGE_ELEVA
     execPolicy: {
       security: "allowlist",
       allowedCommands: [],
-      ask: "on-miss",
-      askFallback: "deny",
     },
   };
   registry.setBackend(
@@ -226,8 +224,6 @@ Deno.test("ToolRegistry normalizes backend exec denials to EXEC_POLICY_DENIED", 
     execPolicy: {
       security: "allowlist",
       allowedCommands: [],
-      ask: "off",
-      askFallback: "deny",
     },
   };
   registry.setBackend(
@@ -264,8 +260,6 @@ Deno.test("ToolRegistry includes shell command context in privilege elevation er
     execPolicy: {
       security: "allowlist",
       allowedCommands: [],
-      ask: "off",
-      askFallback: "deny",
     },
   };
   registry.setBackend(

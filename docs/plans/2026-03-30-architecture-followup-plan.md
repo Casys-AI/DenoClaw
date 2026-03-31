@@ -134,17 +134,16 @@ Reason:
 
 ### ADR-017 migration debt to close explicitly
 
-- legacy command-approval vocabulary still lingers after the privilege elevation
-  migration
-  - `ask`, `askFallback`, and `allowAlways` still appear in config types,
-    defaults, docs, and some tests
-  - the shared backend guard is now static-policy only, so those fields no
-    longer describe the real enforcement path
-  - ADR-017 makes this compatibility residue, not target-state behavior
+- command-approval cleanup should be treated as complete in the live runtime
+  model
+  - config types, defaults, schema, and active tests should no longer depend on
+    command-approval fields
+  - remaining references should be historical documentation only, not current
+    guidance
   - near-term action:
-    - remove dead command-approval semantics from docs/schema/types where
-      possible
-    - keep only minimal parsing compatibility until final cleanup lands
+    - sweep remaining user-facing docs so they only describe policy-first
+      execution plus privilege elevation
+    - keep historical ADR context clearly marked as historical
 
 - explicit elevation-channel availability is still not modeled separately from
   broker support

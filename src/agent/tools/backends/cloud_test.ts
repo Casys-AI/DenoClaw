@@ -9,8 +9,6 @@ import type {
 const basePolicy: ExecPolicy = {
   security: "allowlist",
   allowedCommands: ["echo"],
-  ask: "off",
-  askFallback: "deny",
 };
 
 function shellReq(
@@ -57,7 +55,7 @@ Deno.test("DenoSandboxBackend security=deny blocks shell before init", async () 
   const backend = new DenoSandboxBackend(sandbox, "fake-token");
 
   const result = await backend.execute(
-    shellReq("echo hi", { security: "deny", ask: "off" }),
+    shellReq("echo hi", { security: "deny" }),
   );
 
   assertEquals(result.success, false);
@@ -159,7 +157,6 @@ Deno.test(
     const result = await backend.execute(
       shellReq("deno --version", {
         security: "full",
-        ask: "off",
       }),
     );
 

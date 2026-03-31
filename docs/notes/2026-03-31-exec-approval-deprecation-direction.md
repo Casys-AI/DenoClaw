@@ -4,10 +4,8 @@
 
 The current design still carries an interactive execution-approval model:
 
-- `ask: "on-miss" | "always"`
-- `EXEC_APPROVAL_REQUIRED`
-- `allowAlways`
-- session-scoped command approval memory
+- interactive command-approval states
+- session-scoped command-approval memory
 
 This model came from a copilot-style workflow where a human is expected to click
 through command execution.
@@ -41,8 +39,9 @@ Keep structural privilege handling as the useful interactive exception.
 
 In practice:
 
-- `EXEC_APPROVAL_REQUIRED` should be deprecated as a primary runtime state
-- `allowAlways` should not remain a central product concept
+- command-approval-required states should be deprecated as a primary runtime
+  state
+- remembered command approvals should not remain a central product concept
 - `PRIVILEGE_ELEVATION_REQUIRED` remains useful
 - future human/operator intervention should happen at the privilege-elevation
   layer, not at the command-approval layer
@@ -155,8 +154,9 @@ The important design point is:
 
 ### Near-term implications
 
-- stop treating `ask` as a primary runtime feature
-- stop expanding `allowAlways` / session command grants as a strategic path
+- stop treating legacy command approval as a primary runtime feature
+- stop expanding remembered command approvals / session command grants as a
+  strategic path
 - keep `PRIVILEGE_ELEVATION_REQUIRED` as the meaningful interactive hook
 - keep backend permission errors normalized into agent-facing runtime errors
 
@@ -175,7 +175,8 @@ Not to routine command execution.
 
 1. Reword docs and recovery text so exec approval is no longer presented as the
    main path.
-2. Keep current `ask` compatibility only as legacy or development behavior.
+2. Keep any remaining command-approval compatibility only as historical or
+   transitional behavior.
 3. Introduce a clean product distinction between:
    - policy denial
    - privilege elevation required

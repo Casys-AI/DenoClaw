@@ -1,20 +1,20 @@
 # Agent Sandbox User Guide
 
-This guide explains how to configure agent sandbox permissions from a user point
-of view.
+This guide explains the current sandbox model for agents.
 
 ## Mental Model
 
-There are three separate layers:
+There are four separate layers:
 
-1. `allowedPermissions` What the agent is allowed to do at all: read files,
-   write files, open the network, or run commands.
-
-2. `execPolicy` Which shell commands are allowed once the agent has `run`.
-
+1. `allowedPermissions` What the agent may do at all: read files, write files,
+   open the network, or run commands.
+2. `execPolicy` Which commands are allowed once the agent has `run`.
 3. `shell` How commands are executed:
    - `direct`: `Deno.Command(binary, args)`
    - `system-shell`: a real shell interpreter (`sh -c`)
+4. `privilegeElevation` Whether the broker may offer bounded, temporary
+   privilege elevation when the command is allowed in principle but the current
+   sandbox envelope is too narrow.
 
 `run` is not the same thing as `system-shell`.
 
@@ -44,9 +44,7 @@ There are three separate layers:
     "allowedPermissions": ["read", "write", "run"],
     "execPolicy": {
       "security": "allowlist",
-      "allowedCommands": ["git", "deno", "npm"],
-      "ask": "on-miss",
-      "askFallback": "deny"
+      "allowedCommands": ["git", "deno", "npm"]
     },
     "shell": {
       "mode": "direct"
@@ -69,11 +67,16 @@ There are three separate layers:
     "allowedPermissions": ["read", "write", "run", "net"],
     "networkAllow": ["api.deno.com"],
     "execPolicy": {
-      "security": "full",
-      "ask": "always"
+      "security": "full"
     },
     "shell": {
       "mode": "system-shell"
+    },
+    "privilegeElevation": {
+      "enabled": true,
+      "scopes": ["task", "session"],
+      "requestTimeoutSec": 300,
+      "sessionGrantTtlSec": 1800
     }
   }
 }
@@ -82,7 +85,7 @@ There are three separate layers:
 - Allows a real shell with pipes, redirects, command chaining, and shell
   builtins
 - Requires `execPolicy.security = "full"`
-- Recommended for powerful agents, especially in cloud sandbox mode
+- Can request bounded privilege elevation through the broker if configured
 
 ## `allowedPermissions`
 
@@ -109,8 +112,7 @@ Block shell execution entirely.
 
 ```json
 {
-  "security": "deny",
-  "ask": "off"
+  "security": "deny"
 }
 ```
 
@@ -121,9 +123,7 @@ Allow only listed binaries in `direct` mode.
 ```json
 {
   "security": "allowlist",
-  "allowedCommands": ["git", "deno", "npm"],
-  "ask": "on-miss",
-  "askFallback": "deny"
+  "allowedCommands": ["git", "deno", "npm"]
 }
 ```
 
@@ -145,8 +145,7 @@ No command allowlist.
 
 ```json
 {
-  "security": "full",
-  "ask": "always"
+  "security": "full"
 }
 ```
 
@@ -192,8 +191,7 @@ Opt-in full shell mode.
 ```json
 {
   "execPolicy": {
-    "security": "full",
-    "ask": "always"
+    "security": "full"
   },
   "shell": {
     "mode": "system-shell"
@@ -236,26 +234,37 @@ Disable the shell tool even if the runtime exposes it.
 }
 ```
 
-## Approval Settings
+## `privilegeElevation`
 
-### `ask: "off"`
+Privilege elevation is broker-controlled. It does not approve commands; it
+temporarily widens the sandbox envelope when a command is already acceptable in
+principle.
 
-Run or deny immediately.
+Example:
 
-### `ask: "on-miss"`
+```json
+{
+  "privilegeElevation": {
+    "enabled": true,
+    "scopes": ["once", "task", "session"],
+    "requestTimeoutSec": 300,
+    "sessionGrantTtlSec": 1800
+  }
+}
+```
 
-Ask only when the command is not covered by policy.
+Fields:
 
-### `ask: "always"`
+- `enabled` Whether this agent may enter a resumable privilege-elevation flow
+- `scopes` Which scopes are allowed for grants
+- `requestTimeoutSec` How long an elevation request may stay pending
+- `sessionGrantTtlSec` How long a session-scoped grant remains active
 
-Always require approval.
+Typical use:
 
-### `askFallback`
-
-What to do if the approval channel is unavailable:
-
-- `deny`: fail closed
-- `allowlist`: allow only commands that would already pass without approval
+- `EXEC_POLICY_DENIED` The command is outside policy and must be fixed in config
+- `PRIVILEGE_ELEVATION_REQUIRED` The command is acceptable, but the current
+  sandbox lacks privileges such as `write` or `net`
 
 ## Recommendations
 
@@ -264,6 +273,7 @@ What to do if the approval channel is unavailable:
 - Use `system-shell` only for agents that really need shell composition
 - Prefer cloud sandbox for powerful autonomous agents
 - Keep `networkAllow` narrow even when `run` is enabled
+- Enable `privilegeElevation` only when the broker/operator flow is intended
 
 ## Common Mistakes
 
@@ -280,3 +290,9 @@ reliable control boundary.
 ### "Can I use `system-shell` locally?"
 
 Yes. It is allowed, but it is a higher-trust mode and logs a warning by default.
+
+### "Why did the agent get `PRIVILEGE_ELEVATION_REQUIRED`?"
+
+Because the command passed exec policy, but the sandbox still lacks some
+required capability or resource grant, such as `write` access to a path or `net`
+access to a host.

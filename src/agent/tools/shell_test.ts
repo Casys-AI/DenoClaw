@@ -64,8 +64,6 @@ Deno.test("ShellTool fails on missing command", async () => {
 const allowlistPolicy: ExecPolicy = {
   security: "allowlist",
   allowedCommands: ["git", "deno", "npm", "ls", "echo"],
-  ask: "off",
-  askFallback: "deny",
 };
 
 Deno.test("checkExecPolicy allows listed binary", () => {
@@ -241,18 +239,12 @@ Deno.test("requiresSystemShell catches common wrapper and redirection cases", ()
   assertEquals(requiresSystemShell("bash ./scripts/deploy.sh"), false);
 });
 
-// ── Legacy ask config is ignored by runtime exec policy ──
+// ── Allowlist behavior ──
 
-Deno.test("checkExecPolicy ignores ask=always for allowlisted binary", () => {
-  const policy: ExecPolicy = { ...allowlistPolicy, ask: "always" };
-  const result = checkExecPolicy("git status", policy);
+Deno.test("checkExecPolicy allows allowlisted binary", () => {
+  const result = checkExecPolicy("git status", allowlistPolicy);
   assertEquals(result.allowed, true);
   assertEquals(result.binary, "git");
-});
-
-Deno.test("checkExecPolicy ask=off allows allowlisted binary without ask", () => {
-  const result = checkExecPolicy("git status", allowlistPolicy); // ask: "off"
-  assertEquals(result.allowed, true);
 });
 
 // ── Fix 2: empty allowlist = deny all ──

@@ -75,8 +75,6 @@ for (const agent of agents) {
       execPolicy: {
         security: "allowlist",
         allowedCommands: ["git", "deno", "npm", "ls", "cat", "grep", "echo"],
-        ask: "on-miss",
-        askFallback: "deny",
       },
     },
   };

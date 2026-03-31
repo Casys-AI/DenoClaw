@@ -180,7 +180,6 @@ Deno.test({
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["echo"],
-            ask: "off",
           },
         },
       });
@@ -276,8 +275,6 @@ Deno.test({
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["echo"], // curl is NOT listed
-            ask: "off",
-            askFallback: "deny",
           },
         },
       });

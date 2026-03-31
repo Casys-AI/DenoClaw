@@ -16,8 +16,6 @@ const baseSandbox: SandboxConfig = {
 const allowlistPolicy: ExecPolicy = {
   security: "allowlist",
   allowedCommands: ["echo", "ls"],
-  ask: "off",
-  askFallback: "deny",
 };
 
 function shellReq(
@@ -118,7 +116,7 @@ Deno.test("LocalProcessBackend denies shell operators", async () => {
 });
 
 Deno.test("LocalProcessBackend security=deny blocks all shell", async () => {
-  const denyPolicy: ExecPolicy = { security: "deny", ask: "off" };
+  const denyPolicy: ExecPolicy = { security: "deny" };
   const backend = new LocalProcessBackend(baseSandbox);
   const result = await backend.execute(shellReq("echo hi", denyPolicy));
   assertEquals(result.success, false);
@@ -127,7 +125,7 @@ Deno.test("LocalProcessBackend security=deny blocks all shell", async () => {
 });
 
 Deno.test("LocalProcessBackend security=full allows everything", async () => {
-  const fullPolicy: ExecPolicy = { security: "full", ask: "off" };
+  const fullPolicy: ExecPolicy = { security: "full" };
   const backend = new LocalProcessBackend(baseSandbox);
   const result = await backend.execute(shellReq("echo hello", fullPolicy));
   assertEquals(result.success, true);
@@ -150,35 +148,6 @@ Deno.test("LocalProcessBackend skips exec policy for dry_run shell", async () =>
     execPolicy: allowlistPolicy,
   });
   assertEquals(result.success, true); // dry_run passes through to executor
-  await backend.close();
-});
-
-// ── Legacy ask config is ignored in runtime execution ──
-
-Deno.test("LocalProcessBackend ignores ask=always when command is allowlisted", async () => {
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: ["echo"],
-    ask: "always",
-    askFallback: "deny",
-  };
-  const backend = new LocalProcessBackend(baseSandbox);
-  const result = await backend.execute(shellReq("echo hello", policy));
-  assertEquals(result.success, true);
-  await backend.close();
-});
-
-Deno.test("LocalProcessBackend ignores ask=on-miss and still denies commands outside policy", async () => {
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: ["echo"],
-    ask: "on-miss",
-    askFallback: "allowlist",
-  };
-  const backend = new LocalProcessBackend(baseSandbox);
-  const result = await backend.execute(shellReq("curl foo.com", policy));
-  assertEquals(result.success, false);
-  assertEquals(result.error?.code, "EXEC_DENIED");
   await backend.close();
 });
 

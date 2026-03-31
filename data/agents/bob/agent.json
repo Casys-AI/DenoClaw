@@ -17,8 +17,7 @@
         "deno",
         "node",
         "python3"
-      ],
-      "ask": "off"
+      ]
     }
   },
   "peers": [

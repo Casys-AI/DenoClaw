@@ -4,14 +4,14 @@
 
 We introduced an agent-facing distinction between:
 
-- `EXEC_APPROVAL_REQUIRED`
+- legacy command-approval-required states
 - `PRIVILEGE_ELEVATION_REQUIRED`
 
 This is useful semantically because these two failures do not mean the same
 thing:
 
-- command approval: the action fits inside the current sandbox envelope, but
-  needs an execution approval
+- legacy command approval: the action fits inside the current sandbox envelope,
+  but waits for a per-command approval
 - privilege elevation: the current sandbox envelope itself is insufficient
 
 At the same time, the current runtime model is already strongly broker-governed:
@@ -21,33 +21,25 @@ At the same time, the current runtime model is already strongly broker-governed:
 - agents do not provision their own sandbox envelope
 - backend permission checks are already enforced before execution
 
-That makes a second runtime approval track for structural privilege elevation
-look redundant for now.
+That originally made a second runtime approval track for structural privilege
+elevation look redundant.
 
 ## Reassessment
 
 The semantic distinction is useful.
 
-The double workflow is not.
+The older double-workflow was not.
 
-We should keep the agent-facing error taxonomy, but avoid introducing a second
-approval/grant mechanism unless a concrete use case proves that static policy is
-insufficient.
+The current runtime should keep the agent-facing error taxonomy while letting
+privilege elevation, not command approval, carry the only resumable workflow.
 
 ## Decision Direction
 
-For now:
+For the current runtime:
 
-- keep `PRIVILEGE_ELEVATION_REQUIRED` as a descriptive runtime error
-- keep `allowAlways` and similar scoped approvals only for command execution
-  inside an already-authorized envelope
-- do not introduce a separate conversational or runtime privilege-elevation
-  grant flow
-
-In other words:
-
-- command approvals may be dynamic
-- structural sandbox permissions remain broker/config governed
+- keep `PRIVILEGE_ELEVATION_REQUIRED` as the structural, resumable runtime hook
+- keep privilege grants broker-controlled
+- do not reintroduce a second command-approval track
 
 ## Why This Is Cleaner
 
@@ -67,18 +59,11 @@ between:
 
 That increases ambiguity without solving a demonstrated need.
 
-### 2. Less conceptual overlap with `allowAlways`
+### 2. Less conceptual overlap
 
-`allowAlways` already provides a scoped, user-approved memory for command
-execution decisions.
-
-If we also add a temporary structural privilege elevation workflow, we create
-two very similar runtime concepts:
-
-- "remember this command approval"
-- "remember this temporary privilege escalation"
-
-That is harder to explain to users and harder to reason about for agents.
+If runtime command approval and structural privilege elevation both exist as
+first-class workflows, the model becomes harder to explain and harder for agents
+to reason about.
 
 ### 3. Stronger default posture
 
@@ -114,29 +99,26 @@ If we do not need that yet, we should not build it yet.
 
 ## Proposed Model
 
-### Command approval
+### Execution policy
 
-Keep dynamic approvals for execution-policy cases:
+Keep execution policy static and broker-governed:
 
-- once
-- task
-- session or workspace
-
-This remains the home of `allowAlways`.
+- commands either pass policy or return `EXEC_POLICY_DENIED`
+- command approval is not a first-class runtime flow anymore
 
 ### Structural permissions
 
 Treat missing structural sandbox permissions as:
 
-- a broker/configuration problem
+- a broker-owned privilege-elevation concern
 - surfaced via `PRIVILEGE_ELEVATION_REQUIRED`
-- not dynamically granted in the current runtime
+- granted only through bounded broker-side privilege grants when enabled
 
 The recovery path should point to:
 
-- agent config change
-- broker policy change
-- future admin-grade elevation flow only if explicitly introduced later
+- broker-side privilege grant
+- agent config change when elevation is disabled
+- broker policy change when the agent should have the capability by default
 
 ## Consequences
 
@@ -146,20 +128,20 @@ The recovery path should point to:
   privilege
 - `PRIVILEGE_ELEVATION_REQUIRED` as an agent-facing error code
 - backend-level raw permission errors such as `SANDBOX_PERMISSION_DENIED`
+- broker-owned, bounded privilege grants as the only resumable path
 
-### What we should avoid for now
+### What we should avoid
 
-- temporary runtime privilege grants
-- `always allow` for structural permissions
-- a second approval store for privilege elevation
-- conversational elevation UX that looks equivalent to command approval
+- unbounded structural privilege escalation
+- remembered command approvals as a parallel control path
+- conversational UX that turns privilege elevation back into command approval
 
 ## Near-Term Cleanup
 
 1. Reword recovery text for `PRIVILEGE_ELEVATION_REQUIRED` so it does not imply
-   that temporary elevation already exists.
-2. Keep `privilegeElevation.supported = false` in runtime capabilities until a
-   real feature exists.
+   the wrong operator surface.
+2. Keep runtime capabilities aligned with actual broker-owned privilege
+   elevation support.
 3. Continue to normalize backend permission denials into an agent-facing runtime
    error without adding a second enforcement system.
 
@@ -173,5 +155,5 @@ Revisit this decision only if we hit a real product need such as:
 
 Until then, the simpler model is preferable:
 
-- one dynamic approval system for commands
-- one static broker/config system for structural permissions
+- one policy-first execution model
+- one broker-owned privilege-elevation system for bounded structural widening

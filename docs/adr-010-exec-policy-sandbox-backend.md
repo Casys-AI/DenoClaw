@@ -1,5 +1,9 @@
 # ADR-010: Exec Policy + Dual Sandbox Backend
 
+> Historical ADR. The interactive command-approval model described below is no
+> longer the live runtime model. The current runtime is policy-first and uses
+> broker-owned privilege elevation when enabled.
+
 **Status:** Accepted **Date:** 2026-03-27 **Extends:** ADR-005 (permissions by
 intersection)
 

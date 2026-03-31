@@ -167,15 +167,13 @@
       "additionalProperties": false
     },
     "ExecPolicy": {
-      "description": "Shell command execution policy. `security` is the active policy surface. `ask` / `askFallback` remain legacy compatibility fields and are not the primary control path for autonomous runtimes.",
+      "description": "Shell command execution policy. `security` is the active control surface.",
       "oneOf": [
         {
           "type": "object",
           "description": "Deny all shell execution",
           "properties": {
-            "security": { "const": "deny" },
-            "ask": { "$ref": "#/$defs/AskMode" },
-            "askFallback": { "$ref": "#/$defs/AskFallback" }
+            "security": { "const": "deny" }
           },
           "required": ["security"],
           "additionalProperties": false
@@ -185,8 +183,6 @@
           "description": "Allow any direct command without an allowlist (dangerous — does not imply shell interpreter semantics such as pipes or &&)",
           "properties": {
             "security": { "const": "full" },
-            "ask": { "$ref": "#/$defs/AskMode" },
-            "askFallback": { "$ref": "#/$defs/AskFallback" },
             "envFilter": {
               "type": "array",
               "items": { "type": "string" },
@@ -201,8 +197,6 @@
           "description": "Allow only direct commands whose binary is in allowedCommands (recommended)",
           "properties": {
             "security": { "const": "allowlist" },
-            "ask": { "$ref": "#/$defs/AskMode" },
-            "askFallback": { "$ref": "#/$defs/AskFallback" },
             "allowedCommands": {
               "type": "array",
               "items": { "type": "string" },
@@ -230,16 +224,6 @@
           "additionalProperties": false
         }
       ]
-    },
-    "AskMode": {
-      "type": "string",
-      "enum": ["off", "on-miss", "always"],
-      "description": "Legacy compatibility field from the deprecated command-approval model. The primary runtime path is now policy-first plus privilege elevation."
-    },
-    "AskFallback": {
-      "type": "string",
-      "enum": ["deny", "allowlist"],
-      "description": "Legacy compatibility field paired with `ask`. Kept for config compatibility, not as the main autonomous runtime control."
     }
   }
 }

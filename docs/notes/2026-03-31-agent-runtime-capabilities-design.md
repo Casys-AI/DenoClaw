@@ -14,7 +14,7 @@ The broker remains authoritative for:
 - structural sandbox permissions
 - network policy
 - exec policy
-- runtime approvals and grants
+- runtime grants
 - sandbox selection and lifecycle
 
 Agents must not become the authority that decides what is really allowed.
@@ -39,12 +39,12 @@ They are not meant to replace broker-side enforcement.
 
 ### 4. Grants are separate from base capabilities
 
-Base capabilities and temporary approvals should not be conflated.
+Base capabilities and temporary grants should not be conflated.
 
 Examples:
 
 - base capability: `shell` available, `run` allowed
-- temporary grant: `git` approved for this task
+- temporary grant: `write` on `/workspace/repo/docs` for this task
 
 ## Proposed Model
 
@@ -56,7 +56,6 @@ The broker keeps the real policy inputs:
 - exec policy
 - network allowlist
 - structural sandbox permissions
-- active approval grants
 - future privilege elevation grants
 
 ### Agent-facing projection
@@ -151,7 +150,7 @@ Capabilities should carry a `version` or fingerprint.
 
 Why:
 
-- approvals can change runtime behavior
+- privilege grants can change runtime behavior
 - future privilege elevation could update effective capabilities
 - agent sessions may otherwise reason on stale assumptions
 
@@ -162,10 +161,9 @@ the agent refresh its planning view.
 
 The current distinction should become sharper:
 
-- `EXEC_APPROVAL_REQUIRED`
 - `EXEC_DENIED`
 - `SANDBOX_PERMISSION_DENIED`
-- future: `PRIVILEGE_ELEVATION_REQUIRED`
+- `PRIVILEGE_ELEVATION_REQUIRED`
 
 The agent should use:
 
@@ -185,4 +183,5 @@ The agent should use:
 2. Inject it into worker/runtime initialization.
 3. Add a compact runtime summary to the planning context.
 4. Keep broker-side enforcement unchanged.
-5. Later separate command approvals from privilege elevation in broker errors.
+5. Keep runtime planning separate from broker-side privilege elevation
+   enforcement.

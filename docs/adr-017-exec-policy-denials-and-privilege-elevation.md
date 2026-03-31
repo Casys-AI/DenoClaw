@@ -11,10 +11,8 @@ The runtime currently contains two partially overlapping ideas:
 
 The first came from an interactive copilot model:
 
-- `ask: "on-miss" | "always"`
-- `EXEC_APPROVAL_REQUIRED`
-- `allowAlways`
-- remembered command approvals
+- interactive command approval states
+- remembered command-approval memory
 
 The second comes from the actual sandbox security model:
 
@@ -62,10 +60,9 @@ model.
 
 In particular:
 
-- `EXEC_APPROVAL_REQUIRED` is not the desired steady-state behavior
-- `allowAlways` is not a long-term product primitive
-- remembered command approvals are not the intended mechanism for autonomous
-  execution
+- command-approval-required states are not the desired steady-state behavior
+- remembered command approvals are not a long-term product primitive
+- command approvals are not the intended mechanism for autonomous execution
 
 ### 3. Policy denial and privilege elevation are distinct
 

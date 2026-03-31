@@ -2348,7 +2348,7 @@ Deno.test(
 );
 
 Deno.test(
-  "BrokerServer returns EXEC_POLICY_DENIED for broker-backed shell tasks outside policy even when ask is configured",
+  "BrokerServer returns EXEC_POLICY_DENIED for broker-backed shell tasks outside policy without reaching sandbox",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
@@ -2360,7 +2360,6 @@ Deno.test(
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["git"],
-            ask: "always",
           },
         },
       });
@@ -2407,7 +2406,7 @@ Deno.test(
         payload: {
           tool: "shell",
           args: { command: "curl https://example.com", dry_run: false },
-          taskId: "task-policy-ask-configured",
+          taskId: "task-policy-denied-no-sandbox",
         },
       });
 
@@ -2448,7 +2447,6 @@ Deno.test(
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["git"],
-            ask: "off",
           },
         },
       });
@@ -2536,7 +2534,6 @@ Deno.test(
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["git"],
-            ask: "always",
           },
         },
       });
@@ -2632,7 +2629,6 @@ Deno.test(
           allowedPermissions: ["run"],
           execPolicy: {
             security: "full",
-            ask: "off",
           },
           shell: {
             mode: "system-shell",
@@ -2720,7 +2716,6 @@ Deno.test(
           execPolicy: {
             security: "allowlist",
             allowedCommands: ["echo"],
-            ask: "off",
           },
         },
       });

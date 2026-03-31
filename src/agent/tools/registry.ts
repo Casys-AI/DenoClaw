@@ -17,8 +17,6 @@ import { suggestPrivilegeElevationGrantResources } from "../../shared/privilege_
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
   allowedCommands: [],
-  ask: "off",
-  askFallback: "deny",
 };
 
 export abstract class BaseTool {

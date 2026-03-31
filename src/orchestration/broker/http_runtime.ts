@@ -7,6 +7,7 @@ import type {
 } from "../federation/mod.ts";
 import { log } from "../../shared/log.ts";
 import type { AuthManager } from "../auth.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 import type { BrokerMessage } from "../types.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
 import type { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
@@ -27,10 +28,8 @@ export interface BrokerHttpRuntimeDeps {
   submitChannelMessage(
     message: ChannelMessage,
     input: {
-      targetAgent: string;
+      routePlan: ChannelRoutePlan;
       taskId: string;
-      contextId?: string;
-      metadata?: Record<string, unknown>;
     },
   ): Promise<Task>;
   getTask(taskId: string): Promise<Task | null>;

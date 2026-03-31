@@ -47,7 +47,6 @@ export type {
   AgentStatusEntry,
   AgentStatusValue,
   BrokerEnvelope,
-  ChannelRouting,
   ExecPolicy,
   LLMResponse,
   Message,

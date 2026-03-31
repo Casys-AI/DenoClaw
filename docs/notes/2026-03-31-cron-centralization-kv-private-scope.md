@@ -114,6 +114,59 @@ LibSQL/SQLite embedded is **not available** on Deploy.
 This gives the full ADK memory model (session state, conversation history,
 long-term semantic memory) on Deploy-compatible infra.
 
+## 5. Federation → A2A standard alignment
+
+### Current state
+
+The federation layer uses a **custom internal protocol**:
+- `RemoteAgentCatalogEntry` (custom agent discovery format)
+- `BrokerTaskSubmitPayload` (custom task format)
+- `SignedCatalogEnvelope` (custom signed catalog)
+- WebSocket tunnels as transport
+
+There is **no A2A protocol** (JSON-RPC 2.0, Agent Cards, standard
+tasks/messages/artifacts) in the federation layer today.
+
+### Problem
+
+DenoClaw agents cannot interop with the broader A2A ecosystem (ADK Google,
+LangChain, Mastra, etc.) without custom bridge code. The federation is a
+closed system.
+
+### Proposed change
+
+Keep the existing federation infrastructure (tunnels, trust model, link
+lifecycle, routing policies, dead letter queue, stats/observability) — this is
+**more robust** than what A2A standard provides out-of-the-box.
+
+Replace the **payload format** inside tunnels with A2A standard:
+- `RemoteAgentCatalogEntry` → **A2A Agent Cards** (`.well-known/agent.json`)
+- `BrokerTaskSubmitPayload` → **A2A JSON-RPC 2.0 task messages**
+- Task results/streaming → **A2A SSE events**
+- Agent discovery → **A2A Agent Card resolution**
+
+### What DenoClaw federation adds on top of A2A standard
+
+| Capability | A2A standard | DenoClaw federation |
+|---|---|---|
+| Transport | HTTP request/response + SSE | Persistent WebSocket tunnels |
+| Trust model | HTTPS + API keys/OAuth | Signed identities, key rotation, trust states |
+| Link lifecycle | None (stateless) | opening→active→degraded→closed + heartbeat |
+| Routing | Client knows target | Policy-based (prefer local, deny/allow lists, max latency) |
+| Reliability | Caller retries | Dead letter queue, idempotency keys, submission records |
+| Observability | Not specified | p50/p95 latency per link, denial breakdowns, trace correlation |
+
+### ADK integration opportunity
+
+With `@google/adk` A2A support (TypeScript SDK):
+- Expose DenoClaw agents as `A2AServer` → any A2A client can reach them
+- Consume external agents via `RemoteA2aAgent` → agents use remote A2A
+  services as local tools
+- Events flow naturally through A2A task messages across broker boundaries
+
+This makes DenoClaw federation interoperable with the entire A2A ecosystem
+while keeping its operational advantages.
+
 ## TODO
 
 - [ ] Verify cron jobs currently registered by agents — what schedules exist

@@ -12,15 +12,6 @@ export function resolveGatewayChannelRoutePlan(
   agentIds: string[],
   channelsConfig?: ChannelsConfig,
 ): ChannelRoutePlan {
-  const explicitAgentId = getExplicitChannelMessageAgentId(message);
-  if (explicitAgentId) {
-    return assertAvailableGatewayTargets(
-      createDirectChannelRoutePlan(explicitAgentId),
-      agentIds,
-      message,
-    );
-  }
-
   const configuredRoutePlan = resolveConfiguredChannelRoutePlan(
     message,
     channelsConfig,
@@ -28,6 +19,15 @@ export function resolveGatewayChannelRoutePlan(
   if (configuredRoutePlan) {
     return assertAvailableGatewayTargets(
       configuredRoutePlan,
+      agentIds,
+      message,
+    );
+  }
+
+  const explicitAgentId = getExplicitChannelMessageAgentId(message);
+  if (explicitAgentId) {
+    return assertAvailableGatewayTargets(
+      createDirectChannelRoutePlan(explicitAgentId),
       agentIds,
       message,
     );

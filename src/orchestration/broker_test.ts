@@ -3667,6 +3667,79 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer.submitChannelMessage keeps broadcast agent tasks consistent when one target route is unavailable",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordAgentMessage: async () => {} } as any,
+      });
+      attachConnectedAgentInbox(broker, "agent-alpha");
+
+      const sharedTask = await broker.submitChannelMessage(
+        {
+          id: "discord-msg-partial-route-1",
+          sessionId: "discord-room-partial-route-1",
+          userId: "user-1",
+          content: "shared prompt",
+          channelType: "discord",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "discord",
+            roomId: "room-partial-route-1",
+            userId: "user-1",
+          },
+        },
+        {
+          routePlan: createBroadcastChannelRoutePlan([
+            "agent-alpha",
+            "agent-beta",
+          ]),
+          taskId: "broadcast-partial-route-1",
+        },
+      );
+
+      const sharedBrokerMetadata = bodyBrokerMetadata(sharedTask);
+      assertEquals(sharedBrokerMetadata.shared?.agentTasks, [
+        {
+          agentId: "agent-alpha",
+          taskId: "broadcast-partial-route-1:1:agent-alpha",
+          state: "SUBMITTED",
+        },
+        {
+          agentId: "agent-beta",
+          taskId: "broadcast-partial-route-1:2:agent-beta",
+          state: "FAILED",
+        },
+      ]);
+
+      const failedAgentTask = await broker.getTask({
+        taskId: "broadcast-partial-route-1:2:agent-beta",
+      });
+      assertExists(failedAgentTask);
+      assertEquals(failedAgentTask.status.state, "FAILED");
+      assertEquals(
+        failedAgentTask.status.message?.parts[0],
+        {
+          kind: "text",
+          text:
+            "Failed to route shared ingress to agent-beta: AGENT_ROUTE_UNAVAILABLE",
+        },
+      );
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer /ingress/tasks/:id/continue routes canonical task_continue for the same channel session",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });

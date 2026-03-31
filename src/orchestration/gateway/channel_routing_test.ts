@@ -40,6 +40,36 @@ Deno.test("resolveGatewayChannelRoutePlan honors explicit metadata agentId", () 
 });
 
 Deno.test(
+  "resolveGatewayChannelRoutePlan prefers configured scope policy over legacy metadata agentId",
+  () => {
+    const config: ChannelsConfig = {
+      routing: {
+        scopes: [
+          {
+            scope: { channelType: "telegram", roomId: "room-1" },
+            delivery: "direct",
+            targetAgentIds: ["agent-alpha"],
+          },
+        ],
+      },
+    };
+
+    assertEquals(
+      resolveGatewayChannelRoutePlan(
+        createMessage({ agentId: "agent-beta" }),
+        ["agent-alpha", "agent-beta"],
+        config,
+      ),
+      {
+        delivery: "direct",
+        targetAgentIds: ["agent-alpha"],
+        primaryAgentId: "agent-alpha",
+      },
+    );
+  },
+);
+
+Deno.test(
   "resolveGatewayChannelRoutePlan resolves telegram direct policy from configured channel scopes",
   () => {
     const config: ChannelsConfig = {

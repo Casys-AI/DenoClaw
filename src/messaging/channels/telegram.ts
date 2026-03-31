@@ -131,8 +131,10 @@ export class TelegramChannel extends BaseChannel {
       return;
     }
 
+    const sendOptions = buildTelegramSendOptions(message);
     try {
       await this.bot.api.sendMessage(chatId, message.content, {
+        ...sendOptions,
         parse_mode: "Markdown",
       });
       return;
@@ -147,7 +149,7 @@ export class TelegramChannel extends BaseChannel {
     }
 
     try {
-      await this.bot.api.sendMessage(chatId, message.content);
+      await this.bot.api.sendMessage(chatId, message.content, sendOptions);
     } catch (error) {
       log.error(
         `Telegram: send error (${this.adapterId})`,
@@ -289,6 +291,19 @@ function resolveTelegramToken(
   return typeof token === "string" && token.trim().length > 0
     ? token.trim()
     : undefined;
+}
+
+function buildTelegramSendOptions(
+  message: OutboundChannelMessage,
+): Record<string, unknown> {
+  const threadId = normalizeTelegramThreadId(message.address.threadId);
+  return typeof threadId === "number" ? { message_thread_id: threadId } : {};
+}
+
+function normalizeTelegramThreadId(threadId?: string): number | undefined {
+  if (typeof threadId !== "string") return undefined;
+  const parsed = Number.parseInt(threadId, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function isTelegramMarkdownParseError(error: unknown): boolean {

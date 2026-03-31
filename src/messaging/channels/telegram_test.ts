@@ -223,3 +223,65 @@ Deno.test(
     assertEquals(received?.metadata?.messageThreadId, "77");
   },
 );
+
+Deno.test(
+  "TelegramChannel sends topic replies with message_thread_id",
+  async () => {
+    const channel = new TelegramChannel({
+      enabled: true,
+      adapterId: "telegram:support-bot",
+      accountId: "support-bot",
+      tokenEnvVar: "TG_SUPPORT_TOKEN",
+    });
+
+    let sent:
+      | {
+        chatId: string;
+        content: string;
+        options?: Record<string, unknown>;
+      }
+      | undefined;
+    const internal = channel as unknown as {
+      bot?: {
+        api: {
+          sendMessage(
+            chatId: string,
+            content: string,
+            options?: Record<string, unknown>,
+          ): Promise<void>;
+        };
+      };
+    };
+    internal.bot = {
+      api: {
+        async sendMessage(
+          chatId: string,
+          content: string,
+          options?: Record<string, unknown>,
+        ): Promise<void> {
+          sent = { chatId, content, options };
+        },
+      },
+    };
+
+    await channel.send({
+      address: {
+        channelType: "telegram",
+        accountId: "support-bot",
+        roomId: "-10001",
+        threadId: "77",
+        userId: "7",
+      },
+      content: "hello topic",
+    });
+
+    assertEquals(sent, {
+      chatId: "-10001",
+      content: "hello topic",
+      options: {
+        message_thread_id: 77,
+        parse_mode: "Markdown",
+      },
+    });
+  },
+);

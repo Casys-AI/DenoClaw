@@ -364,8 +364,15 @@ export class BrokerTaskDispatcher {
     );
     await this.deps.persistence.writeTask(persistedSharedTask);
 
+    const persistedAgentTasks: Array<{
+      task: Task;
+      from: string;
+      targetAgent: string;
+      taskMessage: A2AMessage;
+      forwardedMetadata?: Record<string, unknown>;
+    }> = [];
     for (const agentTask of agentTaskRefs) {
-      await this.submitRoutedTask({
+      const persistedAgentTask = await this.persistPreparedTask({
         from: input.submittedBy,
         targetAgent: agentTask.agentId,
         taskId: agentTask.taskId,
@@ -381,9 +388,37 @@ export class BrokerTaskDispatcher {
           sharedTaskId: persistedSharedTask.id,
         }),
       });
+      persistedAgentTasks.push({
+        task: persistedAgentTask,
+        from: input.submittedBy,
+        targetAgent: agentTask.agentId,
+        taskMessage: input.taskMessage,
+        forwardedMetadata: input.forwardedMetadata,
+      });
     }
 
-    return persistedSharedTask;
+    for (const persistedAgentTask of persistedAgentTasks) {
+      try {
+        await this.routePersistedTaskSubmission(
+          persistedAgentTask.task,
+          persistedAgentTask.from,
+          persistedAgentTask.targetAgent,
+          persistedAgentTask.taskMessage,
+          persistedAgentTask.forwardedMetadata,
+        );
+      } catch (error) {
+        await this.deps.persistence.writeTask(
+          createBroadcastRouteFailureTask(
+            persistedAgentTask.task,
+            persistedAgentTask.targetAgent,
+            error,
+          ),
+        );
+      }
+    }
+
+    await this.refreshSharedBroadcastTask(persistedSharedTask.id);
+    return await this.requireTask(persistedSharedTask.id);
   }
 
   private async persistReportedTask(
@@ -574,35 +609,61 @@ export class BrokerTaskDispatcher {
     forwardedMetadata?: Record<string, unknown>;
     brokerMetadata: BrokerTaskMetadata;
   }): Promise<Task> {
+    const persistedTask = await this.persistPreparedTask(input);
+    await this.routePersistedTaskSubmission(
+      persistedTask,
+      input.from,
+      input.targetAgent,
+      input.taskMessage,
+      input.forwardedMetadata,
+    );
+    return persistedTask;
+  }
+
+  private async persistPreparedTask(input: {
+    from: string;
+    targetAgent: string;
+    taskId: string;
+    contextId?: string;
+    taskMessage: A2AMessage;
+    forwardedMetadata?: Record<string, unknown>;
+    brokerMetadata: BrokerTaskMetadata;
+  }): Promise<Task> {
     const task = await this.deps.taskStore.create(
       input.taskId,
       input.taskMessage,
       input.contextId,
     );
 
-    const persistedTask = await this.deps.persistence.persistTaskMetadata(
+    return await this.deps.persistence.persistTaskMetadata(
       task,
       input.brokerMetadata,
     );
+  }
 
-    await this.deps.routeTaskMessage(input.targetAgent, {
+  private async routePersistedTaskSubmission(
+    persistedTask: Task,
+    from: string,
+    targetAgent: string,
+    taskMessage: A2AMessage,
+    forwardedMetadata?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.deps.routeTaskMessage(targetAgent, {
       id: generateId(),
-      from: input.from,
-      to: input.targetAgent,
+      from,
+      to: targetAgent,
       type: "task_submit",
       payload: {
-        targetAgent: input.targetAgent,
+        targetAgent,
         taskId: persistedTask.id,
-        taskMessage: input.taskMessage,
+        taskMessage,
         contextId: persistedTask.contextId,
-        ...(input.forwardedMetadata
-          ? { metadata: input.forwardedMetadata }
+        ...(forwardedMetadata
+          ? { metadata: forwardedMetadata }
           : {}),
       },
       timestamp: new Date().toISOString(),
     });
-
-    return persistedTask;
   }
 
   private async resolveParentTaskForSubmission(
@@ -1034,6 +1095,27 @@ function createBroadcastAgentTaskId(
   index: number,
 ): string {
   return `${sharedTaskId}:${index + 1}:${agentId}`;
+}
+
+function createBroadcastRouteFailureTask(
+  task: Task,
+  targetAgent: string,
+  error: unknown,
+): Task {
+  const structured = error instanceof DenoClawError ? error.toStructured() : {
+    code: "AGENT_ROUTE_UNAVAILABLE",
+    recovery: error instanceof Error ? error.message : "Check agent routing",
+  };
+
+  return transitionTask(task, "FAILED", {
+    statusMessage: createAgentTextMessage(
+      `Failed to route shared ingress to ${targetAgent}: ${structured.code}`,
+    ),
+    metadata: {
+      errorCode: structured.code,
+      ...(structured.context ? { errorContext: structured.context } : {}),
+    },
+  });
 }
 
 function requireBrokerTaskTargetAgent(

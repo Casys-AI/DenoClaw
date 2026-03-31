@@ -16,7 +16,11 @@
     "model": {
       "type": "string",
       "description": "LLM model override (e.g. 'ollama/nemotron-3-super'). Inherits from global defaults if omitted.",
-      "examples": ["ollama/nemotron-3-super", "anthropic/claude-sonnet-4-6", "openai/gpt-4o"]
+      "examples": [
+        "ollama/nemotron-3-super",
+        "anthropic/claude-sonnet-4-6",
+        "openai/gpt-4o"
+      ]
     },
     "temperature": {
       "type": "number",
@@ -99,18 +103,71 @@
         "execPolicy": {
           "$ref": "#/$defs/ExecPolicy"
         },
-        "approvalTimeoutSec": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 60,
-          "description": "Timeout for human approval requests in seconds"
+        "shell": {
+          "$ref": "#/$defs/ShellConfig"
+        },
+        "privilegeElevation": {
+          "type": "object",
+          "description": "Optional broker-owned temporary privilege elevation flow for this agent",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether broker-side temporary privilege elevation may be requested for this agent"
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["once", "task", "session"]
+              },
+              "uniqueItems": true,
+              "description": "Allowed temporary elevation scopes for this agent"
+            },
+            "requestTimeoutSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 300,
+              "description": "How long an INPUT_REQUIRED privilege-elevation request stays resumable"
+            },
+            "sessionGrantTtlSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1800,
+              "description": "TTL for session-scoped temporary privilege elevation grants"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": ["allowedPermissions"],
       "additionalProperties": false
     },
+    "ShellConfig": {
+      "type": "object",
+      "description": "Shell execution mode. 'direct' keeps binary+args semantics. 'system-shell' delegates to a host shell interpreter.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the shell tool may be used when exposed by the runtime"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["direct", "system-shell"],
+          "default": "direct",
+          "description": "'direct' uses Deno.Command(binary, args); 'system-shell' uses a shell interpreter and enables pipes, redirects and command chaining"
+        },
+        "warnOnLocalSystemShell": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emit a warning when 'system-shell' is used on the local backend"
+        }
+      },
+      "additionalProperties": false
+    },
     "ExecPolicy": {
-      "description": "Shell command execution policy (ADR-010). Discriminated union on 'security' field.",
+      "description": "Shell command execution policy. `security` is the active policy surface. `ask` / `askFallback` remain legacy compatibility fields and are not the primary control path for autonomous runtimes.",
       "oneOf": [
         {
           "type": "object",
@@ -120,12 +177,12 @@
             "ask": { "$ref": "#/$defs/AskMode" },
             "askFallback": { "$ref": "#/$defs/AskFallback" }
           },
-          "required": ["security", "ask"],
+          "required": ["security"],
           "additionalProperties": false
         },
         {
           "type": "object",
-          "description": "Allow all shell commands (dangerous — use only for trusted agents)",
+          "description": "Allow any direct command without an allowlist (dangerous — does not imply shell interpreter semantics such as pipes or &&)",
           "properties": {
             "security": { "const": "full" },
             "ask": { "$ref": "#/$defs/AskMode" },
@@ -136,12 +193,12 @@
               "description": "Additional env prefixes to strip (on top of LD_*, DYLD_*)"
             }
           },
-          "required": ["security", "ask"],
+          "required": ["security"],
           "additionalProperties": false
         },
         {
           "type": "object",
-          "description": "Allow only commands whose binary is in allowedCommands (recommended)",
+          "description": "Allow only direct commands whose binary is in allowedCommands (recommended)",
           "properties": {
             "security": { "const": "allowlist" },
             "ask": { "$ref": "#/$defs/AskMode" },
@@ -169,7 +226,7 @@
               "description": "Allow -c/-e flags on interpreters (node -e, python -c). Default false = blocked."
             }
           },
-          "required": ["security", "ask"],
+          "required": ["security"],
           "additionalProperties": false
         }
       ]
@@ -177,12 +234,12 @@
     "AskMode": {
       "type": "string",
       "enum": ["off", "on-miss", "always"],
-      "description": "'off' = never ask, 'on-miss' = ask when command not in allowlist, 'always' = always ask even for allowlisted commands"
+      "description": "Legacy compatibility field from the deprecated command-approval model. The primary runtime path is now policy-first plus privilege elevation."
     },
     "AskFallback": {
       "type": "string",
       "enum": ["deny", "allowlist"],
-      "description": "What to do when approval times out or is unavailable"
+      "description": "Legacy compatibility field paired with `ask`. Kept for config compatibility, not as the main autonomous runtime control."
     }
   }
 }

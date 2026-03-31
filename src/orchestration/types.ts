@@ -8,6 +8,7 @@ import type {
   BrokerEnvelope,
   LLMResponse,
   SandboxPermission,
+  ShellConfig,
   StructuredError,
 } from "../shared/types.ts";
 
@@ -36,6 +37,9 @@ export interface ToolRequest {
   args: Record<string, unknown>;
   taskId?: string;
   contextId?: string;
+  execution?: {
+    shell?: ShellConfig;
+  };
 }
 
 export interface ToolResponsePayload {
@@ -72,15 +76,21 @@ export interface BrokerTaskResultPayload {
   task: Task | null;
 }
 
-export function extractBrokerSubmitTaskMessage(payload: BrokerTaskSubmitPayload): A2AMessage {
+export function extractBrokerSubmitTaskMessage(
+  payload: BrokerTaskSubmitPayload,
+): A2AMessage {
   const taskMessage = payload.taskMessage ?? payload.message;
   if (!taskMessage) throw new Error("Broker task submit requires taskMessage");
   return taskMessage;
 }
 
-export function extractBrokerContinuationMessage(payload: BrokerTaskContinuePayload): A2AMessage {
+export function extractBrokerContinuationMessage(
+  payload: BrokerTaskContinuePayload,
+): A2AMessage {
   const continuationMessage = payload.continuationMessage ?? payload.message;
-  if (!continuationMessage) throw new Error("Broker task continue requires continuationMessage");
+  if (!continuationMessage) {
+    throw new Error("Broker task continue requires continuationMessage");
+  }
   return continuationMessage;
 }
 

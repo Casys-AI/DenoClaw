@@ -1,4 +1,5 @@
 import type { AgentEntry } from "../shared/types.ts";
+import { deriveAgentRuntimeCapabilitiesFromEntry } from "../shared/runtime_capabilities.ts";
 import {
   ensureDir,
   getAgentMemoryPath,
@@ -170,6 +171,11 @@ export class WorkerPoolLifecycle {
         agentId,
         config: this.deps.config,
         agentRegistry: this.deps.runtimeRegistry.snapshot(),
+        runtimeCapabilities: deriveAgentRuntimeCapabilitiesFromEntry(
+          this.deps.runtimeRegistry.get(agentId),
+          this.deps.config.agents.defaults?.sandbox,
+          { privilegeElevationSupported: true },
+        ),
         kvPaths: this.getKvPaths(agentId),
       };
       worker.postMessage(initMsg);

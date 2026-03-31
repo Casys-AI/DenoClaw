@@ -26,6 +26,7 @@ import {
   computePermissionIntersection,
   createPermissionDeniedResult,
 } from "./sandbox_permissions.ts";
+import { ExecPolicyGuard } from "./exec_policy_guard.ts";
 
 const SANDBOX_AGENT_LOCAL_PATH = new URL("../../", import.meta.url).pathname;
 const SANDBOX_SHARED_LOCAL_PATH = new URL("../../../shared/", import.meta.url)
@@ -45,12 +46,12 @@ interface SandboxCommandResult {
 
 export class DenoSandboxBackend implements SandboxBackend {
   readonly kind = "cloud" as const;
-  readonly supportsFullShell = true;
 
   private sandboxConfig: SandboxConfig;
   private token: string;
   private trustGrantedPermissions: boolean;
   private labels?: Record<string, string>;
+  private execPolicyGuard: ExecPolicyGuard;
   // deno-lint-ignore no-explicit-any
   private sandbox: any = null;
   private initPromise: Promise<void> | null = null;
@@ -67,6 +68,7 @@ export class DenoSandboxBackend implements SandboxBackend {
     this.token = token;
     this.trustGrantedPermissions = options?.trustGrantedPermissions ?? false;
     this.labels = options?.labels;
+    this.execPolicyGuard = new ExecPolicyGuard(sandboxConfig);
   }
 
   async execute(req: SandboxExecRequest): Promise<ToolResult> {
@@ -81,17 +83,10 @@ export class DenoSandboxBackend implements SandboxBackend {
       return createPermissionDeniedResult(req, this.sandboxConfig, denied);
     }
 
-    // Design 4: honor security: "deny" even in cloud — it's a business decision, not isolation
-    if (req.execPolicy.security === "deny" && req.tool === "shell") {
-      return {
-        success: false,
-        output: "",
-        error: {
-          code: "EXEC_DENIED",
-          context: { tool: req.tool, reason: "security: deny" },
-          recovery: "Change execPolicy.security to 'allowlist' or 'full'",
-        },
-      };
+    if (this.execPolicyGuard.shouldEnforce(req)) {
+      const command = req.args.command as string;
+      const policyResult = await this.execPolicyGuard.enforce(command, req);
+      if (policyResult) return policyResult;
     }
 
     await this.ensureInitialized();
@@ -99,7 +94,10 @@ export class DenoSandboxBackend implements SandboxBackend {
     const input = JSON.stringify({
       tool: req.tool,
       args: req.args,
-      config: req.toolsConfig,
+      config: {
+        ...req.toolsConfig,
+        shell: req.shell,
+      },
     });
 
     const timeoutSec = req.timeoutSec ?? this.sandboxConfig.maxDurationSec ??
@@ -170,8 +168,7 @@ export class DenoSandboxBackend implements SandboxBackend {
         error: {
           code: "SANDBOX_EXEC_ERROR",
           context: { tool: req.tool, message: msg },
-          recovery:
-            "Check sandbox connectivity and DENOCLAW_SANDBOX_API_TOKEN",
+          recovery: "Check sandbox connectivity and DENOCLAW_SANDBOX_API_TOKEN",
         },
       };
     }

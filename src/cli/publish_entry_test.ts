@@ -36,7 +36,6 @@ Deno.test("materializePublishedEntry preserves explicit sandbox permissions", ()
       maxTokens: 256,
       sandbox: {
         allowedPermissions: ["read", "write"],
-        approvalTimeoutSec: 30,
       },
     },
   );
@@ -44,6 +43,35 @@ Deno.test("materializePublishedEntry preserves explicit sandbox permissions", ()
   assertEquals(entry.sandbox, {
     allowedPermissions: ["read"],
     maxDurationSec: 20,
-    approvalTimeoutSec: 30,
+  });
+});
+
+Deno.test("materializePublishedEntry merges nested privilege elevation config", () => {
+  const entry = materializePublishedEntry(
+    {
+      sandbox: {
+        allowedPermissions: ["read"],
+        privilegeElevation: {
+          enabled: false,
+        },
+      },
+    },
+    {
+      model: "test/model",
+      temperature: 0.2,
+      maxTokens: 256,
+      sandbox: {
+        allowedPermissions: ["read", "write"],
+        privilegeElevation: {
+          enabled: true,
+          scopes: ["task", "session"],
+        },
+      },
+    },
+  );
+
+  assertEquals(entry.sandbox?.privilegeElevation, {
+    enabled: false,
+    scopes: ["task", "session"],
   });
 });

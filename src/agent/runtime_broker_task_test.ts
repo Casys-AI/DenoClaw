@@ -13,6 +13,7 @@ import type {
   ToolResult,
 } from "../shared/types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 
 type BrokerTaskPortStub = AgentLlmToolPort & AgentCanonicalTaskPort<Task> & {
   reportedTasks: Task[];
@@ -118,8 +119,12 @@ function createRuntime(
         messages: Message[],
         _skills: unknown[],
         _facts: unknown[],
+        _memoryTopics?: string[],
+        _memoryFiles?: string[],
+        runtimeGrants?: AgentRuntimeGrant[],
       ): Message[];
     };
+    lastRuntimeGrants?: AgentRuntimeGrant[];
     handleTaskSubmitMessage(msg: RuntimeTaskSubmitMessage): Promise<void>;
     handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
   };
@@ -127,7 +132,15 @@ function createRuntime(
   runtimeAny.getMemory = (_sessionId: string) => Promise.resolve(memory);
   runtimeAny.skills = { getSkills: () => [] };
   runtimeAny.context = {
-    buildContextMessages(messages: Message[]) {
+    buildContextMessages(
+      messages: Message[],
+      _skills?: unknown[],
+      _facts?: unknown[],
+      _memoryTopics?: string[],
+      _memoryFiles?: string[],
+      runtimeGrants?: AgentRuntimeGrant[],
+    ) {
+      runtimeAny.lastRuntimeGrants = runtimeGrants;
       return messages;
     },
   };
@@ -182,7 +195,12 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
     status: {
       state: "INPUT_REQUIRED",
       timestamp: new Date().toISOString(),
-      metadata: { awaitedInput: { kind: "approval", prompt: "approve?" } },
+      metadata: {
+        awaitedInput: {
+          kind: "clarification",
+          question: "Need more detail",
+        },
+      },
     },
     artifacts: [],
     history: [
@@ -197,6 +215,7 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
   const runtime = createRuntime(broker, memory);
   const runtimeAny = runtime as unknown as {
     handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
+    lastRuntimeGrants?: AgentRuntimeGrant[];
   };
 
   await runtimeAny.handleTaskContinueMessage({
@@ -210,9 +229,8 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
       continuationMessage: {
         messageId: crypto.randomUUID(),
         role: "user",
-        parts: [{ kind: "text", text: "Approved, continue" }],
+        parts: [{ kind: "text", text: "More detail, continue" }],
       },
-      metadata: { resume: { kind: "approval", approved: true } },
     },
   });
 
@@ -223,28 +241,97 @@ Deno.test("AgentRuntime handles broker task_continue by resuming existing canoni
   assertEquals(broker.reportedTasks[0]?.history.length, 2);
   assertEquals(broker.reportedTasks[0]?.history[1]?.parts[0], {
     kind: "text",
-    text: "Approved, continue",
+    text: "More detail, continue",
   });
   assertEquals(broker.reportedTasks[1]?.artifacts[0]?.parts[0], {
     kind: "text",
     text: "resumed",
   });
+  assertEquals(runtimeAny.lastRuntimeGrants, []);
 });
 
-Deno.test("AgentRuntime turns broker exec approval requirements into canonical INPUT_REQUIRED", async () => {
+Deno.test("AgentRuntime handles broker privilege-elevation resumes by rebuilding runtime grants", async () => {
+  const broker = createBrokerStub("resumed with privilege grant");
+  broker.currentTask = {
+    id: "task-continue-privilege",
+    contextId: "ctx-continue-privilege",
+    status: {
+      state: "INPUT_REQUIRED",
+      timestamp: new Date().toISOString(),
+      metadata: {
+        awaitedInput: {
+          kind: "privilege-elevation",
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          scope: "task",
+          prompt: "Need temporary write access",
+        },
+      },
+    },
+    artifacts: [],
+    history: [
+      {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Write the file" }],
+      },
+    ],
+  };
+  const memory = new MemoryStub();
+  const runtime = createRuntime(broker, memory);
+  const runtimeAny = runtime as unknown as {
+    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
+    lastRuntimeGrants?: AgentRuntimeGrant[];
+  };
+
+  await runtimeAny.handleTaskContinueMessage({
+    id: "msg-privilege-continue",
+    from: "agent-alpha",
+    to: "agent-beta",
+    type: "task_continue",
+    timestamp: new Date().toISOString(),
+    payload: {
+      taskId: "task-continue-privilege",
+      continuationMessage: {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Grant write and continue" }],
+      },
+      metadata: {
+        resume: {
+          kind: "privilege-elevation",
+          approved: true,
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          scope: "task",
+        },
+      },
+    },
+  });
+
+  assertEquals(runtimeAny.lastRuntimeGrants?.length, 1);
+  const grant = runtimeAny.lastRuntimeGrants?.[0];
+  assertEquals(grant?.kind, "privilege-elevation");
+  if (!grant || grant.kind !== "privilege-elevation") {
+    throw new Error("expected privilege-elevation grant");
+  }
+  assertEquals(grant.scope, "task");
+  assertEquals(grant.grants, [{ permission: "write", paths: ["note.txt"] }]);
+  assertEquals(grant.source, "broker-resume");
+});
+
+Deno.test("AgentRuntime turns broker privilege elevation requirements into canonical INPUT_REQUIRED", async () => {
   const broker = createBrokerStub();
   broker.complete = () =>
     Promise.resolve({
       content: "",
       toolCalls: [
         {
-          id: "tool-1",
+          id: "tool-privilege",
           type: "function",
           function: {
-            name: "shell",
+            name: "write_file",
             arguments: JSON.stringify({
-              command: "git status",
-              dry_run: false,
+              path: "note.txt",
+              content: "hello",
             }),
           },
         },
@@ -256,14 +343,14 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
       success: false,
       output: "",
       error: {
-        code: "EXEC_APPROVAL_REQUIRED",
+        code: "PRIVILEGE_ELEVATION_REQUIRED",
         context: {
-          command: "git status",
-          binary: "git",
-          reason: "always-ask",
+          suggestedGrants: [{ permission: "write", paths: ["note.txt"] }],
+          command: "write_file",
+          binary: "write_file",
+          elevationAvailable: true,
         },
-        recovery:
-          "Resume the canonical task with approval metadata to continue",
+        recovery: "Temporarily grant write access to continue",
       },
     });
   };
@@ -275,18 +362,18 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
   };
 
   await runtimeAny.handleTaskSubmitMessage({
-    id: "msg-approval",
+    id: "msg-privilege-pause",
     from: "agent-alpha",
     to: "agent-beta",
     type: "task_submit",
     timestamp: new Date().toISOString(),
     payload: {
-      taskId: "task-approval",
-      contextId: "ctx-approval",
+      taskId: "task-privilege-pause",
+      contextId: "ctx-privilege-pause",
       taskMessage: {
         messageId: crypto.randomUUID(),
         role: "user",
-        parts: [{ kind: "text", text: "Check git status" }],
+        parts: [{ kind: "text", text: "Write note.txt" }],
       },
     },
   });
@@ -296,21 +383,30 @@ Deno.test("AgentRuntime turns broker exec approval requirements into canonical I
     "INPUT_REQUIRED",
   ]);
   const awaitedInput = broker.reportedTasks[1]?.status.metadata?.awaitedInput as
-    | { kind?: string; command?: string; binary?: string; prompt?: string }
+    | {
+      kind?: string;
+      grants?: unknown[];
+      scope?: string;
+      prompt?: string;
+      command?: string;
+      binary?: string;
+    }
     | undefined;
-  assertEquals(awaitedInput?.kind, "approval");
-  assertEquals(awaitedInput?.command, "git status");
-  assertEquals(awaitedInput?.binary, "git");
-  assertEquals(awaitedInput?.prompt, "Awaiting approval for git: git status");
-  assertEquals(broker.lastExecCorrelation, {
-    taskId: "task-approval",
-    contextId: "ctx-approval",
-  });
-  assertEquals(memory.getMessages().map((message) => message.role), [
-    "user",
-    "assistant",
-    "tool",
+  assertEquals(awaitedInput?.kind, "privilege-elevation");
+  assertEquals(awaitedInput?.grants, [
+    { permission: "write", paths: ["note.txt"] },
   ]);
+  assertEquals(awaitedInput?.scope, "task");
+  assertEquals(
+    awaitedInput?.prompt,
+    "Temporarily grant write access to continue",
+  );
+  assertEquals(awaitedInput?.command, "write_file");
+  assertEquals(awaitedInput?.binary, "write_file");
+  assertEquals(broker.lastExecCorrelation, {
+    taskId: "task-privilege-pause",
+    contextId: "ctx-privilege-pause",
+  });
 });
 
 Deno.test("AgentRuntime rejects non-canonical broker envelopes fail-fast", async () => {

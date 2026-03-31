@@ -1,6 +1,7 @@
 import type {
   ExecPolicy,
   SandboxPermission,
+  ShellConfig,
   ToolResult,
 } from "../../shared/types.ts";
 import type {
@@ -15,6 +16,7 @@ import { ToolRegistry } from "../../agent/tools/registry.ts";
 import { ShellTool } from "../../agent/tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "../../agent/tools/file.ts";
 import { WebFetchTool } from "../../agent/tools/web.ts";
+import { log } from "../../shared/log.ts";
 
 export interface LocalToolExecutionAdapterOptions {
   registry?: ToolRegistry;
@@ -78,6 +80,18 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
       });
     }
 
+    if (request.tool === "shell" && request.shell) {
+      if (
+        request.shell.mode === "system-shell" &&
+        request.shell.warnOnLocalSystemShell !== false
+      ) {
+        log.warn(
+          "ShellTool: local system-shell mode is enabled; command semantics are delegated to the host shell",
+        );
+      }
+      return new ShellTool(false, request.shell).execute(request.args);
+    }
+
     return this.registry.execute(request.tool, request.args);
   }
 
@@ -96,8 +110,12 @@ export class LocalToolExecutionAdapter implements ToolExecutionPort {
     return [];
   }
 
-  checkExecPolicy(command: string, policy: ExecPolicy): ExecPolicyCheckResult {
-    return checkExecPolicy(command, policy);
+  checkExecPolicy(
+    command: string,
+    policy: ExecPolicy,
+    shell?: ShellConfig,
+  ): ExecPolicyCheckResult {
+    return checkExecPolicy(command, policy, shell);
   }
 
   getToolPermissions(): Record<string, SandboxPermission[]> {

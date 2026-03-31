@@ -1,23 +1,18 @@
 import type { Task } from "../../messaging/a2a/types.ts";
 import type { ChannelAddress } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
+import {
+  filterActivePrivilegeElevationGrants,
+  getPrivilegeElevationGrantSignature,
+  type PrivilegeElevationGrant,
+} from "../../shared/privilege_elevation.ts";
 import type { AgentEntry } from "../../shared/types.ts";
-
-export interface ApprovalGrant {
-  kind: "approval";
-  approved: true;
-  command: string;
-  binary: string;
-  grantedAt: string;
-}
-
-export type PendingResumes = Record<string, ApprovalGrant>;
 
 export interface BrokerTaskMetadata {
   submittedBy?: string;
   targetAgent?: string;
   request?: Record<string, unknown>;
-  pendingResumes?: PendingResumes;
+  privilegeElevationGrants?: PrivilegeElevationGrant[];
   channel?: BrokerTaskChannelMetadata;
 }
 
@@ -62,34 +57,95 @@ export class BrokerTaskPersistence {
       : {};
   }
 
-  getPendingResumes(brokerMetadata: BrokerTaskMetadata): PendingResumes {
-    return brokerMetadata.pendingResumes ?? {};
+  getPrivilegeElevationGrants(
+    brokerMetadata: BrokerTaskMetadata,
+  ): PrivilegeElevationGrant[] {
+    return filterActivePrivilegeElevationGrants(
+      brokerMetadata.privilegeElevationGrants ?? [],
+    );
   }
 
-  async consumeApprovedTaskResume(
+  async getTaskPrivilegeElevationGrants(
     taskId: string,
-    command: string,
+  ): Promise<PrivilegeElevationGrant[]> {
+    const kv = await this.deps.getKv();
+    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
+    if (!entry.value) return [];
+
+    const brokerMetadata = this.getTaskBrokerMetadata(entry.value);
+    return this.getPrivilegeElevationGrants(brokerMetadata);
+  }
+
+  async getTaskContextId(taskId: string): Promise<string | undefined> {
+    const kv = await this.deps.getKv();
+    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
+    return entry.value?.contextId;
+  }
+
+  async getTaskBrokerMetadataById(taskId: string): Promise<BrokerTaskMetadata> {
+    const kv = await this.deps.getKv();
+    const entry = await kv.get<Task>(["a2a_tasks", taskId]);
+    if (!entry.value) return {};
+    return this.getTaskBrokerMetadata(entry.value);
+  }
+
+  async getContextPrivilegeElevationGrants(
+    contextId: string,
+  ): Promise<PrivilegeElevationGrant[]> {
+    const kv = await this.deps.getKv();
+    const entry = await kv.get<PrivilegeElevationGrant[]>([
+      "a2a_contexts",
+      contextId,
+      "privilege_elevation_grants",
+    ]);
+    return filterActivePrivilegeElevationGrants(entry.value ?? []);
+  }
+
+  async appendContextPrivilegeElevationGrant(
+    contextId: string,
+    grant: PrivilegeElevationGrant,
+  ): Promise<void> {
+    const kv = await this.deps.getKv();
+    const entry = await kv.get<PrivilegeElevationGrant[]>([
+      "a2a_contexts",
+      contextId,
+      "privilege_elevation_grants",
+    ]);
+    const grants = entry.value ?? [];
+    await kv.set(
+      ["a2a_contexts", contextId, "privilege_elevation_grants"],
+      [...grants, grant],
+    );
+  }
+
+  async consumeOnceTaskPrivilegeElevationGrants(
+    taskId: string,
+    usedGrantSignatures: string[],
   ): Promise<boolean> {
+    if (usedGrantSignatures.length === 0) return true;
+
     const kv = await this.deps.getKv();
     const entry = await kv.get<Task>(["a2a_tasks", taskId]);
     if (!entry.value) return false;
 
     const brokerMetadata = this.getTaskBrokerMetadata(entry.value);
-    const pendingResumes = this.getPendingResumes(brokerMetadata);
-    const grantKey = pendingResumes[command]?.approved === true
-      ? command
-      : pendingResumes["*"]?.approved === true
-      ? "*"
-      : null;
-    if (!grantKey) return false;
+    const grants = this.getPrivilegeElevationGrants(brokerMetadata);
+    if (grants.length === 0) return true;
 
-    const nextResumes = { ...pendingResumes };
-    delete nextResumes[grantKey];
+    const signatures = new Set(usedGrantSignatures);
+    const keep = grants.filter((grant) =>
+      grant.scope !== "once" ||
+      !signatures.has(getPrivilegeElevationGrantSignature(grant))
+    );
+    if (keep.length === grants.length) {
+      return true;
+    }
+
     const nextTask: Task = {
       ...entry.value,
       metadata: {
         ...(entry.value.metadata ?? {}),
-        broker: { ...brokerMetadata, pendingResumes: nextResumes },
+        broker: { ...brokerMetadata, privilegeElevationGrants: keep },
       },
     };
 

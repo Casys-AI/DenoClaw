@@ -28,7 +28,12 @@ import {
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
 import { executeAgentConversation } from "./runtime_conversation.ts";
-import { extractRuntimeTaskText } from "./runtime_message_mapping.ts";
+import {
+  extractApprovedPrivilegeElevationGrant,
+  extractRuntimeTaskText,
+} from "./runtime_message_mapping.ts";
+import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
+import { AgentRuntimeGrantStore } from "./runtime_capabilities.ts";
 
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
@@ -62,12 +67,13 @@ export class AgentRuntime {
     llmToolPort: AgentLlmToolPort,
     canonicalTaskPort: AgentCanonicalTaskPort<Task>,
     maxIterations = 10,
+    runtimeCapabilities?: AgentRuntimeCapabilities,
   ) {
     this.agentId = agentId;
     this.config = config;
     this.llmToolPort = llmToolPort;
     this.canonicalTaskPort = canonicalTaskPort;
-    this.context = new ContextBuilder(config);
+    this.context = new ContextBuilder(config, runtimeCapabilities);
     this.skills = new SkillsLoader();
     this.maxIterations = maxIterations;
   }
@@ -189,6 +195,7 @@ export class AgentRuntime {
         contextId: payload.contextId,
         initialMessage: taskMessage,
       }),
+      getRuntimeGrants: undefined,
       reportWorkingTransition: true,
       maxIterations: this.maxIterations,
       reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
@@ -216,6 +223,19 @@ export class AgentRuntime {
     await this.reportCanonicalTaskResult(resumed);
 
     const inputText = extractRuntimeTaskText(continuationMessage);
+    const runtimeGrantStore = new AgentRuntimeGrantStore();
+    const approvedPrivilegeGrant = extractApprovedPrivilegeElevationGrant(
+      existing,
+      payload,
+    );
+    if (approvedPrivilegeGrant) {
+      runtimeGrantStore.grantPrivilegeElevation({
+        scope: approvedPrivilegeGrant.scope,
+        grants: approvedPrivilegeGrant.grants,
+        source: approvedPrivilegeGrant.source,
+        grantedAt: approvedPrivilegeGrant.grantedAt,
+      });
+    }
     log.info(
       `Canonical continuation received from ${msg.from}: ${
         inputText.slice(0, 100)
@@ -231,6 +251,7 @@ export class AgentRuntime {
       fromAgentId: msg.from,
       inputText,
       canonicalTask: resumed,
+      getRuntimeGrants: () => runtimeGrantStore.list(),
       reportWorkingTransition: false,
       maxIterations: this.maxIterations,
       reportTaskResult: (task) => this.reportCanonicalTaskResult(task),

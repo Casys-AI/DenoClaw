@@ -128,10 +128,11 @@ export class BrokerSandboxManager {
             security: "deny",
             ask: "off",
           },
+          shell: request.shell,
           toolsConfig: request.toolsConfig,
         });
       } finally {
-        await this.withManagerLock(async () => {
+        await this.withManagerLock(() => {
           entry.inUseCount = Math.max(0, entry.inUseCount - 1);
           entry.lastReleasedAtMs = this.now();
         });
@@ -146,7 +147,10 @@ export class BrokerSandboxManager {
       try {
         await backend.close();
       } catch (error) {
-        log.warn(`SandboxManager: failed to close sandbox for ${ownerKey}`, error);
+        log.warn(
+          `SandboxManager: failed to close sandbox for ${ownerKey}`,
+          error,
+        );
       }
     }));
   }
@@ -240,7 +244,7 @@ export class BrokerSandboxManager {
     return value.length <= 128 ? value : value.slice(0, 128);
   }
 
-  private async withManagerLock<T>(fn: () => Promise<T>): Promise<T> {
+  private async withManagerLock<T>(fn: () => Promise<T> | T): Promise<T> {
     let release!: () => void;
     const next = new Promise<void>((resolve) => {
       release = resolve;

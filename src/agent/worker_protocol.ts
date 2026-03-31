@@ -9,15 +9,15 @@
  *   worker transport and does not define a second task contract
  *
  * The canonical task contract lives in `src/messaging/a2a/`. The worker protocol
- * handles only runtime coordination: init, ready, shutdown, approval transport,
- * and observability hooks. Task semantics (submit, continue, result) are
+ * handles only runtime coordination: init, ready, shutdown, and observability
+ * hooks. Task semantics (submit, continue, result) are
  * routed through `executeCanonicalWorkerTask()` in worker_entrypoint.ts.
  */
 import type { AgentDefaults, ToolsConfig } from "./types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import type { AgentEntry } from "../shared/types.ts";
-import type { ApprovalReason } from "./sandbox_types.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
+import type { AgentRuntimeCapabilities } from "../shared/runtime_capabilities.ts";
 
 /** Minimal Config projection sent to the Worker (JSON-serializable). */
 export interface WorkerConfig {
@@ -38,10 +38,9 @@ export interface WorkerKvPaths {
 // ── Infra message types (permanent runtime plumbing) ─────
 
 /** infra: Messages that are strictly runtime/lifecycle coordination. */
-export type InfraRequestType = "init" | "ask_response" | "shutdown";
+export type InfraRequestType = "init" | "shutdown";
 export type InfraResponseType =
   | "ready"
-  | "ask_approval"
   | "task_started"
   | "task_completed";
 
@@ -69,14 +68,8 @@ export type WorkerRequest =
     agentId: string;
     config: WorkerConfig;
     agentRegistry: ResolvedAgentRegistry;
+    runtimeCapabilities?: AgentRuntimeCapabilities;
     kvPaths: WorkerKvPaths;
-  }
-  // infra: approval transport (ADR-010)
-  | {
-    type: "ask_response";
-    requestId: string;
-    approved: boolean;
-    allowAlways?: boolean;
   }
   // infra: graceful shutdown
   | { type: "shutdown" }
@@ -114,15 +107,6 @@ export type WorkerRequest =
 export type WorkerResponse =
   // infra: worker ready signal
   | { type: "ready"; agentId: string }
-  // infra: approval request (ADR-010)
-  | {
-    type: "ask_approval";
-    requestId: string;
-    agentId: string;
-    command: string;
-    binary: string;
-    reason: ApprovalReason;
-  }
   // infra: observability — task lifecycle hooks
   | {
     type: "task_started";
@@ -181,10 +165,6 @@ export type WorkerPeerResponseRequest = Extract<
   WorkerRequest,
   { type: "peer_response" }
 >;
-export type WorkerAskApprovalMessage = Extract<
-  WorkerResponse,
-  { type: "ask_approval" }
->;
 export type WorkerPeerSendMessage = Extract<
   WorkerResponse,
   { type: "peer_send" }
@@ -202,7 +182,6 @@ export type WorkerTaskObserveMessage = Extract<
 
 const INFRA_REQUEST_TYPES: ReadonlySet<InfraRequestType> = new Set([
   "init",
-  "ask_response",
   "shutdown",
 ]);
 
@@ -214,7 +193,6 @@ const EXECUTION_REQUEST_TYPES: ReadonlySet<ExecutionRequestType> = new Set([
 
 const INFRA_RESPONSE_TYPES: ReadonlySet<InfraResponseType> = new Set([
   "ready",
-  "ask_approval",
   "task_started",
   "task_completed",
 ]);

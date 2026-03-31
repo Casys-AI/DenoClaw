@@ -1,7 +1,7 @@
 /**
  * Runtime → canonical A2A task mapping helpers.
  *
- * Maps runtime inputs (text messages, errors, approval pauses) into canonical
+ * Maps runtime inputs (text messages, errors, privilege elevation pauses) into canonical
  * A2A task shapes. Lifecycle rules remain centralized in `internal_contract.ts`.
  *
  * This module has no dependency on agent/ or orchestration/ — it only uses
@@ -15,6 +15,13 @@ import {
 } from "./internal_contract.ts";
 import { createAwaitedInputMetadata } from "./input_metadata.ts";
 import type { A2AMessage, Artifact, Task } from "./types.ts";
+import type {
+  PrivilegeElevationGrantResource,
+  PrivilegeElevationScope,
+} from "../../shared/privilege_elevation.ts";
+import {
+  formatPrivilegeElevationPrompt,
+} from "../../shared/privilege_elevation.ts";
 
 export interface TaskTextInput {
   requestId: string;
@@ -25,10 +32,13 @@ export interface TaskTextInput {
   role?: A2AMessage["role"];
 }
 
-export interface ApprovalPauseInput {
-  command: string;
-  binary: string;
+export interface PrivilegeElevationPauseInput {
+  grants: PrivilegeElevationGrantResource[];
+  scope: PrivilegeElevationScope;
   prompt?: string;
+  command?: string;
+  binary?: string;
+  expiresAt?: string;
   continuationToken?: string;
 }
 
@@ -95,26 +105,39 @@ export function mapTaskErrorToTerminalStatus(
   });
 }
 
-export function mapApprovalPauseToInputRequiredTask(
+export function mapPrivilegeElevationPauseToInputRequiredTask(
   task: Task,
-  approval: ApprovalPauseInput,
+  elevation: PrivilegeElevationPauseInput,
 ): Task {
   return transitionTask(task, "INPUT_REQUIRED", {
     statusMessage: createTextMessage(
-      approval.prompt ?? `Awaiting approval for ${approval.binary}`,
+      elevation.prompt ?? formatPrivilegeElevationPrompt({
+        grants: elevation.grants,
+        scope: elevation.scope,
+        tool: elevation.binary ?? elevation.command,
+        binary: elevation.binary,
+        command: elevation.command,
+      }),
       "agent",
     ),
     metadata: createAwaitedInputMetadata({
-      kind: "approval",
-      command: approval.command,
-      binary: approval.binary,
-      prompt: approval.prompt,
-      continuationToken: approval.continuationToken,
+      kind: "privilege-elevation",
+      grants: elevation.grants,
+      scope: elevation.scope,
+      ...(elevation.prompt !== undefined ? { prompt: elevation.prompt } : {}),
+      ...(elevation.command !== undefined
+        ? { command: elevation.command }
+        : {}),
+      ...(elevation.binary !== undefined ? { binary: elevation.binary } : {}),
+      ...(elevation.expiresAt !== undefined
+        ? { expiresAt: elevation.expiresAt }
+        : {}),
+      ...(elevation.continuationToken !== undefined
+        ? { continuationToken: elevation.continuationToken }
+        : {}),
     }),
   });
 }
-
-
 
 function createTextMessage(
   text: string,

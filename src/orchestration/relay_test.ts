@@ -3,6 +3,7 @@ import {
   assertRelaySocketWritable,
   buildRelayRegistrationMessage,
   buildRelaySocketOptions,
+  describeRelayExecutionMode,
   resolveRelayAuthToken,
 } from "./relay.ts";
 import { DENOCLAW_TUNNEL_PROTOCOL } from "./tunnel_protocol.ts";
@@ -18,6 +19,17 @@ Deno.test("resolveRelayAuthToken prefers the session token once issued", () => {
   assertEquals(
     resolveRelayAuthToken("invite-123", "session-456"),
     "session-456",
+  );
+});
+
+Deno.test("describeRelayExecutionMode makes broker-owned approval explicit", () => {
+  assertEquals(
+    describeRelayExecutionMode(true),
+    "Relay: local execution (auto-approve)",
+  );
+  assertEquals(
+    describeRelayExecutionMode(false),
+    "Relay: approval is broker-controlled; executing broker-approved request",
   );
 });
 

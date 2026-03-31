@@ -12,7 +12,6 @@ import { WorkerPoolObservability } from "./worker_pool_observability.ts";
 import { WorkerPoolRequestTracker } from "./worker_pool_request_tracker.ts";
 import { WorkerPoolPeerRouter } from "./worker_pool_peer_router.ts";
 import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
-import { WorkerPoolApprovalBridge } from "./worker_pool_approval.ts";
 import { AgentRuntimeRegistry, getResolvedAgentRegistry } from "./registry.ts";
 import type { WorkerPeerSendMessage } from "./worker_protocol.ts";
 import type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
@@ -30,7 +29,6 @@ export class WorkerPool {
   private readonly requestTracker = new WorkerPoolRequestTracker();
   private readonly runtimeRegistry: AgentRuntimeRegistry;
   private readonly lifecycle: WorkerPoolLifecycle;
-  private readonly approvalBridge: WorkerPoolApprovalBridge;
   private peerRouter: WorkerPoolPeerRouter;
 
   constructor(
@@ -47,10 +45,6 @@ export class WorkerPool {
       callbacks: this.callbacks,
       entrypointUrl: new URL("./worker_entrypoint.ts", import.meta.url).href,
       onWorkerMessage: (agentId, msg) => this.handleWorkerMessage(agentId, msg),
-    });
-    this.approvalBridge = new WorkerPoolApprovalBridge({
-      getAgent: (agentId) => this.lifecycle.getAgent(agentId),
-      onAskApproval: this.callbacks.onAskApproval,
     });
     this.peerRouter = new WorkerPoolPeerRouter({
       runtimeRegistry: this.runtimeRegistry,
@@ -119,17 +113,6 @@ export class WorkerPool {
 
       case "task_observe": {
         this.observability.writeTaskObservation(msg);
-        break;
-      }
-
-      case "ask_approval": {
-        this.approvalBridge.handleAskApproval(fromAgentId, msg).catch((e) => {
-          log.error(
-            `handleAskApproval failed for ${fromAgentId}: ${
-              (e as Error).message
-            }`,
-          );
-        });
         break;
       }
 

@@ -7,6 +7,7 @@ import type { ContextBuilder } from "./context.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import type { SkillsLoader } from "./skills.ts";
 import type { ToolRegistry } from "./tools/registry.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 
 export interface ProcessAgentLoopMessageInput {
   userMessage: string;
@@ -18,6 +19,7 @@ export interface ProcessAgentLoopMessageInput {
   tools: ToolRegistry;
   memoryTopics: string[];
   memoryFiles: string[];
+  getRuntimeGrants?: () => AgentRuntimeGrant[];
   maxIterations: number;
   traceWriter: TraceWriter | null;
   traceId?: string;
@@ -77,6 +79,7 @@ export async function processAgentLoopMessage(
             input.tools.getDefinitions(),
             input.memoryTopics,
             input.memoryFiles,
+            input.getRuntimeGrants?.() ?? [],
           );
 
           const CHARS_PER_TOKEN = 4;

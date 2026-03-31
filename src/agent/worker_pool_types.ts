@@ -1,4 +1,3 @@
-import type { ApprovalReason } from "./sandbox_types.ts";
 import type { WorkerRequest } from "./worker_protocol.ts";
 
 export interface WorkerPoolWorker {
@@ -29,11 +28,4 @@ export interface WorkerPoolCallbacks {
     toAgent: string,
     message: string,
   ) => void;
-  onAskApproval?: (
-    agentId: string,
-    requestId: string,
-    command: string,
-    binary: string,
-    reason: ApprovalReason,
-  ) => Promise<{ approved: boolean; allowAlways?: boolean }>;
 }

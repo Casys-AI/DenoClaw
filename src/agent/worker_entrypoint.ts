@@ -13,11 +13,7 @@
  */
 
 import { AgentLoop } from "./loop.ts";
-import type {
-  AgentLoopFactoryContext,
-  AgentLoopLike,
-  AskApprovalFn,
-} from "./loop.ts";
+import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
@@ -25,10 +21,8 @@ import type { ResolvedAgentRegistry } from "./registry.ts";
 import { getAgentDefDir } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
-import type { ApprovalRequest, ApprovalResponse } from "./sandbox_types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
-  mapApprovalPauseToInputRequiredTask,
   mapLocalTextInputToTask,
   mapTaskErrorToTerminalStatus,
   mapTaskResultToCompletion,
@@ -42,10 +36,11 @@ import type {
   WorkerRunRequest,
 } from "./worker_protocol.ts";
 import { createWorkerTaskEventEmitter } from "./worker_runtime_observability.ts";
-import { WorkerApprovalBridge } from "./worker_runtime_approval.ts";
 import { handleWorkerPeerDeliverRequest } from "./worker_runtime_peer_delivery.ts";
 import { WorkerPeerMessenger } from "./worker_runtime_peer_messenger.ts";
 import { handleWorkerRunRequest } from "./worker_runtime_run.ts";
+import { deriveAgentRuntimeCapabilities } from "./runtime_capabilities.ts";
+import type { AgentRuntimeCapabilities } from "../shared/runtime_capabilities.ts";
 
 // ── Canonical A2A task execution (Task 3.2) ──────────────
 
@@ -62,7 +57,6 @@ export type CanonicalWorkerTaskRequest = WorkerRunRequest;
 export interface CanonicalWorkerTaskDeps {
   createLoop: (ctx: AgentLoopFactoryContext) => AgentLoopLike;
   onTaskUpdate?: (task: Task) => void;
-  askApproval?: AskApprovalFn;
 }
 
 /**
@@ -82,8 +76,8 @@ export interface CanonicalWorkerTaskResult {
  * It wraps AgentLoop (or any AgentLoopLike) inside the canonical
  * task lifecycle: SUBMITTED → WORKING → terminal state.
  *
- * Approval pauses surface as INPUT_REQUIRED in the task lifecycle
- * and are transported via the injected askApproval callback.
+ * Exec policy and privilege checks are enforced by runtime policy, not by
+ * interactive command approvals.
  */
 export async function executeCanonicalWorkerTask(
   request: CanonicalWorkerTaskRequest,
@@ -106,29 +100,6 @@ export async function executeCanonicalWorkerTask(
   task = transitionTask(task, "WORKING");
   deps.onTaskUpdate?.(task);
 
-  // Build approval wrapper that surfaces pauses in A2A lifecycle
-  const wrappedAskApproval: AskApprovalFn | undefined = deps.askApproval
-    ? async (req: ApprovalRequest): Promise<ApprovalResponse> => {
-      // Transition to INPUT_REQUIRED
-      task = mapApprovalPauseToInputRequiredTask(task, {
-        command: req.command,
-        binary: req.binary,
-        prompt: `Awaiting approval for ${req.binary}: ${req.command}`,
-        continuationToken: req.requestId,
-      });
-      deps.onTaskUpdate?.(task);
-
-      // Transport the approval request
-      const response = await deps.askApproval!(req);
-
-      // Resume to WORKING
-      task = transitionTask(task, "WORKING");
-      deps.onTaskUpdate?.(task);
-
-      return response;
-    }
-    : undefined;
-
   // Create the loop with canonical context
   const loop = deps.createLoop({
     sessionId: request.sessionId,
@@ -136,7 +107,6 @@ export async function executeCanonicalWorkerTask(
     traceId: request.traceId,
     taskId,
     contextId,
-    askApproval: wrappedAskApproval,
   });
 
   try {
@@ -171,11 +141,11 @@ let agentRegistry: ResolvedAgentRegistry = {};
 let kvPrivatePath: string | undefined;
 let traceWriter: TraceWriter | null = null;
 let sharedKv: Deno.Kv | null = null;
+let injectedRuntimeCapabilities: AgentRuntimeCapabilities | undefined;
 function respond(msg: WorkerResponse): void {
   workerGlobal.postMessage(msg);
 }
 const taskEvents = createWorkerTaskEventEmitter(respond);
-const approvalBridge = new WorkerApprovalBridge(respond, () => agentId);
 const peerMessenger = new WorkerPeerMessenger(
   respond,
   taskEvents,
@@ -187,7 +157,6 @@ const peerMessenger = new WorkerPeerMessenger(
 const broadcast = new BroadcastChannel("denoclaw");
 broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
-    approvalBridge.shutdown();
     peerMessenger.shutdown();
     if (sharedKv) {
       sharedKv.close();
@@ -206,7 +175,6 @@ function createAgentLoop(
   traceId?: string,
   taskId?: string,
   contextId?: string,
-  overrideAskApproval?: AskApprovalFn,
 ): AgentLoop {
   if (!config) {
     throw new AgentError(
@@ -222,6 +190,12 @@ function createAgentLoop(
   const sandboxConfig = entry?.sandbox ??
     config.agents.defaults?.sandbox;
   const workspaceDir = getAgentDefDir(agentId);
+  const runtimeCapabilities = deriveAgentRuntimeCapabilities({
+    sandboxConfig,
+    availablePeers: peers,
+  });
+  const effectiveRuntimeCapabilities = injectedRuntimeCapabilities ??
+    runtimeCapabilities;
   return new AgentLoop(
     sessionId,
     config,
@@ -232,14 +206,13 @@ function createAgentLoop(
       sendToAgent: peerMessenger.createSendToAgent(taskId, contextId, traceId),
       availablePeers: peers,
       sandboxConfig,
-      askApproval: overrideAskApproval ??
-        ((req) => approvalBridge.askApproval(req)),
       traceWriter: traceWriter ?? undefined,
       traceId,
       taskId,
       contextId,
       agentId,
       workspaceDir,
+      runtimeCapabilities: effectiveRuntimeCapabilities,
     },
   );
 }
@@ -254,6 +227,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       agentId = msg.agentId;
       config = msg.config;
       agentRegistry = msg.agentRegistry;
+      injectedRuntimeCapabilities = msg.runtimeCapabilities;
       kvPrivatePath = msg.kvPaths.private;
       // Open shared KV for trace writing (best-effort observability)
       try {
@@ -284,9 +258,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 ctx.traceId,
                 ctx.taskId,
                 ctx.contextId,
-                ctx.askApproval,
               ),
-            askApproval: (req) => approvalBridge.askApproval(req),
             onTaskUpdate,
           }),
       });
@@ -329,13 +301,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       break;
     }
 
-    case "ask_response": {
-      approvalBridge.handleAskResponse(msg);
-      break;
-    }
-
     case "shutdown": {
-      approvalBridge.shutdown();
       peerMessenger.shutdown();
       if (sharedKv) {
         sharedKv.close();

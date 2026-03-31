@@ -30,10 +30,8 @@ import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
 import { processAgentLoopMessage } from "./loop_process.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
-
-import type { ApprovalRequest, ApprovalResponse } from "./sandbox_types.ts";
-
-export type AskApprovalFn = (req: ApprovalRequest) => Promise<ApprovalResponse>;
+import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 
 export interface AgentLoopLike {
   processMessage(userMessage: string): Promise<AgentResponse>;
@@ -46,7 +44,6 @@ export interface AgentLoopFactoryContext {
   traceId?: string;
   taskId: string;
   contextId: string;
-  askApproval?: AskApprovalFn;
 }
 
 export interface AgentLoopDeps {
@@ -56,7 +53,6 @@ export interface AgentLoopDeps {
   sendToAgent?: SendToAgentFn;
   availablePeers?: string[];
   sandboxConfig?: SandboxConfig;
-  askApproval?: AskApprovalFn;
   traceWriter?: TraceWriter;
   traceId?: string;
   taskId?: string;
@@ -64,6 +60,8 @@ export interface AgentLoopDeps {
   agentId?: string;
   workspaceDir?: string;
   workspaceKv?: Deno.Kv;
+  runtimeCapabilities?: AgentRuntimeCapabilities;
+  getRuntimeGrants?: () => AgentRuntimeGrant[];
 }
 
 export class AgentLoop implements AgentLoopLike {
@@ -82,6 +80,7 @@ export class AgentLoop implements AgentLoopLike {
   private sessionId: string;
   private workspaceDir: string | undefined;
   private memoryFiles: string[] = [];
+  private getRuntimeGrants?: () => AgentRuntimeGrant[];
 
   constructor(
     sessionId: string,
@@ -101,7 +100,7 @@ export class AgentLoop implements AgentLoopLike {
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
     this.memory = deps?.memory ?? new Memory(sessionId);
     this.tools = deps?.tools ?? new ToolRegistry();
-    this.context = new ContextBuilder(this.config);
+    this.context = new ContextBuilder(this.config, deps?.runtimeCapabilities);
     this.skills = new SkillsLoader();
     this.maxIterations = maxIterations;
     this.traceWriter = deps?.traceWriter ?? null;
@@ -111,6 +110,7 @@ export class AgentLoop implements AgentLoopLike {
     this.agentId = deps?.agentId ?? sessionId;
     this.sessionId = sessionId;
     this.workspaceDir = deps?.workspaceDir;
+    this.getRuntimeGrants = deps?.getRuntimeGrants;
 
     if (!deps?.tools) this.registerBuiltInTools(config, deps);
     if (deps?.sendToAgent) {
@@ -131,8 +131,10 @@ export class AgentLoop implements AgentLoopLike {
         deps.sandboxConfig.execPolicy,
         toolsCfg,
         deps.sandboxConfig.networkAllow,
+        deps.sandboxConfig.shell,
+        deps.sandboxConfig,
+        deps.runtimeCapabilities,
       );
-      if (deps.askApproval) this.tools.setAskApproval(deps.askApproval);
     }
   }
 
@@ -177,6 +179,7 @@ export class AgentLoop implements AgentLoopLike {
       tools: this.tools,
       memoryTopics: this.memoryTopics,
       memoryFiles: this.memoryFiles,
+      getRuntimeGrants: this.getRuntimeGrants,
       maxIterations: this.maxIterations,
       traceWriter: this.traceWriter,
       traceId: this.traceId,

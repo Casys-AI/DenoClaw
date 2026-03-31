@@ -1,6 +1,7 @@
 import type {
   ExecPolicy,
   SandboxPermission,
+  ShellConfig,
   ToolResult,
 } from "../shared/types.ts";
 
@@ -8,6 +9,7 @@ export interface ExecPolicyCheckResult {
   allowed: boolean;
   reason?: string;
   binary?: string;
+  recovery?: string;
 }
 
 export type SandboxOwnershipScope = "agent";
@@ -26,6 +28,7 @@ export interface ExecuteToolRequest {
   networkAllow?: string[];
   timeoutSec?: number;
   execPolicy?: ExecPolicy;
+  shell?: ShellConfig;
   toolsConfig?: Record<string, unknown>;
   executionContext?: ToolExecutionContext;
 }
@@ -36,7 +39,11 @@ export interface ToolExecutionPort {
     tool: string,
     tunnelPermissions?: Readonly<Record<string, SandboxPermission[]>>,
   ): SandboxPermission[];
-  checkExecPolicy(command: string, policy: ExecPolicy): ExecPolicyCheckResult;
+  checkExecPolicy(
+    command: string,
+    policy: ExecPolicy,
+    shell?: ShellConfig,
+  ): ExecPolicyCheckResult;
   getToolPermissions(): Record<string, SandboxPermission[]>;
   close?(): Promise<void>;
 }

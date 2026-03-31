@@ -1,6 +1,12 @@
 import { assertEquals } from "@std/assert";
-import type { ToolDefinition, ToolResult } from "../../shared/types.ts";
+import type {
+  SandboxConfig,
+  ToolDefinition,
+  ToolResult,
+} from "../../shared/types.ts";
+import type { SandboxBackend } from "../sandbox_types.ts";
 import { BaseTool, ToolRegistry } from "./registry.ts";
+import { deriveAgentRuntimeCapabilities } from "../runtime_capabilities.ts";
 
 class MockTool extends BaseTool {
   name = "mock";
@@ -46,6 +52,93 @@ class FailTool extends BaseTool {
   }
 }
 
+class PermissionedTool extends BaseTool {
+  name = "write_file";
+  description = "Needs write";
+  permissions = ["write" as const];
+
+  getDefinition(): ToolDefinition {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    };
+  }
+
+  execute(_args: Record<string, unknown>): Promise<ToolResult> {
+    return Promise.resolve(this.ok("unexpected"));
+  }
+}
+
+class ShellPermissionedTool extends BaseTool {
+  name = "shell";
+  description = "Needs run";
+  permissions = ["run" as const];
+
+  getDefinition(): ToolDefinition {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    };
+  }
+
+  execute(_args: Record<string, unknown>): Promise<ToolResult> {
+    return Promise.resolve(this.ok("unexpected"));
+  }
+}
+
+class DenyBackend implements SandboxBackend {
+  readonly kind = "local" as const;
+
+  execute(): Promise<ToolResult> {
+    return Promise.resolve({
+      success: false,
+      output: "",
+      error: {
+        code: "SANDBOX_PERMISSION_DENIED",
+        context: {
+          denied: ["write"],
+        },
+      },
+    });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class ExecDeniedBackend implements SandboxBackend {
+  readonly kind = "local" as const;
+
+  execute(): Promise<ToolResult> {
+    return Promise.resolve({
+      success: false,
+      output: "",
+      error: {
+        code: "EXEC_DENIED",
+        context: {
+          command: "git clone https://example.com/repo.git",
+          binary: "git",
+          reason: "not-in-allowlist",
+        },
+        recovery: "Update execPolicy.allowedCommands",
+      },
+    });
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 Deno.test("ToolRegistry registers and executes tools", async () => {
   const registry = new ToolRegistry();
   registry.register(new MockTool());
@@ -83,4 +176,120 @@ Deno.test("FailTool returns structured error", async () => {
   assertEquals(result.error?.code, "INTENTIONAL_FAILURE");
   assertEquals(result.error?.context?.reason, "test");
   assertEquals(result.error?.recovery, "This is expected");
+});
+
+Deno.test("ToolRegistry normalizes backend permission denials to PRIVILEGE_ELEVATION_REQUIRED", async () => {
+  const registry = new ToolRegistry();
+  registry.register(new PermissionedTool());
+  const sandboxConfig: SandboxConfig = {
+    allowedPermissions: ["read"],
+    execPolicy: {
+      security: "allowlist",
+      allowedCommands: [],
+      ask: "on-miss",
+      askFallback: "deny",
+    },
+  };
+  registry.setBackend(
+    new DenyBackend(),
+    sandboxConfig.execPolicy,
+    undefined,
+    undefined,
+    undefined,
+    sandboxConfig,
+    deriveAgentRuntimeCapabilities({ sandboxConfig }),
+  );
+
+  const result = await registry.execute("write_file", {
+    path: "note.txt",
+    content: "hi",
+  });
+
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "PRIVILEGE_ELEVATION_REQUIRED");
+  assertEquals(result.error?.context?.tool, "write_file");
+  assertEquals(result.error?.context?.requiredPermissions, ["write"]);
+  assertEquals(result.error?.context?.agentAllowed, ["read"]);
+  assertEquals(result.error?.context?.denied, ["write"]);
+  assertEquals(result.error?.context?.backendCode, "SANDBOX_PERMISSION_DENIED");
+  assertEquals(
+    result.error?.recovery,
+    "Update agent sandbox.allowedPermissions or broker policy to allow write_file (write paths=[note.txt])",
+  );
+});
+
+Deno.test("ToolRegistry normalizes backend exec denials to EXEC_POLICY_DENIED", async () => {
+  const registry = new ToolRegistry();
+  registry.register(new PermissionedTool());
+  const sandboxConfig: SandboxConfig = {
+    allowedPermissions: ["write"],
+    execPolicy: {
+      security: "allowlist",
+      allowedCommands: [],
+      ask: "off",
+      askFallback: "deny",
+    },
+  };
+  registry.setBackend(
+    new ExecDeniedBackend(),
+    sandboxConfig.execPolicy,
+    undefined,
+    undefined,
+    undefined,
+    sandboxConfig,
+    deriveAgentRuntimeCapabilities({ sandboxConfig }),
+  );
+
+  const result = await registry.execute("write_file", {
+    path: "note.txt",
+    content: "hi",
+  });
+
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "EXEC_POLICY_DENIED");
+  assertEquals(
+    result.error?.context?.command,
+    "git clone https://example.com/repo.git",
+  );
+  assertEquals(result.error?.context?.binary, "git");
+  assertEquals(result.error?.context?.reason, "not-in-allowlist");
+  assertEquals(result.error?.context?.backendCode, "EXEC_DENIED");
+});
+
+Deno.test("ToolRegistry includes shell command context in privilege elevation errors", async () => {
+  const registry = new ToolRegistry();
+  registry.register(new ShellPermissionedTool());
+  const sandboxConfig: SandboxConfig = {
+    allowedPermissions: [],
+    execPolicy: {
+      security: "allowlist",
+      allowedCommands: [],
+      ask: "off",
+      askFallback: "deny",
+    },
+  };
+  registry.setBackend(
+    new DenyBackend(),
+    sandboxConfig.execPolicy,
+    undefined,
+    undefined,
+    undefined,
+    sandboxConfig,
+    deriveAgentRuntimeCapabilities({ sandboxConfig }),
+  );
+
+  const result = await registry.execute("shell", {
+    command: "git status",
+    dry_run: false,
+  });
+
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "PRIVILEGE_ELEVATION_REQUIRED");
+  assertEquals(result.error?.context?.tool, "shell");
+  assertEquals(result.error?.context?.command, "git status");
+  assertEquals(result.error?.context?.binary, "git");
+  assertEquals(
+    result.error?.recovery,
+    "Update agent sandbox.allowedPermissions or broker policy to allow git (run groups=[shell])",
+  );
 });

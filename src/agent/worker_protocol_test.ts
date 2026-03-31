@@ -8,15 +8,13 @@ import {
 
 // ── Infra classification ─────────────────────────────────
 
-Deno.test("worker protocol classifies init, ask_response, shutdown as infra requests", () => {
+Deno.test("worker protocol classifies init and shutdown as infra requests", () => {
   assertEquals(isInfraRequest("init"), true);
-  assertEquals(isInfraRequest("ask_response"), true);
   assertEquals(isInfraRequest("shutdown"), true);
 });
 
-Deno.test("worker protocol classifies ready, ask_approval, task_started, task_completed as infra responses", () => {
+Deno.test("worker protocol classifies ready, task_started, task_completed as infra responses", () => {
   assertEquals(isInfraResponse("ready"), true);
-  assertEquals(isInfraResponse("ask_approval"), true);
   assertEquals(isInfraResponse("task_started"), true);
   assertEquals(isInfraResponse("task_completed"), true);
 });
@@ -40,7 +38,7 @@ Deno.test("worker protocol classifies run_result, run_error, peer_send, peer_res
 // ── Mutual exclusion ─────────────────────────────────────
 
 Deno.test("worker protocol infra and execution classifications are mutually exclusive for requests", () => {
-  for (const type of ["init", "ask_response", "shutdown"] as const) {
+  for (const type of ["init", "shutdown"] as const) {
     assertEquals(isInfraRequest(type), true);
     assertEquals(isExecutionRequest(type), false);
   }
@@ -51,14 +49,7 @@ Deno.test("worker protocol infra and execution classifications are mutually excl
 });
 
 Deno.test("worker protocol infra and execution classifications are mutually exclusive for responses", () => {
-  for (
-    const type of [
-      "ready",
-      "ask_approval",
-      "task_started",
-      "task_completed",
-    ] as const
-  ) {
+  for (const type of ["ready", "task_started", "task_completed"] as const) {
     assertEquals(isInfraResponse(type), true);
     assertEquals(isExecutionResponse(type), false);
   }

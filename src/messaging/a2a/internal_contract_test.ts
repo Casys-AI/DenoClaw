@@ -79,14 +79,15 @@ Deno.test("transitionTask applies canonical status changes without leaking stale
       timestamp: "2026-03-28T00:00:00.000Z",
       metadata: {
         awaitedInput: {
-          kind: "approval",
-          command: "git push origin main",
+          kind: "privilege-elevation",
+          grants: [{ permission: "write", paths: ["docs"] }],
+          scope: "task",
         },
       },
       message: {
         messageId: "msg-1",
         role: "agent",
-        parts: [{ kind: "text", text: "Need approval" }],
+        parts: [{ kind: "text", text: "Need temporary write access" }],
       },
     },
   };

@@ -1,4 +1,8 @@
 import type { TaskStatus } from "./types.ts";
+import type {
+  PrivilegeElevationGrantResource,
+  PrivilegeElevationScope,
+} from "../../shared/privilege_elevation.ts";
 
 export const AWAITED_INPUT_METADATA_KEY = "awaitedInput";
 export const RESUME_PAYLOAD_METADATA_KEY = "resume";
@@ -9,11 +13,14 @@ export interface ClarificationField {
   required?: boolean;
 }
 
-export interface ApprovalAwaitedInput {
-  kind: "approval";
-  command: string;
-  binary?: string;
+export interface PrivilegeElevationAwaitedInput {
+  kind: "privilege-elevation";
+  grants: PrivilegeElevationGrantResource[];
+  scope: PrivilegeElevationScope;
   prompt?: string;
+  command?: string;
+  binary?: string;
+  expiresAt?: string;
   continuationToken?: string;
 }
 
@@ -32,7 +39,7 @@ export interface ConfirmationAwaitedInput {
 }
 
 export type AwaitedInputMetadata =
-  | ApprovalAwaitedInput
+  | PrivilegeElevationAwaitedInput
   | ClarificationAwaitedInput
   | ConfirmationAwaitedInput;
 
@@ -40,6 +47,8 @@ export interface ResumePayloadMetadata {
   continuationToken?: string;
   kind: AwaitedInputMetadata["kind"];
   approved?: boolean;
+  grants?: PrivilegeElevationGrantResource[];
+  scope?: PrivilegeElevationScope;
   responseText?: string;
   fields?: Record<string, unknown>;
 }
@@ -78,8 +87,8 @@ function isAwaitedInputMetadata(value: unknown): value is AwaitedInputMetadata {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
 
   switch (value.kind) {
-    case "approval":
-      return true;
+    case "privilege-elevation":
+      return Array.isArray(value.grants) && typeof value.scope === "string";
     case "clarification":
       return typeof value.question === "string";
     case "confirmation":
@@ -89,7 +98,9 @@ function isAwaitedInputMetadata(value: unknown): value is AwaitedInputMetadata {
   }
 }
 
-function isResumePayloadMetadata(value: unknown): value is ResumePayloadMetadata {
+function isResumePayloadMetadata(
+  value: unknown,
+): value is ResumePayloadMetadata {
   return isRecord(value) && typeof value.kind === "string";
 }
 

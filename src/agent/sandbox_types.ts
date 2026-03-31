@@ -1,20 +1,31 @@
 /**
- * Agent sandbox and approval contracts.
+ * Agent sandbox contracts.
  *
  * These types are consumed across files, but their ownership is agent-side:
- * they describe how agent tooling execution is approved, filtered and run.
+ * they describe how agent tooling execution is filtered and run.
  */
 
 import type { SandboxPermission, ToolResult } from "../shared/types.ts";
 
-export type ApprovalReason =
-  | "not-in-allowlist"
-  | "shell-operator"
-  | "inline-eval"
-  | "always-ask";
+export type CommandMode = "direct" | "system-shell";
+
+export interface ShellConfig {
+  enabled?: boolean;
+  mode?: CommandMode;
+  warnOnLocalSystemShell?: boolean;
+}
 
 interface ExecPolicyBase {
-  ask: "off" | "on-miss" | "always";
+  /**
+   * Legacy compatibility knob from the old command-approval flow.
+   * The current runtime is policy-first and does not rely on interactive
+   * per-command approvals.
+   */
+  ask?: "off" | "on-miss" | "always";
+  /**
+   * Legacy compatibility fallback paired with `ask`.
+   * Kept for config compatibility only.
+   */
   askFallback?: "deny" | "allowlist";
 }
 
@@ -37,18 +48,6 @@ interface ExecPolicyAllowlist extends ExecPolicyBase {
 
 export type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
 
-export interface ApprovalRequest {
-  requestId: string;
-  command: string;
-  binary: string;
-  reason: ApprovalReason;
-}
-
-export interface ApprovalResponse {
-  approved: boolean;
-  allowAlways?: boolean;
-}
-
 export interface SandboxExecRequest {
   tool: string;
   args: Record<string, unknown>;
@@ -56,13 +55,17 @@ export interface SandboxExecRequest {
   networkAllow?: string[];
   timeoutSec?: number;
   execPolicy: ExecPolicy;
-  toolsConfig?: { restrictToWorkspace?: boolean; workspaceDir?: string; agentId?: string };
-  onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
+  shell?: ShellConfig;
+  toolsConfig?: {
+    restrictToWorkspace?: boolean;
+    workspaceDir?: string;
+    agentId?: string;
+    shell?: ShellConfig;
+  };
 }
 
 export interface SandboxBackend {
   readonly kind: "local" | "cloud";
-  readonly supportsFullShell: boolean;
   execute(req: SandboxExecRequest): Promise<ToolResult>;
   close(): Promise<void>;
 }

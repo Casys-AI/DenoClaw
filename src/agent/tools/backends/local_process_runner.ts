@@ -72,7 +72,10 @@ function createExecutorInput(req: SandboxExecRequest): string {
   return JSON.stringify({
     tool: req.tool,
     args: req.args,
-    config: req.toolsConfig,
+    config: {
+      ...req.toolsConfig,
+      shell: req.shell,
+    },
   });
 }
 

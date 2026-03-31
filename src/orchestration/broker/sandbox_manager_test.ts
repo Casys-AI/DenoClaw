@@ -29,7 +29,6 @@ function toolRequest(
 
 class FakeSandboxBackend implements SandboxBackend {
   readonly kind = "cloud" as const;
-  readonly supportsFullShell = true;
   closeCalls = 0;
   executeCalls = 0;
 
@@ -125,8 +124,12 @@ Deno.test("BrokerSandboxManager recycles a sandbox when the network policy chang
     },
   });
 
-  await manager.executeTool(toolRequest("bob", { networkAllow: ["a.example"] }));
-  await manager.executeTool(toolRequest("bob", { networkAllow: ["b.example"] }));
+  await manager.executeTool(
+    toolRequest("bob", { networkAllow: ["a.example"] }),
+  );
+  await manager.executeTool(
+    toolRequest("bob", { networkAllow: ["b.example"] }),
+  );
 
   assertEquals(created.length, 2);
   assertEquals(created[0].closeCalls, 1);

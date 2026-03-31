@@ -151,10 +151,10 @@ the code checks `!== false`. That is counterintuitive. **Options:** rename the
 field to `allowInlineEval?: boolean` so missing means `false`, which preserves
 strict mode by default.
 
-### Design 9 — `supportsFullShell` is declared but never used
+### Design 9 — `supportsFullShell` was decorative
 
-The flag exists on `SandboxBackend`, but no code branches on it. It is
-decorative right now. **Options:** use it for routing, or remove it.
+The flag existed on `SandboxBackend`, but no code branched on it. It described
+an execution mode the runtime did not actually implement, so it was removed.
 
 ### Design 10 — `deniedCommands` uses `string.includes()`, which creates false positives
 

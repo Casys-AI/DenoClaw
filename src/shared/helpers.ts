@@ -2,6 +2,8 @@ import { join } from "@std/path";
 import { DenoClawError } from "./errors.ts";
 
 export function getHomeDir(): string {
+  const override = Deno.env.get("DENOCLAW_HOME_DIR");
+  if (override) return override;
   const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || ".";
   return join(home, ".denoclaw");
 }
@@ -71,7 +73,6 @@ export function getAgentRuntimeDir(agentId: string): string {
 export function getAgentMemoryPath(agentId: string): string {
   return join(getAgentRuntimeDir(agentId), "memory.db");
 }
-
 
 export function generateId(): string {
   return crypto.randomUUID();

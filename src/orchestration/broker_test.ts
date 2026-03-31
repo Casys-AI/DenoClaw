@@ -4,9 +4,11 @@ import {
   assertRejects,
   assertThrows,
 } from "@std/assert";
+import { DenoClawError } from "../shared/errors.ts";
 import { DENOCLAW_AGENT_PROTOCOL } from "./agent_socket_protocol.ts";
 import { BrokerServer } from "./broker/server.ts";
 import { AuthManager } from "./auth.ts";
+import { MetricsCollector } from "../telemetry/metrics.ts";
 import { TunnelRegistry } from "./broker/tunnel_registry.ts";
 import {
   DENOCLAW_TUNNEL_PROTOCOL,
@@ -17,10 +19,11 @@ import {
   createAwaitedInputMetadata,
   createResumePayloadMetadata,
 } from "../messaging/a2a/input_metadata.ts";
+import type { Config } from "../config/types.ts";
 import type { BrokerMessage } from "./types.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
 
-function createConfig() {
+function createConfig(): Config {
   return {
     providers: {},
     agents: {
@@ -308,7 +311,7 @@ Deno.test(
         targetAgent: "agent-beta",
         taskId: "task-continue",
         contextId: "ctx-continue",
-        message: createMessage("Need approval"),
+        message: createMessage("Need confirmation"),
       });
 
       const paused: Task = {
@@ -318,10 +321,8 @@ Deno.test(
           timestamp: new Date().toISOString(),
           metadata: {
             awaitedInput: {
-              kind: "approval",
-              command: "git status",
-              binary: "git",
-              prompt: "approve?",
+              kind: "confirmation",
+              prompt: "continue?",
             },
           },
         },
@@ -336,9 +337,9 @@ Deno.test(
 
       const resumed = await broker.continueAgentTask("agent-alpha", {
         taskId: paused.id,
-        continuationMessage: createMessage("Approved, continue"),
+        continuationMessage: createMessage("Confirmed, continue"),
         metadata: createResumePayloadMetadata({
-          kind: "approval",
+          kind: "confirmation",
           approved: true,
         }),
       });
@@ -353,10 +354,10 @@ Deno.test(
       assertEquals(forwarded.payload.taskId, paused.id);
       assertEquals(forwarded.payload.continuationMessage?.parts[0], {
         kind: "text",
-        text: "Approved, continue",
+        text: "Confirmed, continue",
       });
       assertEquals(forwarded.payload.metadata, {
-        resume: { kind: "approval", approved: true },
+        resume: { kind: "confirmation", approved: true },
       });
 
       await broker.stop();
@@ -686,7 +687,7 @@ Deno.test(
         taskId: submitted.id,
         continuationMessage: createMessage("No"),
         metadata: createResumePayloadMetadata({
-          kind: "approval",
+          kind: "confirmation",
           approved: false,
         }),
       });
@@ -741,7 +742,1105 @@ Deno.test("BrokerServer.submitAgentTask enforces peer policy", async () => {
 });
 
 Deno.test(
-  "BrokerServer returns EXEC_APPROVAL_REQUIRED for broker-backed shell tasks",
+  "BrokerServer returns PRIVILEGE_ELEVATION_REQUIRED and uses default sandbox permissions",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      let sandboxCalls = 0;
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => {
+            sandboxCalls++;
+            return Promise.resolve({ success: true, output: "" });
+          },
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) => message.type === "error" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-elevation",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.requiredPermissions, ["write"]);
+      assertEquals(reply.payload.context?.agentAllowed, ["read"]);
+      assertEquals(reply.payload.context?.denied, ["write"]);
+      assertEquals(reply.payload.context?.suggestedGrants, [
+        { permission: "write", paths: ["note.txt"] },
+      ]);
+      assertEquals(reply.payload.context?.privilegeElevationSupported, true);
+      assertEquals(reply.payload.context?.elevationAvailable, false);
+      assertEquals(reply.payload.context?.elevationReason, "no_channel");
+      assertEquals(
+        reply.payload.recovery,
+        "Attach an elevation channel or update agent sandbox.allowedPermissions / broker policy to allow write_file (write paths=[note.txt])",
+      );
+      assertEquals(
+        typeof reply.payload.context?.capabilitiesFingerprint,
+        "string",
+      );
+      assertEquals(
+        reply.payload.context?.capabilitiesVersion,
+        "runtime-capabilities-v1",
+      );
+      assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer disables privilege elevation per agent while keeping structured denials",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      let sandboxCalls = 0;
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => {
+            sandboxCalls++;
+            return Promise.resolve({ success: true, output: "" });
+          },
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      await kv.set(["agents", "agent-beta", "config"], {
+        sandbox: {
+          allowedPermissions: ["read"],
+          privilegeElevation: {
+            enabled: false,
+          },
+        },
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) => message.type === "error" && message.to === "agent-beta",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-disabled-elevation",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.privilegeElevationSupported, false);
+      assertEquals(reply.payload.context?.elevationAvailable, false);
+      assertEquals(
+        reply.payload.context?.elevationReason,
+        "disabled_for_agent",
+      );
+      assertEquals(reply.payload.context?.privilegeElevationScopes, []);
+      assertEquals(
+        reply.payload.recovery,
+        "Update agent sandbox.allowedPermissions or broker policy to allow write_file (write paths=[note.txt])",
+      );
+      assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer marks privilege elevation as available for channel-backed tasks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      const broker = new BrokerServer(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "" }),
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const submitted = await broker.submitChannelMessage(
+        {
+          id: "telegram-msg-elevation",
+          sessionId: "telegram-elevation-session",
+          userId: "999",
+          content: "Write note.txt",
+          channelType: "telegram",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "telegram",
+            userId: "999",
+            roomId: "999",
+          },
+        },
+        {
+          targetAgent: "agent-beta",
+          taskId: "channel-elevation-task",
+        },
+      );
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "error" && message.to === "agent-beta" &&
+          message.id === "tool-req-channel-elevation",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-channel-elevation",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+          taskId: submitted.id,
+          contextId: submitted.contextId,
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.privilegeElevationSupported, true);
+      assertEquals(reply.payload.context?.elevationAvailable, true);
+      assertEquals(reply.payload.context?.elevationReason, undefined);
+      assertEquals(
+        reply.payload.recovery,
+        "Grant temporary privilege elevation for write_file (write paths=[note.txt]) or update agent sandbox.allowedPermissions / broker policy",
+      );
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer rejects privilege-elevation resume when the target agent disables it",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+          privilegeElevation: {
+            enabled: false,
+          },
+        },
+      });
+
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordAgentMessage: async () => {} } as any,
+      });
+
+      const submitted = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-disabled-elevation",
+        contextId: "ctx-disabled-elevation",
+        taskMessage: createMessage("Write note.txt"),
+      });
+
+      await kv.set(["a2a_tasks", submitted.id], {
+        ...submitted,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["note.txt"] }],
+            scope: "task",
+            prompt: "Need temporary write access",
+          }),
+        },
+      });
+
+      await assertRejects(
+        () =>
+          broker.continueAgentTask("agent-alpha", {
+            taskId: submitted.id,
+            continuationMessage: createMessage("Grant write"),
+            metadata: createResumePayloadMetadata({
+              kind: "privilege-elevation",
+              approved: true,
+            }),
+          }),
+        DenoClawError,
+        "Enable sandbox.privilegeElevation.enabled",
+      );
+
+      const persisted = await broker.getTask({ taskId: submitted.id });
+      const privilegeGrants = ((persisted?.metadata?.broker as
+        | { privilegeElevationGrants?: unknown[] }
+        | undefined)?.privilegeElevationGrants) ?? [];
+      assertEquals(privilegeGrants, []);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer rejects expired privilege-elevation resumes and expires session grants",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+          privilegeElevation: {
+            sessionGrantTtlSec: 1,
+          },
+        },
+      });
+
+      const queueMessages = createQueueCollector(kv);
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "ok" }),
+          resolveToolPermissions: (tool) => {
+            switch (tool) {
+              case "write_file":
+                return ["write"];
+              default:
+                return [];
+            }
+          },
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const submitted = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-expired-elevation",
+        contextId: "ctx-expired-elevation",
+        taskMessage: createMessage("Write note.txt"),
+      });
+
+      await kv.set(["a2a_tasks", submitted.id], {
+        ...submitted,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["note.txt"] }],
+            scope: "task",
+            prompt: "Need temporary write access",
+            expiresAt: "2026-03-31T00:00:00.000Z",
+          }),
+        },
+      });
+
+      const expiredOnContinue = await broker.continueAgentTask("agent-alpha", {
+        taskId: submitted.id,
+        continuationMessage: createMessage("Grant write"),
+        metadata: createResumePayloadMetadata({
+          kind: "privilege-elevation",
+          approved: true,
+        }),
+      });
+      assertEquals(expiredOnContinue?.status.state, "FAILED");
+      assertEquals(expiredOnContinue?.status.metadata, {
+        errorCode: "PRIVILEGE_ELEVATION_REQUEST_EXPIRED",
+        errorContext: {
+          expiresAt: "2026-03-31T00:00:00.000Z",
+        },
+      });
+      assertEquals(expiredOnContinue?.status.message?.parts[0], {
+        kind: "text",
+        text:
+          "Privilege elevation request expired; request a fresh elevation to continue",
+      });
+      const loadedExpired = await broker.getTask({ taskId: submitted.id });
+      assertEquals(loadedExpired?.status.state, "FAILED");
+
+      await kv.set(
+        ["a2a_contexts", "ctx-expired-elevation", "privilege_elevation_grants"],
+        [{
+          kind: "privilege-elevation",
+          scope: "session",
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          grantedAt: "2026-03-31T00:00:00.000Z",
+          expiresAt: "2026-03-31T00:00:01.000Z",
+          source: "broker-resume",
+        }],
+      );
+
+      const realDateNow = Date.now;
+      Date.now = () => Date.parse("2026-03-31T00:00:02.000Z");
+      try {
+        await (
+          broker as unknown as {
+            handleToolRequest(
+              msg: Extract<BrokerMessage, { type: "tool_request" }>,
+            ): Promise<void>;
+          }
+        ).handleToolRequest({
+          id: "tool-expired-session-grant",
+          from: "agent-beta",
+          to: "broker",
+          type: "tool_request",
+          timestamp: new Date().toISOString(),
+          payload: {
+            tool: "write_file",
+            args: { path: "note.txt", content: "hello" },
+            taskId: submitted.id,
+            contextId: "ctx-expired-elevation",
+          },
+        });
+      } finally {
+        Date.now = realDateNow;
+      }
+
+      const deniedReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "error" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-expired-session-grant",
+      )) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(deniedReply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer stores privilege-elevation grants on resume and consumes once grants only when used",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+
+      const executedTools: string[] = [];
+      const queueMessages = createQueueCollector(kv);
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: (request) => {
+            executedTools.push(request.tool);
+            return Promise.resolve({ success: true, output: "ok" });
+          },
+          resolveToolPermissions: (tool) => {
+            switch (tool) {
+              case "read_file":
+                return ["read"];
+              case "write_file":
+                return ["write"];
+              default:
+                return [];
+            }
+          },
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const submitted = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-privilege-grant",
+        taskMessage: createMessage("Update note.txt"),
+      });
+
+      await kv.set(["a2a_tasks", submitted.id], {
+        ...submitted,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["note.txt"] }],
+            scope: "once",
+            prompt: "Need temporary write access",
+          }),
+        },
+      });
+
+      await broker.continueAgentTask("agent-alpha", {
+        taskId: submitted.id,
+        continuationMessage: createMessage("Grant write once"),
+        metadata: createResumePayloadMetadata({
+          kind: "privilege-elevation",
+          approved: true,
+        }),
+      });
+
+      let persisted = await broker.getTask({ taskId: submitted.id });
+      let privilegeGrants = ((persisted?.metadata?.broker as
+        | { privilegeElevationGrants?: unknown[] }
+        | undefined)?.privilegeElevationGrants) ?? [];
+      const firstPrivilegeGrant = privilegeGrants[0] as
+        | Record<string, unknown>
+        | undefined;
+      assertEquals(privilegeGrants.length, 1);
+      assertEquals(firstPrivilegeGrant?.kind, "privilege-elevation");
+      assertEquals(firstPrivilegeGrant?.scope, "once");
+      assertEquals(firstPrivilegeGrant?.grants, [
+        { permission: "write", paths: ["note.txt"] },
+      ]);
+      assertEquals(firstPrivilegeGrant?.source, "broker-resume");
+      assertEquals(typeof firstPrivilegeGrant?.grantedAt, "string");
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-read",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "read_file",
+          args: { path: "note.txt" },
+          taskId: submitted.id,
+        },
+      });
+
+      const readReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "tool_response" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-read",
+      )) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(readReply.payload.success, true);
+      assertEquals(executedTools, ["read_file"]);
+
+      persisted = await broker.getTask({ taskId: submitted.id });
+      privilegeGrants = ((persisted?.metadata?.broker as
+        | { privilegeElevationGrants?: unknown[] }
+        | undefined)?.privilegeElevationGrants) ?? [];
+      assertEquals(
+        privilegeGrants.length,
+        1,
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-write-other",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "other.txt", content: "nope" },
+          taskId: submitted.id,
+        },
+      });
+
+      const otherDeniedReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "error" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-write-other",
+      )) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(
+        otherDeniedReply.payload.code,
+        "PRIVILEGE_ELEVATION_REQUIRED",
+      );
+      assertEquals(executedTools, ["read_file"]);
+
+      persisted = await broker.getTask({ taskId: submitted.id });
+      privilegeGrants = ((persisted?.metadata?.broker as
+        | { privilegeElevationGrants?: unknown[] }
+        | undefined)?.privilegeElevationGrants) ?? [];
+      assertEquals(
+        privilegeGrants.length,
+        1,
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-write-1",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hello" },
+          taskId: submitted.id,
+        },
+      });
+
+      const writeReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "tool_response" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-write-1",
+      )) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(writeReply.payload.success, true);
+      assertEquals(executedTools, ["read_file", "write_file"]);
+
+      persisted = await broker.getTask({ taskId: submitted.id });
+      privilegeGrants = ((persisted?.metadata?.broker as
+        | { privilegeElevationGrants?: unknown[] }
+        | undefined)?.privilegeElevationGrants) ?? [];
+      assertEquals(
+        privilegeGrants.length,
+        0,
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-write-2",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hello again" },
+          taskId: submitted.id,
+        },
+      });
+
+      const deniedReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "error" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-write-2",
+      )) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(deniedReply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer applies net privilege grants only to matching hosts",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+
+      const queueMessages = createQueueCollector(kv);
+      const executedUrls: string[] = [];
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: (request) => {
+            executedUrls.push(String(request.args.url));
+            return Promise.resolve({ success: true, output: "ok" });
+          },
+          resolveToolPermissions: (tool) => {
+            switch (tool) {
+              case "web_fetch":
+                return ["net"];
+              default:
+                return [];
+            }
+          },
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const submitted = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-net-grant",
+        taskMessage: createMessage("Fetch api.example.com"),
+      });
+
+      await kv.set(["a2a_tasks", submitted.id], {
+        ...submitted,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "net", hosts: ["api.example.com"] }],
+            scope: "once",
+            prompt: "Need temporary network access",
+          }),
+        },
+      });
+
+      await broker.continueAgentTask("agent-alpha", {
+        taskId: submitted.id,
+        continuationMessage: createMessage("Grant net once"),
+        metadata: createResumePayloadMetadata({
+          kind: "privilege-elevation",
+          approved: true,
+        }),
+      });
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-net-other",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "web_fetch",
+          args: { url: "https://other.example.com/page" },
+          taskId: submitted.id,
+        },
+      });
+
+      const otherHostDenied = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "error" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-net-other",
+      )) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(
+        otherHostDenied.payload.code,
+        "PRIVILEGE_ELEVATION_REQUIRED",
+      );
+      assertEquals(executedUrls, []);
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-net-allowed",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "web_fetch",
+          args: { url: "https://api.example.com/page" },
+          taskId: submitted.id,
+        },
+      });
+
+      const allowedHostReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "tool_response" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-net-allowed",
+      )) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(allowedHostReply.payload.success, true);
+      assertEquals(executedUrls, ["https://api.example.com/page"]);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer applies session-scoped privilege grants across tasks sharing a context",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      await kv.set(["agents", "agent-beta", "config"], {
+        acceptFrom: ["agent-alpha"],
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+
+      const queueMessages = createQueueCollector(kv);
+      const executedTools: string[] = [];
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: (request) => {
+            executedTools.push(request.tool);
+            return Promise.resolve({ success: true, output: "ok" });
+          },
+          resolveToolPermissions: (tool) => {
+            switch (tool) {
+              case "write_file":
+                return ["write"];
+              default:
+                return [];
+            }
+          },
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        metrics: new MetricsCollector(kv),
+      });
+
+      const firstTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-session-grant-1",
+        contextId: "ctx-session-grant",
+        taskMessage: createMessage("Task one"),
+      });
+
+      await kv.set(["a2a_tasks", firstTask.id], {
+        ...firstTask,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["session.txt"] }],
+            scope: "session",
+            prompt: "Need session write access",
+          }),
+        },
+      });
+
+      await broker.continueAgentTask("agent-alpha", {
+        taskId: firstTask.id,
+        continuationMessage: createMessage("Grant write for session"),
+        metadata: createResumePayloadMetadata({
+          kind: "privilege-elevation",
+          approved: true,
+          scope: "session",
+        }),
+      });
+
+      const secondTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-session-grant-2",
+        contextId: "ctx-session-grant",
+        taskMessage: createMessage("Task two"),
+      });
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-session-write",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "session.txt", content: "hello" },
+          taskId: secondTask.id,
+          contextId: "ctx-session-grant",
+        },
+      });
+
+      const allowedReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "tool_response" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-session-write",
+      )) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(allowedReply.payload.success, true);
+      assertEquals(executedTools, ["write_file"]);
+
+      const thirdTask = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-session-grant-3",
+        contextId: "ctx-other-session",
+        taskMessage: createMessage("Task three"),
+      });
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-session-write-denied",
+        from: "agent-beta",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "session.txt", content: "hello" },
+          taskId: thirdTask.id,
+          contextId: "ctx-other-session",
+        },
+      });
+
+      const deniedReply = (await waitForCollectedMessage(
+        queueMessages,
+        (message) =>
+          message.type === "error" &&
+          message.to === "agent-beta" &&
+          message.id === "tool-session-write-denied",
+      )) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(deniedReply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer rejects privilege-elevation resumes that broaden requested grants or scope",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordAgentMessage: async () => {} } as any,
+      });
+
+      const submitted = await broker.submitAgentTask("agent-alpha", {
+        targetAgent: "agent-beta",
+        taskId: "task-invalid-privilege-resume",
+        contextId: "ctx-invalid-privilege-resume",
+        taskMessage: createMessage("Need temporary write access"),
+      });
+
+      await kv.set(["a2a_tasks", submitted.id], {
+        ...submitted,
+        status: {
+          state: "INPUT_REQUIRED",
+          timestamp: new Date().toISOString(),
+          metadata: createAwaitedInputMetadata({
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["docs"] }],
+            scope: "task",
+            prompt: "Need write access under docs",
+          }),
+        },
+      });
+
+      await assertRejects(
+        () =>
+          broker.continueAgentTask("agent-alpha", {
+            taskId: submitted.id,
+            continuationMessage: createMessage("Broaden it"),
+            metadata: createResumePayloadMetadata({
+              kind: "privilege-elevation",
+              approved: true,
+              grants: [{ permission: "write", paths: ["*"] }],
+            }),
+          }),
+        DenoClawError,
+        "Resume with the requested privilege grants or a narrower subset",
+      );
+
+      await assertRejects(
+        () =>
+          broker.continueAgentTask("agent-alpha", {
+            taskId: submitted.id,
+            continuationMessage: createMessage("Make it session-wide"),
+            metadata: createResumePayloadMetadata({
+              kind: "privilege-elevation",
+              approved: true,
+              scope: "session",
+            }),
+          }),
+        DenoClawError,
+        "Resume with the requested privilege scope or a narrower scope",
+      );
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer returns EXEC_POLICY_DENIED for broker-backed shell tasks outside policy even when ask is configured",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });
     const kv = await Deno.openKv(kvPath);
@@ -769,8 +1868,9 @@ Deno.test(
           resolveToolPermissions: () => ["run"],
           checkExecPolicy: () => ({
             allowed: false,
-            reason: "always-ask",
-            binary: "git",
+            reason: "not-in-allowlist",
+            binary: "curl",
+            recovery: "Add 'curl' to execPolicy.allowedCommands",
           }),
           getToolPermissions: () => ({}),
         },
@@ -798,8 +1898,8 @@ Deno.test(
         timestamp: new Date().toISOString(),
         payload: {
           tool: "shell",
-          args: { command: "git status", dry_run: false },
-          taskId: "task-approval",
+          args: { command: "curl https://example.com", dry_run: false },
+          taskId: "task-policy-ask-configured",
         },
       });
 
@@ -807,14 +1907,289 @@ Deno.test(
         BrokerMessage,
         { type: "tool_response" }
       >;
-      assertEquals(reply.payload.error?.code, "EXEC_APPROVAL_REQUIRED");
+      assertEquals(reply.payload.error?.code, "EXEC_POLICY_DENIED");
       assertEquals(reply.payload.error?.context, {
-        taskId: "task-approval",
-        command: "git status",
-        binary: "git",
-        reason: "always-ask",
+        command: "curl https://example.com",
+        binary: "curl",
+        reason: "not-in-allowlist",
       });
+      assertEquals(
+        reply.payload.error?.recovery,
+        "Add 'curl' to execPolicy.allowedCommands",
+      );
       assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer returns EXEC_POLICY_DENIED for broker-backed shell tasks blocked by policy",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await kv.set(["agents", "agent-alpha", "config"], {
+        sandbox: {
+          allowedPermissions: ["run"],
+          execPolicy: {
+            security: "allowlist",
+            allowedCommands: ["git"],
+            ask: "off",
+          },
+        },
+      });
+
+      let sandboxCalls = 0;
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        toolExecution: {
+          executeTool: () => {
+            sandboxCalls++;
+            return Promise.resolve({ success: true, output: "" });
+          },
+          resolveToolPermissions: () => ["run"],
+          checkExecPolicy: () => ({
+            allowed: false,
+            reason: "not-in-allowlist",
+            binary: "curl",
+            recovery: "Add 'curl' to execPolicy.allowedCommands",
+          }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "tool_response" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-policy-denied",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "shell",
+          args: { command: "curl https://example.com", dry_run: false },
+          taskId: "task-policy-denied",
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(reply.payload.error?.code, "EXEC_POLICY_DENIED");
+      assertEquals(reply.payload.error?.context, {
+        command: "curl https://example.com",
+        binary: "curl",
+        reason: "not-in-allowlist",
+      });
+      assertEquals(
+        reply.payload.error?.recovery,
+        "Add 'curl' to execPolicy.allowedCommands",
+      );
+      assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer runs exec-policy preflight before routing shell tools to a tunnel",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await kv.set(["agents", "agent-alpha", "config"], {
+        sandbox: {
+          allowedPermissions: ["run"],
+          execPolicy: {
+            security: "allowlist",
+            allowedCommands: ["git"],
+            ask: "always",
+          },
+        },
+      });
+
+      const tunnelRegistry = new TunnelRegistry();
+      const tunnelMessages: BrokerMessage[] = [];
+      const fakeTunnel = {
+        readyState: WebSocket.OPEN,
+        bufferedAmount: 0,
+        send(raw: string) {
+          tunnelMessages.push(JSON.parse(raw) as BrokerMessage);
+        },
+        close() {},
+      } as unknown as WebSocket;
+      tunnelRegistry.register("relay-shell", fakeTunnel, {
+        tunnelId: "relay-shell",
+        type: "local",
+        tools: ["shell"],
+        allowedAgents: [],
+      });
+
+      let executeCalls = 0;
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        tunnelRegistry,
+        toolExecution: {
+          executeTool: () => {
+            executeCalls++;
+            return Promise.resolve({ success: true, output: "" });
+          },
+          resolveToolPermissions: () => ["run"],
+          checkExecPolicy: () => ({
+            allowed: false,
+            reason: "not-in-allowlist",
+            binary: "curl",
+          }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "tool_response" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-tunnel-preflight",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "shell",
+          args: { command: "curl https://example.com", dry_run: false },
+          taskId: "task-tunnel-preflight",
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(reply.payload.error?.code, "EXEC_POLICY_DENIED");
+      assertEquals(tunnelMessages.length, 0);
+      assertEquals(executeCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer forwards resolved shell mode to tunnel execution",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      await kv.set(["agents", "agent-alpha", "config"], {
+        sandbox: {
+          allowedPermissions: ["run"],
+          execPolicy: {
+            security: "full",
+            ask: "off",
+          },
+          shell: {
+            mode: "system-shell",
+          },
+        },
+      });
+
+      const tunnelRegistry = new TunnelRegistry();
+      const tunnelMessages: BrokerMessage[] = [];
+      const fakeTunnel = {
+        readyState: WebSocket.OPEN,
+        bufferedAmount: 0,
+        send(raw: string) {
+          tunnelMessages.push(JSON.parse(raw) as BrokerMessage);
+        },
+        close() {},
+      } as unknown as WebSocket;
+      tunnelRegistry.register("relay-shell-mode", fakeTunnel, {
+        tunnelId: "relay-shell-mode",
+        type: "local",
+        tools: ["shell"],
+        allowedAgents: [],
+      });
+
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        tunnelRegistry,
+        toolExecution: {
+          executeTool: () => Promise.resolve({ success: true, output: "" }),
+          resolveToolPermissions: () => ["run"],
+          checkExecPolicy: (_command, _policy, shell) => ({
+            allowed: true,
+            binary: shell?.mode === "system-shell" ? "sh" : "echo",
+          }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-shell-mode",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "shell",
+          args: { command: "echo hello | tr a-z A-Z", dry_run: false },
+        },
+      });
+
+      assertEquals(tunnelMessages.length, 1);
+      assertEquals(
+        (
+          tunnelMessages[0] as Extract<BrokerMessage, { type: "tool_request" }>
+        ).payload.execution?.shell,
+        { mode: "system-shell" },
+      );
 
       await broker.stop();
     } finally {
@@ -895,250 +2270,6 @@ Deno.test(
         contextId: "ctx-context",
         ownershipScope: "agent",
       });
-
-      await broker.stop();
-    } finally {
-      kv.close();
-      await Deno.remove(kvPath);
-    }
-  },
-);
-
-Deno.test(
-  "BrokerServer consumes one approved continuation to allow the next broker-backed shell execution",
-  async () => {
-    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-    const kv = await Deno.openKv(kvPath);
-
-    try {
-      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      await kv.set(["agents", "agent-beta", "config"], {
-        acceptFrom: ["agent-alpha"],
-        sandbox: {
-          allowedPermissions: ["run"],
-          execPolicy: {
-            security: "allowlist",
-            allowedCommands: ["git"],
-            ask: "always",
-          },
-        },
-      });
-
-      const broker = new BrokerServer(createConfig(), {
-        kv,
-        // deno-lint-ignore no-explicit-any
-        metrics: { recordAgentMessage: async () => {} } as any,
-      });
-
-      const submitted = await broker.submitAgentTask("agent-alpha", {
-        targetAgent: "agent-beta",
-        taskId: "task-resume-grant",
-        taskMessage: createMessage("Run git status"),
-      });
-
-      await kv.set(["a2a_tasks", submitted.id], {
-        ...submitted,
-        status: {
-          state: "INPUT_REQUIRED",
-          timestamp: new Date().toISOString(),
-          metadata: createAwaitedInputMetadata({
-            kind: "approval",
-            command: "git status",
-            binary: "git",
-          }),
-        },
-      });
-
-      await broker.continueAgentTask("agent-alpha", {
-        taskId: submitted.id,
-        continuationMessage: createMessage("Approved"),
-        metadata: createResumePayloadMetadata({
-          kind: "approval",
-          approved: true,
-        }),
-      });
-
-      const firstCheck = await (
-        broker as unknown as {
-          resolveBrokerToolApprovalRequirement(
-            agentId: string,
-            req: {
-              tool: string;
-              args: Record<string, unknown>;
-              taskId?: string;
-            },
-            agentPolicy?: unknown,
-            defaultPolicy?: unknown,
-          ): Promise<unknown>;
-        }
-      ).resolveBrokerToolApprovalRequirement(
-        "agent-beta",
-        {
-          tool: "shell",
-          args: { command: "git status", dry_run: false },
-          taskId: submitted.id,
-        },
-        {
-          security: "allowlist",
-          allowedCommands: ["git"],
-          ask: "always",
-        },
-        undefined,
-      );
-      assertEquals(firstCheck, null);
-
-      const secondCheck = await (
-        broker as unknown as {
-          resolveBrokerToolApprovalRequirement(
-            agentId: string,
-            req: {
-              tool: string;
-              args: Record<string, unknown>;
-              taskId?: string;
-            },
-            agentPolicy?: unknown,
-            defaultPolicy?: unknown,
-          ): Promise<{ error?: { code?: string } } | null>;
-        }
-      ).resolveBrokerToolApprovalRequirement(
-        "agent-beta",
-        {
-          tool: "shell",
-          args: { command: "git status", dry_run: false },
-          taskId: submitted.id,
-        },
-        {
-          security: "allowlist",
-          allowedCommands: ["git"],
-          ask: "always",
-        },
-        undefined,
-      );
-      assertEquals(secondCheck?.error?.code, "EXEC_APPROVAL_REQUIRED");
-
-      await broker.stop();
-    } finally {
-      kv.close();
-      await Deno.remove(kvPath);
-    }
-  },
-);
-
-Deno.test(
-  "BrokerServer rejects grant consumption when command does not match",
-  async () => {
-    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
-    const kv = await Deno.openKv(kvPath);
-
-    try {
-      await seedPeerPolicy(kv, "agent-alpha", "agent-beta");
-      await kv.set(["agents", "agent-beta", "config"], {
-        acceptFrom: ["agent-alpha"],
-        sandbox: {
-          allowedPermissions: ["run"],
-          execPolicy: {
-            security: "allowlist",
-            allowedCommands: ["git", "npm"],
-            ask: "always",
-          },
-        },
-      });
-
-      const broker = new BrokerServer(createConfig(), {
-        kv,
-        // deno-lint-ignore no-explicit-any
-        metrics: { recordAgentMessage: async () => {} } as any,
-      });
-
-      const submitted = await broker.submitAgentTask("agent-alpha", {
-        targetAgent: "agent-beta",
-        taskId: "task-mismatch",
-        taskMessage: createMessage("Run git status"),
-      });
-
-      // Pause with approval for "git status"
-      await kv.set(["a2a_tasks", submitted.id], {
-        ...submitted,
-        status: {
-          state: "INPUT_REQUIRED",
-          timestamp: new Date().toISOString(),
-          metadata: createAwaitedInputMetadata({
-            kind: "approval",
-            command: "git status",
-            binary: "git",
-          }),
-        },
-      });
-
-      // Approve "git status"
-      await broker.continueAgentTask("agent-alpha", {
-        taskId: submitted.id,
-        continuationMessage: createMessage("Approved"),
-        metadata: createResumePayloadMetadata({
-          kind: "approval",
-          approved: true,
-        }),
-      });
-
-      // Try to consume with a DIFFERENT command — must be rejected
-      const mismatchCheck = await (
-        broker as unknown as {
-          resolveBrokerToolApprovalRequirement(
-            agentId: string,
-            req: {
-              tool: string;
-              args: Record<string, unknown>;
-              taskId?: string;
-            },
-            agentPolicy?: unknown,
-            defaultPolicy?: unknown,
-          ): Promise<{ error?: { code?: string } } | null>;
-        }
-      ).resolveBrokerToolApprovalRequirement(
-        "agent-beta",
-        {
-          tool: "shell",
-          args: { command: "npm install", dry_run: false },
-          taskId: submitted.id,
-        },
-        {
-          security: "allowlist",
-          allowedCommands: ["git", "npm"],
-          ask: "always",
-        },
-        undefined,
-      );
-      assertEquals(mismatchCheck?.error?.code, "EXEC_APPROVAL_REQUIRED");
-
-      // Original command still works
-      const matchCheck = await (
-        broker as unknown as {
-          resolveBrokerToolApprovalRequirement(
-            agentId: string,
-            req: {
-              tool: string;
-              args: Record<string, unknown>;
-              taskId?: string;
-            },
-            agentPolicy?: unknown,
-            defaultPolicy?: unknown,
-          ): Promise<unknown>;
-        }
-      ).resolveBrokerToolApprovalRequirement(
-        "agent-beta",
-        {
-          tool: "shell",
-          args: { command: "git status", dry_run: false },
-          taskId: submitted.id,
-        },
-        {
-          security: "allowlist",
-          allowedCommands: ["git", "npm"],
-          ask: "always",
-        },
-        undefined,
-      );
-      assertEquals(matchCheck, null);
 
       await broker.stop();
     } finally {
@@ -1500,7 +2631,7 @@ Deno.test(
         id: "telegram-msg-2",
         sessionId: "telegram-999",
         userId: "999",
-        content: "Need approval",
+        content: "Need follow-up",
         channelType: "telegram",
         timestamp: new Date().toISOString(),
         address: {

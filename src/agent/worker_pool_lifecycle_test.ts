@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { AgentEntry } from "../shared/types.ts";
+import { deriveAgentRuntimeCapabilitiesFromEntry } from "../shared/runtime_capabilities.ts";
 import { AgentRuntimeRegistry } from "./registry.ts";
 import type { WorkerResponse } from "./worker_protocol.ts";
 import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
@@ -98,6 +99,11 @@ Deno.test("WorkerPoolLifecycle starts workers and forwards runtime messages", as
     agentId: "agent-alpha",
     config: createWorkerConfig(),
     agentRegistry: {},
+    runtimeCapabilities: deriveAgentRuntimeCapabilitiesFromEntry(
+      undefined,
+      createWorkerConfig().agents.defaults.sandbox,
+      { privilegeElevationSupported: true },
+    ),
     kvPaths: {
       private: "/tmp/agent-alpha-memory.db",
       shared: "/tmp/shared.db",

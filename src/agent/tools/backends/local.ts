@@ -12,7 +12,8 @@ import type {
   SandboxExecRequest,
   ToolResult,
 } from "../../../shared/types.ts";
-import { LocalExecPolicyRuntime } from "./local_exec_policy.ts";
+import { log } from "../../../shared/log.ts";
+import { ExecPolicyGuard } from "./exec_policy_guard.ts";
 import {
   computePermissionIntersection,
   createPermissionDeniedResult,
@@ -21,14 +22,13 @@ import { runLocalToolExecutor } from "./local_process_runner.ts";
 
 export class LocalProcessBackend implements SandboxBackend {
   readonly kind = "local" as const;
-  readonly supportsFullShell = false;
 
   private sandboxConfig: SandboxConfig;
-  private execPolicyRuntime: LocalExecPolicyRuntime;
+  private execPolicyGuard: ExecPolicyGuard;
 
   constructor(sandboxConfig: SandboxConfig) {
     this.sandboxConfig = sandboxConfig;
-    this.execPolicyRuntime = new LocalExecPolicyRuntime(sandboxConfig);
+    this.execPolicyGuard = new ExecPolicyGuard(sandboxConfig);
   }
 
   async execute(req: SandboxExecRequest): Promise<ToolResult> {
@@ -43,11 +43,17 @@ export class LocalProcessBackend implements SandboxBackend {
     }
 
     // ADR-010: enforce exec policy for shell tool BEFORE spawning
-    if (
-      req.tool === "shell" && req.args.command && req.args.dry_run === false
-    ) {
+    if (this.execPolicyGuard.shouldEnforce(req)) {
+      if (
+        req.shell?.mode === "system-shell" &&
+        req.shell.warnOnLocalSystemShell !== false
+      ) {
+        log.warn(
+          "LocalProcessBackend: sandbox.shell.mode='system-shell' delegates command semantics to the host shell",
+        );
+      }
       const command = req.args.command as string;
-      const policyResult = await this.execPolicyRuntime.enforce(command, req);
+      const policyResult = await this.execPolicyGuard.enforce(command, req);
       if (policyResult) return policyResult;
     }
 

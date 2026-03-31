@@ -6,12 +6,11 @@
  */
 
 export type {
-  ApprovalReason,
-  ApprovalRequest,
-  ApprovalResponse,
+  CommandMode,
   ExecPolicy,
   SandboxBackend,
   SandboxExecRequest,
+  ShellConfig,
 } from "../agent/sandbox_types.ts";
 export type {
   ActiveTaskEntry,
@@ -140,6 +139,13 @@ export type SandboxPermission =
   | "env"
   | "ffi";
 
+export interface SandboxPrivilegeElevationConfig {
+  enabled?: boolean;
+  scopes?: import("./privilege_elevation.ts").PrivilegeElevationScope[];
+  requestTimeoutSec?: number;
+  sessionGrantTtlSec?: number;
+}
+
 // ── Sandbox Config ───────────────────────────────────────
 
 export interface SandboxConfig {
@@ -148,7 +154,8 @@ export interface SandboxConfig {
   networkAllow?: string[];
   maxDurationSec?: number;
   execPolicy?: import("../agent/sandbox_types.ts").ExecPolicy;
-  approvalTimeoutSec?: number;
+  shell?: import("../agent/sandbox_types.ts").ShellConfig;
+  privilegeElevation?: SandboxPrivilegeElevationConfig;
 }
 
 // ── Agent registry (cross-domain: used by orchestration, messaging/a2a, cli, config) ─
@@ -174,4 +181,3 @@ export interface AgentEntry {
   channels?: string[]; // assigned channel names
   channelRouting?: ChannelRouting;
 }
-

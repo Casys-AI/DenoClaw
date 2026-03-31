@@ -177,8 +177,13 @@ export class BrokerServer {
       },
     });
     this.taskDispatcher = new BrokerTaskDispatcher({
+      config: this.config,
       taskStore: this.taskStore,
       persistence: this.taskPersistence,
+      getAgentConfigEntry: async (agentId) => {
+        const kv = await this.getKv();
+        return await kv.get(["agents", agentId, "config"]);
+      },
       routeTaskMessage: (targetAgentId, message) =>
         this.agentMessageRouter.routeTaskMessage(targetAgentId, message),
     });

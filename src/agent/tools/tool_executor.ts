@@ -4,7 +4,8 @@
  *
  * Spawned by LocalProcessBackend via Deno.Command with --allow-* flags
  * matching the tool×agent permission intersection (ADR-005).
- * Exec policy is enforced BEFORE spawn by the backend (ADR-010).
+ * Exec policy is enforced BEFORE spawn by the caller/backend guard (ADR-010).
+ * Shell execution remains direct (`Deno.Command(binary, args)`), not `sh -c`.
  *
  * Input: JSON string as first CLI arg: { tool, args, config? }
  * Output: ToolResult JSON on stdout
@@ -13,7 +14,7 @@
 import { ShellTool } from "./shell.ts";
 import { ReadFileTool, WriteFileTool } from "./file.ts";
 import { WebFetchTool } from "./web.ts";
-import type { ToolResult } from "../../shared/types.ts";
+import type { ShellConfig, ToolResult } from "../../shared/types.ts";
 
 interface ExecutorInput {
   tool: string;
@@ -22,6 +23,7 @@ interface ExecutorInput {
     restrictToWorkspace?: boolean;
     workspaceDir?: string;
     agentId?: string;
+    shell?: ShellConfig;
   };
 }
 
@@ -32,7 +34,7 @@ function instantiateTool(name: string, config?: ExecutorInput["config"]) {
 
   switch (name) {
     case "shell":
-      return new ShellTool(config?.restrictToWorkspace);
+      return new ShellTool(config?.restrictToWorkspace, config?.shell);
     case "read_file":
       return new ReadFileTool(wsCtx);
     case "write_file":

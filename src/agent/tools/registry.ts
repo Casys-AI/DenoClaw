@@ -1,20 +1,23 @@
 import type {
-  ApprovalRequest,
-  ApprovalResponse,
   ExecPolicy,
   SandboxBackend,
+  SandboxConfig,
   SandboxPermission,
+  ShellConfig,
   ToolDefinition,
   ToolResult,
 } from "../../shared/types.ts";
 import type { ToolsConfig } from "../types.ts";
 import { log } from "../../shared/log.ts";
+import type { AgentRuntimeCapabilities } from "../../shared/runtime_capabilities.ts";
+import { normalizeAgentFacingToolResult } from "../../shared/tool_result_normalization.ts";
+import { suggestPrivilegeElevationGrantResources } from "../../shared/privilege_elevation.ts";
 
-/** Default exec policy — deny-first, allowlist with on-miss (AX #2 Safe Defaults). */
+/** Default exec policy — deny-first, allowlist, no interactive approval by default. */
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
   allowedCommands: [],
-  ask: "on-miss",
+  ask: "off",
   askFallback: "deny",
 };
 
@@ -48,7 +51,9 @@ export class ToolRegistry {
   private execPolicy: ExecPolicy = DEFAULT_EXEC_POLICY;
   private toolsConfig?: ToolsConfig;
   private networkAllow?: string[];
-  private onAskApproval?: (req: ApprovalRequest) => Promise<ApprovalResponse>;
+  private shellConfig?: ShellConfig;
+  private sandboxConfig?: SandboxConfig;
+  private runtimeCapabilities?: AgentRuntimeCapabilities;
 
   /** Set the sandbox backend (ADR-010). */
   setBackend(
@@ -56,21 +61,18 @@ export class ToolRegistry {
     execPolicy?: ExecPolicy,
     toolsConfig?: ToolsConfig,
     networkAllow?: string[],
+    shellConfig?: ShellConfig,
+    sandboxConfig?: SandboxConfig,
+    runtimeCapabilities?: AgentRuntimeCapabilities,
   ): void {
     this.backend = backend;
     this.execPolicy = execPolicy ?? DEFAULT_EXEC_POLICY;
     this.toolsConfig = toolsConfig;
     this.networkAllow = networkAllow;
-    log.debug(
-      `SandboxBackend: kind=${backend.kind} supportsFullShell=${backend.supportsFullShell}`,
-    );
-  }
-
-  /** Set the approval callback for exec policy ask flows. */
-  setAskApproval(
-    fn: (req: ApprovalRequest) => Promise<ApprovalResponse>,
-  ): void {
-    this.onAskApproval = fn;
+    this.shellConfig = shellConfig;
+    this.sandboxConfig = sandboxConfig;
+    this.runtimeCapabilities = runtimeCapabilities;
+    log.debug(`SandboxBackend: kind=${backend.kind}`);
   }
 
   register(tool: BaseTool): void {
@@ -111,14 +113,36 @@ export class ToolRegistry {
       // ADR-010: tools with permissions execute via SandboxBackend
       if (this.backend && tool.permissions.length > 0) {
         log.info(`Tool execution (sandbox ${this.backend.kind}): ${name}`);
-        return await this.backend.execute({
+        const result = await this.backend.execute({
           tool: name,
           args,
           permissions: tool.permissions,
           networkAllow: this.networkAllow,
           execPolicy: this.execPolicy,
+          shell: this.shellConfig,
           toolsConfig: this.toolsConfig,
-          onAskApproval: this.onAskApproval,
+        });
+        const command = name === "shell" && typeof args.command === "string"
+          ? args.command
+          : undefined;
+        const binary = command ? command.trim().split(/\s+/)[0] : undefined;
+        return normalizeAgentFacingToolResult(result, {
+          tool: name,
+          command,
+          binary,
+          requiredPermissions: tool.permissions,
+          agentAllowed: this.sandboxConfig?.allowedPermissions ?? [],
+          suggestedGrants: suggestPrivilegeElevationGrantResources(
+            name,
+            args,
+            tool.permissions,
+          ),
+          capabilities: this.runtimeCapabilities,
+          elevationAvailable: false,
+          elevationReason:
+            this.runtimeCapabilities?.sandbox.privilegeElevation.supported
+              ? "no_channel"
+              : "broker_unsupported",
         });
       }
 

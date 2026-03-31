@@ -65,6 +65,28 @@ Deno.test("DenoSandboxBackend security=deny blocks shell before init", async () 
   await backend.close();
 });
 
+Deno.test("DenoSandboxBackend rejects system-shell when exec policy is not full", async () => {
+  const sandbox: SandboxConfig = {
+    backend: "cloud",
+    allowedPermissions: ["run"],
+    maxDurationSec: 5,
+  };
+  const backend = new DenoSandboxBackend(sandbox, "fake-token");
+
+  const result = await backend.execute({
+    ...shellReq("echo hi | tr a-z A-Z"),
+    shell: { mode: "system-shell" },
+  });
+
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "EXEC_DENIED");
+  assertEquals(
+    (result.error?.context as Record<string, unknown>)?.reason,
+    "invalid-policy",
+  );
+  await backend.close();
+});
+
 Deno.test(
   "DenoSandboxBackend can trust broker-granted permissions in broker mode",
   async () => {
@@ -78,13 +100,15 @@ Deno.test(
     });
     // deno-lint-ignore no-explicit-any
     (backend as any).sandbox = {
-      spawn: async () => ({
-        output: async () => ({
-          status: { success: true, code: 0 },
-          stdoutText: JSON.stringify({ success: true, output: "ok" }),
-          stderrText: "",
+      spawn: () =>
+        Promise.resolve({
+          output: () =>
+            Promise.resolve({
+              status: { success: true, code: 0 },
+              stdoutText: JSON.stringify({ success: true, output: "ok" }),
+              stderrText: "",
+            }),
         }),
-      }),
     };
     // deno-lint-ignore no-explicit-any
     (backend as any).ensureInitialized = async () => {};
@@ -115,22 +139,29 @@ Deno.test(
     });
     // deno-lint-ignore no-explicit-any
     (backend as any).sandbox = {
-      spawn: async () => ({
-        output: async () => ({
-          status: { success: false, code: 1 },
-          stdoutText: JSON.stringify({
-            success: false,
-            output: "",
-            error: { code: "COMMAND_EXEC_ERROR" },
-          }),
-          stderrText: "boom",
+      spawn: () =>
+        Promise.resolve({
+          output: () =>
+            Promise.resolve({
+              status: { success: false, code: 1 },
+              stdoutText: JSON.stringify({
+                success: false,
+                output: "",
+                error: { code: "COMMAND_EXEC_ERROR" },
+              }),
+              stderrText: "boom",
+            }),
         }),
-      }),
     };
     // deno-lint-ignore no-explicit-any
     (backend as any).ensureInitialized = async () => {};
 
-    const result = await backend.execute(shellReq("deno --version"));
+    const result = await backend.execute(
+      shellReq("deno --version", {
+        security: "full",
+        ask: "off",
+      }),
+    );
 
     assertEquals(result.success, false);
     assertEquals(result.error?.code, "COMMAND_EXEC_ERROR");

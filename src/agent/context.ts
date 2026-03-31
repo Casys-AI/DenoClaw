@@ -1,12 +1,21 @@
 import type { Message, ToolDefinition } from "../shared/types.ts";
 import type { AgentConfig, Skill } from "./types.ts";
 import { formatDate } from "../shared/helpers.ts";
+import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
+import { formatAgentRuntimeCapabilities } from "./runtime_capabilities.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
+import { formatAgentRuntimeGrants } from "./runtime_capabilities.ts";
 
 export class ContextBuilder {
   private config: AgentConfig;
+  private runtimeCapabilities?: AgentRuntimeCapabilities;
 
-  constructor(config: AgentConfig) {
+  constructor(
+    config: AgentConfig,
+    runtimeCapabilities?: AgentRuntimeCapabilities,
+  ) {
     this.config = config;
+    this.runtimeCapabilities = runtimeCapabilities;
   }
 
   /**
@@ -20,6 +29,7 @@ export class ContextBuilder {
     now: Date = new Date(),
     memoryTopics?: string[],
     memoryFiles?: string[],
+    runtimeGrants: AgentRuntimeGrant[] = [],
   ): string {
     const parts: string[] = [];
 
@@ -46,8 +56,24 @@ export class ContextBuilder {
         }`,
       );
       parts.push(
-        "Use read_file/write_file to access them (e.g., read_file({path: \"memories/project.md\"})).",
+        'Use read_file/write_file to access them (e.g., read_file({path: "memories/project.md"})).',
       );
+    }
+
+    if (this.runtimeCapabilities) {
+      parts.push("\n## Runtime Capabilities\n");
+      for (
+        const line of formatAgentRuntimeCapabilities(this.runtimeCapabilities)
+      ) {
+        parts.push(`- ${line}`);
+      }
+    }
+
+    if (runtimeGrants.length > 0) {
+      parts.push("\n## Temporary Runtime Grants\n");
+      for (const line of formatAgentRuntimeGrants(runtimeGrants)) {
+        parts.push(`- ${line}`);
+      }
     }
 
     if (skills.length > 0) {
@@ -88,6 +114,7 @@ Guidelines:
     tools: ToolDefinition[],
     memoryTopics?: string[],
     memoryFiles?: string[],
+    runtimeGrants: AgentRuntimeGrant[] = [],
   ): Message[] {
     return [
       {
@@ -98,6 +125,7 @@ Guidelines:
           new Date(),
           memoryTopics,
           memoryFiles,
+          runtimeGrants,
         ),
       },
       ...conversation,

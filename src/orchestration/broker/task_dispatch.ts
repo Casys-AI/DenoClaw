@@ -11,6 +11,9 @@ import type { A2AMessage, Task } from "../../messaging/a2a/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { generateId } from "../../shared/helpers.ts";
+import { deriveAgentRuntimeCapabilitiesFromEntry } from "../../shared/runtime_capabilities.ts";
+import type { Config } from "../../config/types.ts";
+import type { AgentEntry } from "../../shared/types.ts";
 import type {
   BrokerMessage,
   BrokerTaskContinuePayload,
@@ -23,12 +26,20 @@ import {
   extractBrokerSubmitTaskMessage,
 } from "../types.ts";
 import { createChannelTaskMessage } from "../channel_ingress/task_message.ts";
-import type { ApprovalGrant } from "./persistence.ts";
 import type {
   BrokerTaskMetadata,
   BrokerTaskPersistence,
 } from "./persistence.ts";
 import type { TaskStore } from "../../messaging/a2a/tasks.ts";
+import {
+  arePrivilegeElevationGrantResourcesSubset,
+  isPrivilegeElevationExpired,
+  isPrivilegeElevationScopeWithin,
+  type PrivilegeElevationGrant,
+  type PrivilegeElevationGrantResource,
+  type PrivilegeElevationScope,
+  resolvePrivilegeElevationExpiry,
+} from "../../shared/privilege_elevation.ts";
 
 type BrokerTaskEnvelope = Extract<
   BrokerMessage,
@@ -38,8 +49,10 @@ type BrokerTaskEnvelope = Extract<
 >;
 
 export interface BrokerTaskDispatcherDeps {
+  config: Config;
   taskStore: TaskStore;
   persistence: BrokerTaskPersistence;
+  getAgentConfigEntry(agentId: string): Promise<Deno.KvEntryMaybe<AgentEntry>>;
   routeTaskMessage(
     targetAgentId: string,
     message: BrokerTaskEnvelope,
@@ -123,7 +136,9 @@ export class BrokerTaskDispatcher {
   }
 
   async getTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
-    return await this.deps.taskStore.get(payload.taskId);
+    const task = await this.deps.taskStore.get(payload.taskId);
+    if (!task) return null;
+    return await this.expireAwaitedInputIfNeeded(task);
   }
 
   async continueAgentTask(
@@ -148,10 +163,15 @@ export class BrokerTaskDispatcher {
     }
     await this.deps.persistence.assertPeerAccess(fromAgentId, targetAgentId);
 
-    if (existing.status.state !== "INPUT_REQUIRED") {
+    const activeTask = await this.expireAwaitedInputIfNeeded(existing);
+    if (activeTask.status.state !== "INPUT_REQUIRED") {
+      return activeTask;
+    }
+
+    if (activeTask.status.state !== "INPUT_REQUIRED") {
       throw new DenoClawError(
         "TASK_NOT_WAITING_FOR_INPUT",
-        { taskId: existing.id, state: existing.status.state },
+        { taskId: activeTask.id, state: activeTask.status.state },
         "Only INPUT_REQUIRED tasks can be resumed through broker continuation",
       );
     }
@@ -159,37 +179,21 @@ export class BrokerTaskDispatcher {
     const continuationMessage = extractBrokerContinuationMessage(payload);
     const resume = getResumePayloadMetadata({ metadata: payload.metadata });
     if (resume?.approved === false) {
-      const rejected = transitionTask(existing, "REJECTED", {
+      const rejected = transitionTask(activeTask, "REJECTED", {
         statusMessage: continuationMessage,
       });
-      rejected.history = [...existing.history, continuationMessage];
+      rejected.history = [...activeTask.history, continuationMessage];
       await this.deps.persistence.writeTask(rejected);
       return rejected;
     }
 
-    let updated = existing;
+    let updated = activeTask;
     if (resume?.approved === true) {
-      const awaitedInput = getAwaitedInputMetadata(existing.status);
-      const command = awaitedInput?.kind === "approval"
-        ? awaitedInput.command
-        : "*";
-      const binary = awaitedInput?.kind === "approval" && awaitedInput.binary
-        ? awaitedInput.binary
-        : command;
-      const pendingResumes = this.deps.persistence.getPendingResumes(
+      updated = await this.persistResumeGrant(
+        activeTask,
         brokerMetadata,
+        resume,
       );
-      const grant: ApprovalGrant = {
-        kind: "approval",
-        approved: true,
-        command,
-        binary,
-        grantedAt: new Date().toISOString(),
-      };
-      updated = await this.deps.persistence.persistTaskMetadata(existing, {
-        ...brokerMetadata,
-        pendingResumes: { ...pendingResumes, [command]: grant },
-      });
     }
 
     await this.deps.routeTaskMessage(targetAgentId, {
@@ -227,10 +231,15 @@ export class BrokerTaskDispatcher {
 
     this.assertChannelAccess(message, brokerMetadata);
 
-    if (existing.status.state !== "INPUT_REQUIRED") {
+    const activeTask = await this.expireAwaitedInputIfNeeded(existing);
+    if (activeTask.status.state !== "INPUT_REQUIRED") {
+      return activeTask;
+    }
+
+    if (activeTask.status.state !== "INPUT_REQUIRED") {
       throw new DenoClawError(
         "TASK_NOT_WAITING_FOR_INPUT",
-        { taskId: existing.id, state: existing.status.state },
+        { taskId: activeTask.id, state: activeTask.status.state },
         "Only INPUT_REQUIRED tasks can be resumed through channel continuation",
       );
     }
@@ -238,37 +247,21 @@ export class BrokerTaskDispatcher {
     const continuationMessage = extractBrokerContinuationMessage(payload);
     const resume = getResumePayloadMetadata({ metadata: payload.metadata });
     if (resume?.approved === false) {
-      const rejected = transitionTask(existing, "REJECTED", {
+      const rejected = transitionTask(activeTask, "REJECTED", {
         statusMessage: continuationMessage,
       });
-      rejected.history = [...existing.history, continuationMessage];
+      rejected.history = [...activeTask.history, continuationMessage];
       await this.deps.persistence.writeTask(rejected);
       return rejected;
     }
 
-    let updated = existing;
+    let updated = activeTask;
     if (resume?.approved === true) {
-      const awaitedInput = getAwaitedInputMetadata(existing.status);
-      const command = awaitedInput?.kind === "approval"
-        ? awaitedInput.command
-        : "*";
-      const binary = awaitedInput?.kind === "approval" && awaitedInput.binary
-        ? awaitedInput.binary
-        : command;
-      const pendingResumes = this.deps.persistence.getPendingResumes(
+      updated = await this.persistResumeGrant(
+        activeTask,
         brokerMetadata,
+        resume,
       );
-      const grant: ApprovalGrant = {
-        kind: "approval",
-        approved: true,
-        command,
-        binary,
-        grantedAt: new Date().toISOString(),
-      };
-      updated = await this.deps.persistence.persistTaskMetadata(existing, {
-        ...brokerMetadata,
-        pendingResumes: { ...pendingResumes, [command]: grant },
-      });
     }
 
     await this.deps.routeTaskMessage(targetAgentId, {
@@ -451,5 +444,156 @@ export class BrokerTaskDispatcher {
         "Resume the task as the same channel user",
       );
     }
+  }
+
+  private async persistResumeGrant(
+    existing: Task,
+    brokerMetadata: BrokerTaskMetadata,
+    resume: { kind?: string; grants?: unknown; scope?: unknown },
+  ): Promise<Task> {
+    const awaitedInput = getAwaitedInputMetadata(existing.status);
+    if (
+      awaitedInput?.kind === "privilege-elevation" &&
+      resume.kind === "privilege-elevation"
+    ) {
+      if (isPrivilegeElevationExpired(awaitedInput.expiresAt)) {
+        throw new DenoClawError(
+          "PRIVILEGE_ELEVATION_REQUEST_EXPIRED",
+          {
+            taskId: existing.id,
+            expiresAt: awaitedInput.expiresAt,
+          },
+          "Request a fresh privilege elevation; this approval window has expired",
+        );
+      }
+      const targetAgentId = typeof brokerMetadata.targetAgent === "string"
+        ? brokerMetadata.targetAgent
+        : undefined;
+      if (!targetAgentId) {
+        throw new DenoClawError(
+          "TASK_TARGET_UNKNOWN",
+          { taskId: existing.id, brokerMetadata },
+          "Broker task metadata is missing targetAgent",
+        );
+      }
+      const agentConfig = await this.deps.getAgentConfigEntry(targetAgentId);
+      const capabilities = deriveAgentRuntimeCapabilitiesFromEntry(
+        agentConfig.value ?? undefined,
+        this.deps.config.agents?.defaults?.sandbox,
+        { privilegeElevationSupported: true },
+      );
+      if (!capabilities.sandbox.privilegeElevation.supported) {
+        throw new DenoClawError(
+          "PRIVILEGE_ELEVATION_DISABLED",
+          { taskId: existing.id, targetAgentId },
+          "Enable sandbox.privilegeElevation.enabled or widen the agent sandbox policy before resuming with privilege elevation",
+        );
+      }
+      const scope = this.resolvePrivilegeElevationScope(
+        resume.scope,
+        awaitedInput.scope,
+      );
+      const grants = Array.isArray(resume.grants) && resume.grants.length > 0
+        ? resume.grants as PrivilegeElevationGrantResource[]
+        : awaitedInput.grants;
+      if (
+        !arePrivilegeElevationGrantResourcesSubset(grants, awaitedInput.grants)
+      ) {
+        throw new DenoClawError(
+          "PRIVILEGE_ELEVATION_GRANT_INVALID",
+          {
+            requested: grants,
+            allowed: awaitedInput.grants,
+            taskId: existing.id,
+          },
+          "Resume with the requested privilege grants or a narrower subset",
+        );
+      }
+      if (!isPrivilegeElevationScopeWithin(scope, awaitedInput.scope)) {
+        throw new DenoClawError(
+          "PRIVILEGE_ELEVATION_SCOPE_INVALID",
+          {
+            requested: scope,
+            allowed: awaitedInput.scope,
+            taskId: existing.id,
+          },
+          "Resume with the requested privilege scope or a narrower scope",
+        );
+      }
+      const grant: PrivilegeElevationGrant = {
+        kind: "privilege-elevation",
+        scope,
+        grants,
+        grantedAt: new Date().toISOString(),
+        expiresAt: scope === "session"
+          ? resolvePrivilegeElevationExpiry(
+            capabilities.sandbox.privilegeElevation.sessionGrantTtlSec,
+          )
+          : undefined,
+        source: "broker-resume",
+      };
+      if (grant.scope === "session") {
+        await this.deps.persistence.appendContextPrivilegeElevationGrant(
+          existing.contextId ?? existing.id,
+          grant,
+        );
+        return existing;
+      }
+      return await this.deps.persistence.persistTaskMetadata(existing, {
+        ...brokerMetadata,
+        privilegeElevationGrants: [
+          ...this.deps.persistence.getPrivilegeElevationGrants(brokerMetadata),
+          grant,
+        ],
+      });
+    }
+    return existing;
+  }
+
+  private async expireAwaitedInputIfNeeded(task: Task): Promise<Task> {
+    if (task.status.state !== "INPUT_REQUIRED") {
+      return task;
+    }
+
+    const awaitedInput = getAwaitedInputMetadata(task.status);
+    if (
+      awaitedInput?.kind !== "privilege-elevation" ||
+      !isPrivilegeElevationExpired(awaitedInput.expiresAt)
+    ) {
+      return task;
+    }
+
+    const expired = transitionTask(task, "FAILED", {
+      statusMessage: {
+        messageId: crypto.randomUUID(),
+        role: "agent",
+        parts: [{
+          kind: "text",
+          text:
+            "Privilege elevation request expired; request a fresh elevation to continue",
+        }],
+      },
+      metadata: {
+        errorCode: "PRIVILEGE_ELEVATION_REQUEST_EXPIRED",
+        errorContext: {
+          expiresAt: awaitedInput.expiresAt,
+        },
+      },
+    });
+    await this.deps.persistence.writeTask(expired);
+    return expired;
+  }
+
+  private resolvePrivilegeElevationScope(
+    resumeScope: unknown,
+    awaitedScope: PrivilegeElevationScope,
+  ): PrivilegeElevationScope {
+    if (
+      resumeScope === "once" || resumeScope === "task" ||
+      resumeScope === "session"
+    ) {
+      return resumeScope;
+    }
+    return awaitedScope;
   }
 }

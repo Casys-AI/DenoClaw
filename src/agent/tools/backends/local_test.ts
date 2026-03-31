@@ -112,7 +112,7 @@ Deno.test("LocalProcessBackend denies shell operators", async () => {
   assertEquals(result.error?.code, "EXEC_DENIED");
   assertEquals(
     (result.error?.context as Record<string, unknown>)?.reason,
-    "shell-operator",
+    "unsupported-shell-syntax",
   );
   await backend.close();
 });
@@ -153,92 +153,30 @@ Deno.test("LocalProcessBackend skips exec policy for dry_run shell", async () =>
   await backend.close();
 });
 
-// ── Ask flow ──
+// ── Legacy ask config is ignored in runtime execution ──
 
-Deno.test("LocalProcessBackend ask=on-miss with no callback — askFallback=deny denies", async () => {
+Deno.test("LocalProcessBackend ignores ask=always when command is allowlisted", async () => {
+  const policy: ExecPolicy = {
+    security: "allowlist",
+    allowedCommands: ["echo"],
+    ask: "always",
+    askFallback: "deny",
+  };
+  const backend = new LocalProcessBackend(baseSandbox);
+  const result = await backend.execute(shellReq("echo hello", policy));
+  assertEquals(result.success, true);
+  await backend.close();
+});
+
+Deno.test("LocalProcessBackend ignores ask=on-miss and still denies commands outside policy", async () => {
   const policy: ExecPolicy = {
     security: "allowlist",
     allowedCommands: ["echo"],
     ask: "on-miss",
-    askFallback: "deny",
+    askFallback: "allowlist",
   };
   const backend = new LocalProcessBackend(baseSandbox);
   const result = await backend.execute(shellReq("curl foo.com", policy));
-  assertEquals(result.success, false);
-  assertEquals(result.error?.code, "EXEC_DENIED");
-  await backend.close();
-});
-
-Deno.test("LocalProcessBackend ask=on-miss with callback — approved proceeds to exec", async () => {
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: [],
-    ask: "on-miss",
-    askFallback: "deny",
-  };
-  const backend = new LocalProcessBackend(baseSandbox);
-  const result = await backend.execute({
-    ...shellReq("echo approved", policy),
-    onAskApproval: () => Promise.resolve({ approved: true }),
-  });
-  assertEquals(result.success, true);
-  assertEquals(result.output.includes("approved"), true);
-  await backend.close();
-});
-
-Deno.test("LocalProcessBackend ask=on-miss with callback — denied", async () => {
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: [],
-    ask: "on-miss",
-    askFallback: "deny",
-  };
-  const backend = new LocalProcessBackend(baseSandbox);
-  const result = await backend.execute({
-    ...shellReq("echo nope", policy),
-    onAskApproval: () => Promise.resolve({ approved: false }),
-  });
-  assertEquals(result.success, false);
-  assertEquals(result.error?.code, "EXEC_DENIED");
-  await backend.close();
-});
-
-Deno.test("LocalProcessBackend ask callback — allowAlways adds to session allowlist", async () => {
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: [],
-    ask: "on-miss",
-    askFallback: "deny",
-  };
-  const backend = new LocalProcessBackend(baseSandbox);
-
-  // First call: callback approves with allowAlways
-  const r1 = await backend.execute({
-    ...shellReq("echo first", policy),
-    onAskApproval: () => Promise.resolve({ approved: true, allowAlways: true }),
-  });
-  assertEquals(r1.success, true);
-
-  // Second call: no callback needed — "echo" is now in session allowlist
-  const r2 = await backend.execute(shellReq("echo second", policy));
-  assertEquals(r2.success, true);
-
-  await backend.close();
-});
-
-Deno.test("LocalProcessBackend approval timeout — denies (fail-closed)", async () => {
-  const sandbox: SandboxConfig = { ...baseSandbox, approvalTimeoutSec: 1 };
-  const policy: ExecPolicy = {
-    security: "allowlist",
-    allowedCommands: [],
-    ask: "on-miss",
-    askFallback: "deny",
-  };
-  const backend = new LocalProcessBackend(sandbox);
-  const result = await backend.execute({
-    ...shellReq("echo timeout", policy),
-    onAskApproval: () => new Promise(() => {}), // never resolves
-  });
   assertEquals(result.success, false);
   assertEquals(result.error?.code, "EXEC_DENIED");
   await backend.close();

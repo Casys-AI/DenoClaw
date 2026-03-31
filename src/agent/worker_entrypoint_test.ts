@@ -4,10 +4,9 @@ import {
   type CanonicalWorkerTaskRequest,
   executeCanonicalWorkerTask,
 } from "./worker_entrypoint.ts";
-import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
+import type { AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
 import type { Task } from "../messaging/a2a/types.ts";
-import type { ApprovalRequest } from "./sandbox_types.ts";
 
 // ── Stubs ────────────────────────────────────────────────
 
@@ -60,45 +59,6 @@ Deno.test("executeCanonicalWorkerTask maps local work into canonical A2A lifecyc
     text: "done",
   });
   assertEquals(result.response, { content: "done", finishReason: "stop" });
-});
-
-Deno.test("executeCanonicalWorkerTask surfaces approval pauses as INPUT_REQUIRED then resumes WORKING", async () => {
-  const updates: string[] = [];
-  const approvals: ApprovalRequest[] = [];
-
-  const result = await executeCanonicalWorkerTask(
-    createRequest({ message: "git push" }),
-    {
-      createLoop: (ctx: AgentLoopFactoryContext) =>
-        new StubLoop(async () => {
-          const approval = await ctx.askApproval!({
-            requestId: "approval-1",
-            command: "git push origin main",
-            binary: "git",
-            reason: "not-in-allowlist",
-          });
-          assertEquals(approval.approved, true);
-          return { content: "pushed", finishReason: "stop" };
-        }),
-      askApproval: (request: ApprovalRequest) => {
-        approvals.push(request);
-        return Promise.resolve({ approved: true });
-      },
-      onTaskUpdate: (task: Task) => {
-        updates.push(task.status.state);
-      },
-    },
-  );
-
-  assertEquals(approvals.length, 1);
-  assertEquals(updates, [
-    "SUBMITTED",
-    "WORKING",
-    "INPUT_REQUIRED",
-    "WORKING",
-    "COMPLETED",
-  ]);
-  assertEquals(result.task.status.state, "COMPLETED");
 });
 
 Deno.test("executeCanonicalWorkerTask classifies user refusals as REJECTED", async () => {

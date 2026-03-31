@@ -1,5 +1,9 @@
 import type { BrokerMessage } from "./types.ts";
-import type { SandboxPermission, ToolResult } from "../shared/types.ts";
+import type {
+  SandboxPermission,
+  ShellConfig,
+  ToolResult,
+} from "../shared/types.ts";
 import { log } from "../shared/log.ts";
 import {
   createTunnelRegisterMessage,
@@ -51,6 +55,14 @@ export function resolveRelayAuthToken(
   sessionToken?: string | null,
 ): string {
   return sessionToken ?? inviteToken;
+}
+
+export function describeRelayExecutionMode(
+  autoApprove = true,
+): string {
+  return autoApprove
+    ? "Relay: local execution (auto-approve)"
+    : "Relay: approval is broker-controlled; executing broker-approved request";
 }
 
 export function assertRelaySocketWritable(
@@ -212,8 +224,13 @@ export class LocalRelay {
         const req = msg.payload as {
           tool: string;
           args: Record<string, unknown>;
+          execution?: { shell?: ShellConfig };
         };
-        const result = await this.executeTool(req.tool, req.args);
+        const result = await this.executeTool(
+          req.tool,
+          req.args,
+          req.execution,
+        );
         response = {
           id: msg.id,
           from: "tunnel",
@@ -236,15 +253,17 @@ export class LocalRelay {
   private async executeTool(
     tool: string,
     args: Record<string, unknown>,
+    execution?: { shell?: ShellConfig },
   ): Promise<ToolResult> {
-    if (this.config.autoApprove) {
-      log.info(`Relay: local execution (auto-approve) — ${tool}`);
-    } else {
-      // TODO: implement the interactive approval prompt
-      log.warn(`Relay: manual approval not implemented, executing — ${tool}`);
-    }
+    log.info(
+      `${describeRelayExecutionMode(this.config.autoApprove)} — ${tool}`,
+    );
 
-    return await this.toolExecution.executeTool({ tool, args });
+    return await this.toolExecution.executeTool({
+      tool,
+      args,
+      shell: execution?.shell,
+    });
   }
 
   private attemptReconnect(): void {

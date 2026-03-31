@@ -148,7 +148,14 @@ Deno.test("BrokerClient submit/get/continue/cancel use canonical task operations
         role: "user",
         parts: [{ kind: "text", text: "continue" }],
       },
-      metadata: { resume: { kind: "approval", approved: true } },
+      metadata: {
+        resume: {
+          kind: "privilege-elevation",
+          approved: true,
+          scope: "task",
+          grants: [{ permission: "write", paths: ["docs"] }],
+        },
+      },
     });
     assertExists(resumed);
     assertEquals(resumed?.status.state, "WORKING");

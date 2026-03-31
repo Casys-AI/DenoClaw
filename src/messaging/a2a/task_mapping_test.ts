@@ -1,8 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { AgentError } from "../../shared/errors.ts";
 import {
-  mapApprovalPauseToInputRequiredTask,
   mapLocalTextInputToTask,
+  mapPrivilegeElevationPauseToInputRequiredTask,
   mapTaskErrorToTerminalStatus,
   mapTaskResultToCompletion,
   resolveContextIdFromSessionId,
@@ -63,26 +63,51 @@ Deno.test("task mapping classifies refusal errors as REJECTED and generic errors
   assertEquals(failed.status.metadata?.errorCode, "UNEXPECTED_ERROR");
 });
 
-Deno.test("task mapping turns approval pauses into INPUT_REQUIRED metadata", () => {
+Deno.test("task mapping turns privilege elevation pauses into INPUT_REQUIRED metadata", () => {
   const task = mapLocalTextInputToTask({
-    requestId: "req-4",
-    sessionId: "session-4",
-    message: "git push",
+    requestId: "req-5",
+    sessionId: "session-5",
+    message: "write file",
   });
 
-  const paused = mapApprovalPauseToInputRequiredTask(task, {
-    command: "git push origin main",
-    binary: "git",
-    prompt: "Approve push?",
-    continuationToken: "resume-123",
+  const paused = mapPrivilegeElevationPauseToInputRequiredTask(task, {
+    grants: [{ permission: "write", paths: ["note.txt"] }],
+    scope: "task",
+    prompt: "Need temporary write access",
+    command: "write_file",
+    binary: "write_file",
+    continuationToken: "resume-456",
   });
 
   assertEquals(paused.status.state, "INPUT_REQUIRED");
   assertEquals(paused.status.metadata?.awaitedInput, {
-    kind: "approval",
-    command: "git push origin main",
-    binary: "git",
-    prompt: "Approve push?",
-    continuationToken: "resume-123",
+    kind: "privilege-elevation",
+    grants: [{ permission: "write", paths: ["note.txt"] }],
+    scope: "task",
+    prompt: "Need temporary write access",
+    command: "write_file",
+    binary: "write_file",
+    continuationToken: "resume-456",
+  });
+});
+
+Deno.test("task mapping formats privilege elevation pauses when no prompt is provided", () => {
+  const task = mapLocalTextInputToTask({
+    requestId: "req-6",
+    sessionId: "session-6",
+    message: "write file",
+  });
+
+  const paused = mapPrivilegeElevationPauseToInputRequiredTask(task, {
+    grants: [{ permission: "write", paths: ["note.txt"] }],
+    scope: "task",
+    command: "write_file",
+    binary: "write_file",
+  });
+
+  assertEquals(paused.status.message?.parts[0], {
+    kind: "text",
+    text:
+      "Temporary privilege elevation required for write_file (this task): write paths=[note.txt]",
   });
 });

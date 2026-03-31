@@ -154,7 +154,7 @@ Deno.test({
     try {
       const message = createMessage({
         id: "msg-init",
-        content: "Need approval",
+        content: "Need temporary write access",
       });
       const task = await taskStore.create(
         "task-1",
@@ -163,9 +163,9 @@ Deno.test({
       );
       const paused = transitionTask(task, "INPUT_REQUIRED", {
         metadata: createAwaitedInputMetadata({
-          kind: "approval",
-          command: "git push",
-          binary: "git",
+          kind: "privilege-elevation",
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          scope: "task",
         }),
       });
       paused.metadata = {
@@ -182,7 +182,10 @@ Deno.test({
 
       const resumed = await runtime.continueTask(
         "task-1",
-        createMessage({ id: "msg-next", content: "Approved, continue" }),
+        createMessage({
+          id: "msg-next",
+          content: "Grant write on note.txt and continue",
+        }),
       );
 
       assertEquals(resumed?.status.state, "COMPLETED");

@@ -1,17 +1,21 @@
 import {
-  mapApprovalPauseToInputRequiredTask,
+  mapPrivilegeElevationPauseToInputRequiredTask,
   mapTaskErrorToTerminalStatus,
   mapTaskResultToCompletion,
 } from "../messaging/a2a/task_mapping.ts";
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import { log } from "../shared/log.ts";
+import { formatPrivilegeElevationGrantResources } from "../shared/privilege_elevation.ts";
 import type { AgentLlmToolPort } from "../shared/types.ts";
 import type { ContextBuilder } from "./context.ts";
 import type { MemoryPort } from "./memory_port.ts";
-import { extractRuntimeApprovalPause } from "./runtime_message_mapping.ts";
+import {
+  extractRuntimePrivilegeElevationPause,
+} from "./runtime_message_mapping.ts";
 import type { SkillsLoader } from "./skills.ts";
 import type { AgentConfig } from "./types.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 
 export interface ExecuteAgentConversationInput {
   config: AgentConfig;
@@ -22,6 +26,7 @@ export interface ExecuteAgentConversationInput {
   fromAgentId: string;
   inputText: string;
   canonicalTask: Task;
+  getRuntimeGrants?: () => AgentRuntimeGrant[];
   reportWorkingTransition: boolean;
   maxIterations: number;
   reportTaskResult(task: Task): Promise<void>;
@@ -48,6 +53,9 @@ export async function executeAgentConversation(
         input.memory.getMessages(),
         input.skills.getSkills(),
         [],
+        undefined,
+        undefined,
+        input.getRuntimeGrants?.() ?? [],
       );
 
       const response = await input.llmToolPort.complete(
@@ -88,24 +96,28 @@ export async function executeAgentConversation(
             },
           );
 
-          const approvalPause = extractRuntimeApprovalPause(result);
-          if (approvalPause) {
+          const privilegePause = extractRuntimePrivilegeElevationPause(result);
+          if (privilegePause) {
             await input.memory.addMessage({
               role: "tool",
-              content:
-                `Approval required [${approvalPause.reason}]: ${approvalPause.command}`,
+              content: `Privilege elevation required: ${
+                formatPrivilegeElevationGrantResources(privilegePause.grants)
+              }`,
               name: tc.function.name,
               tool_call_id: tc.id,
             });
             await input.reportTaskResult(
-              mapApprovalPauseToInputRequiredTask(canonicalTask, {
-                command: approvalPause.command,
-                binary: approvalPause.binary,
-                prompt: approvalPause.prompt,
+              mapPrivilegeElevationPauseToInputRequiredTask(canonicalTask, {
+                grants: privilegePause.grants,
+                scope: privilegePause.scope,
+                prompt: privilegePause.prompt,
+                command: privilegePause.command,
+                binary: privilegePause.binary,
+                expiresAt: privilegePause.expiresAt,
               }),
             );
             log.info(
-              `Canonical task paused in INPUT_REQUIRED for ${input.fromAgentId}`,
+              `Canonical task paused in INPUT_REQUIRED for privilege elevation (${input.fromAgentId})`,
             );
             return;
           }

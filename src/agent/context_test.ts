@@ -1,6 +1,10 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { ContextBuilder } from "./context.ts";
 import type { Message } from "../shared/types.ts";
+import {
+  type AgentRuntimeGrant,
+  deriveAgentRuntimeCapabilities,
+} from "./runtime_capabilities.ts";
 
 const builder = new ContextBuilder({
   model: "test",
@@ -34,6 +38,60 @@ Deno.test("buildSystemPrompt includes tools", () => {
   }]);
   assertStringIncludes(prompt, "test_tool");
   assertStringIncludes(prompt, "Does testing");
+});
+
+Deno.test("buildSystemPrompt includes runtime capabilities summary", () => {
+  const prompt = new ContextBuilder(
+    {
+      model: "test",
+      temperature: 0.5,
+      maxTokens: 1024,
+    },
+    deriveAgentRuntimeCapabilities({
+      sandboxConfig: {
+        allowedPermissions: ["read", "run", "net"],
+        networkAllow: ["api.example.com"],
+        execPolicy: {
+          security: "allowlist",
+          allowedCommands: ["git"],
+          ask: "on-miss",
+        },
+      },
+      availablePeers: ["bob"],
+      privilegeElevationSupported: true,
+    }),
+  ).buildSystemPrompt([], []);
+
+  assertStringIncludes(prompt, "## Runtime Capabilities");
+  assertStringIncludes(prompt, "Shell: enabled");
+  assertStringIncludes(prompt, "Network allowlist: api.example.com");
+  assertStringIncludes(prompt, "Peer routing: enabled (bob)");
+  assertStringIncludes(prompt, "Privilege elevation: supported via broker");
+});
+
+Deno.test("buildSystemPrompt includes temporary runtime grants", () => {
+  const prompt = builder.buildSystemPrompt(
+    [],
+    [],
+    new Date("2025-01-15T10:30:00.000Z"),
+    undefined,
+    undefined,
+    [
+      {
+        kind: "privilege-elevation",
+        scope: "task",
+        grants: [{ permission: "write", paths: ["docs/plan.md"] }],
+        grantedAt: "2025-01-15T10:31:00.000Z",
+        source: "broker-resume",
+      } satisfies AgentRuntimeGrant,
+    ],
+  );
+
+  assertStringIncludes(prompt, "## Temporary Runtime Grants");
+  assertStringIncludes(
+    prompt,
+    "Temporary privilege-elevation: write paths=[docs/plan.md] (task scope",
+  );
 });
 
 Deno.test("truncateContext keeps all messages when under limit", () => {

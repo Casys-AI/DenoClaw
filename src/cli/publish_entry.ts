@@ -5,11 +5,18 @@ export function materializePublishedEntry(
   entry: AgentEntry,
   defaults: AgentDefaults,
 ): AgentEntry {
+  const privilegeElevation = entry.sandbox?.privilegeElevation
+    ? {
+      ...(defaults.sandbox?.privilegeElevation ?? {}),
+      ...entry.sandbox.privilegeElevation,
+    }
+    : defaults.sandbox?.privilegeElevation;
   const sandbox = entry.sandbox
     ? {
       ...(defaults.sandbox ?? {}),
       ...entry.sandbox,
       allowedPermissions: entry.sandbox.allowedPermissions,
+      ...(privilegeElevation ? { privilegeElevation } : {}),
     }
     : defaults.sandbox
     ? { ...defaults.sandbox }

@@ -7,24 +7,6 @@ import {
 import { assertEquals } from "@std/assert";
 import type { TaskStatus } from "./types.ts";
 
-Deno.test("createAwaitedInputMetadata supports approval requests", () => {
-  const metadata = createAwaitedInputMetadata({
-    kind: "approval",
-    command: "git status",
-    binary: "git",
-    prompt: "Allow once?",
-    continuationToken: "cont-1",
-  });
-
-  assertEquals(getAwaitedInputMetadata({ metadata }), {
-    kind: "approval",
-    command: "git status",
-    binary: "git",
-    prompt: "Allow once?",
-    continuationToken: "cont-1",
-  });
-});
-
 Deno.test("createAwaitedInputMetadata supports clarification requests", () => {
   const metadata = createAwaitedInputMetadata({
     kind: "clarification",
@@ -57,21 +39,87 @@ Deno.test("createAwaitedInputMetadata supports confirmation requests", () => {
   });
 });
 
+Deno.test("createAwaitedInputMetadata supports privilege elevation requests", () => {
+  const metadata = createAwaitedInputMetadata({
+    kind: "privilege-elevation",
+    grants: [
+      {
+        permission: "net",
+        hosts: ["api.github.com"],
+      },
+      {
+        permission: "write",
+        paths: ["/workspace/repo/docs"],
+      },
+    ],
+    scope: "task",
+    command: "git clone https://github.com/example/repo",
+    binary: "git",
+    prompt: "Grant temporary privileges?",
+    expiresAt: "2026-03-31T00:05:00.000Z",
+    continuationToken: "cont-elev-1",
+  });
+
+  assertEquals(getAwaitedInputMetadata({ metadata }), {
+    kind: "privilege-elevation",
+    grants: [
+      {
+        permission: "net",
+        hosts: ["api.github.com"],
+      },
+      {
+        permission: "write",
+        paths: ["/workspace/repo/docs"],
+      },
+    ],
+    scope: "task",
+    command: "git clone https://github.com/example/repo",
+    binary: "git",
+    prompt: "Grant temporary privileges?",
+    expiresAt: "2026-03-31T00:05:00.000Z",
+    continuationToken: "cont-elev-1",
+  });
+});
+
 Deno.test("createResumePayloadMetadata preserves resume payload shape", () => {
   const metadata = createResumePayloadMetadata({
     continuationToken: "cont-4",
-    kind: "approval",
+    kind: "confirmation",
     approved: true,
-    responseText: "allow-once",
-    fields: { scope: "current-command" },
+    responseText: "confirmed",
+    fields: { acknowledgedBy: "operator" },
   });
 
   assertEquals(getResumePayloadMetadata({ metadata }), {
     continuationToken: "cont-4",
-    kind: "approval",
+    kind: "confirmation",
     approved: true,
-    responseText: "allow-once",
-    fields: { scope: "current-command" },
+    responseText: "confirmed",
+    fields: { acknowledgedBy: "operator" },
+  });
+});
+
+Deno.test("createResumePayloadMetadata preserves privilege elevation payload shape", () => {
+  const metadata = createResumePayloadMetadata({
+    continuationToken: "cont-priv-1",
+    kind: "privilege-elevation",
+    approved: true,
+    scope: "once",
+    grants: [{
+      permission: "env",
+      keys: ["GITHUB_TOKEN"],
+    }],
+  });
+
+  assertEquals(getResumePayloadMetadata({ metadata }), {
+    continuationToken: "cont-priv-1",
+    kind: "privilege-elevation",
+    approved: true,
+    scope: "once",
+    grants: [{
+      permission: "env",
+      keys: ["GITHUB_TOKEN"],
+    }],
   });
 });
 
@@ -82,21 +130,26 @@ Deno.test("awaited input metadata composes with TaskStatus.message and metadata"
     message: {
       messageId: "msg-1",
       role: "agent",
-      parts: [{ kind: "text", text: "Need approval" }],
+      parts: [{ kind: "text", text: "Need temporary privileges" }],
     },
     metadata: createAwaitedInputMetadata({
-      kind: "approval",
-      command: "git status",
-      binary: "git",
+      kind: "privilege-elevation",
+      grants: [{ permission: "write", paths: ["note.txt"] }],
+      scope: "task",
+      expiresAt: "2026-03-31T00:05:00.000Z",
       continuationToken: "cont-5",
     }),
   };
 
-  assertEquals(status.message?.parts[0], { kind: "text", text: "Need approval" });
+  assertEquals(status.message?.parts[0], {
+    kind: "text",
+    text: "Need temporary privileges",
+  });
   assertEquals(getAwaitedInputMetadata(status), {
-    kind: "approval",
-    command: "git status",
-    binary: "git",
+    kind: "privilege-elevation",
+    grants: [{ permission: "write", paths: ["note.txt"] }],
+    scope: "task",
+    expiresAt: "2026-03-31T00:05:00.000Z",
     continuationToken: "cont-5",
   });
 });

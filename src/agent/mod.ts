@@ -10,6 +10,10 @@ export type {
   WorkerResponse,
 } from "./worker_protocol.ts";
 export { ContextBuilder } from "./context.ts";
+export {
+  deriveAgentRuntimeCapabilities,
+  formatAgentRuntimeCapabilities,
+} from "./runtime_capabilities.ts";
 export { SkillsLoader } from "./skills.ts";
 export { CronManager } from "./cron.ts";
 export type {
@@ -22,9 +26,10 @@ export type {
   ToolsConfig,
 } from "./types.ts";
 export type {
-  ApprovalReason,
-  ApprovalRequest,
-  ApprovalResponse,
+  AgentPrivilegeElevationScope,
+  AgentRuntimeCapabilities,
+} from "./runtime_capabilities.ts";
+export type {
   ExecPolicy,
   SandboxBackend,
   SandboxExecRequest,

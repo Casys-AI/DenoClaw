@@ -10,6 +10,7 @@ import {
   isAuthorizedBrokerWakeUp,
   resolveBrokerAuthToken,
 } from "./deploy_runtime_auth.ts";
+import { deriveAgentRuntimeCapabilitiesFromEntry } from "../shared/runtime_capabilities.ts";
 
 export interface DeployedAgentRuntimeOptions {
   agentId: string;
@@ -45,7 +46,16 @@ export async function startDeployedAgentRuntime(
   });
 
   const broker = new BrokerClient(agentId, { transport: brokerTransport });
-  runtime = new AgentRuntime(agentId, runtimeConfig, broker, broker);
+  runtime = new AgentRuntime(
+    agentId,
+    runtimeConfig,
+    broker,
+    broker,
+    10,
+    deriveAgentRuntimeCapabilitiesFromEntry(options.entry, undefined, {
+      privilegeElevationSupported: true,
+    }),
+  );
   await runtime.start();
 
   Deno.serve((req) => handleDeployedAgentRequest(req, agentId, runtime));

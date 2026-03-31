@@ -20,17 +20,32 @@ export {
   getSkillsDir,
   truncate,
 } from "./helpers.ts";
+export {
+  AgentRuntimeGrantStore,
+  deriveAgentRuntimeCapabilities,
+  deriveAgentRuntimeCapabilitiesFromEntry,
+  formatAgentRuntimeCapabilities,
+  formatAgentRuntimeGrants,
+} from "./runtime_capabilities.ts";
+export {
+  formatPrivilegeElevationGrantResource,
+  formatPrivilegeElevationGrantResources,
+  formatPrivilegeElevationPrompt,
+  formatPrivilegeElevationScopeLabel,
+  listGrantedPermissions,
+} from "./privilege_elevation.ts";
+export {
+  createPrivilegeElevationRequiredError,
+  normalizeAgentFacingToolResult,
+} from "./tool_result_normalization.ts";
 export type {
   ActiveTaskEntry,
   AgentBrokerPort,
   AgentCanonicalTaskPort,
-  AgentLlmToolPort,
   AgentEntry,
+  AgentLlmToolPort,
   AgentStatusEntry,
   AgentStatusValue,
-  ApprovalReason,
-  ApprovalRequest,
-  ApprovalResponse,
   BrokerEnvelope,
   ChannelRouting,
   ExecPolicy,
@@ -47,3 +62,17 @@ export type {
   ToolDefinition,
   ToolResult,
 } from "./types.ts";
+export type {
+  AgentNetworkMode,
+  AgentPrivilegeElevationScope,
+  AgentRuntimeCapabilities,
+  AgentRuntimeGrant,
+  AgentRuntimePrivilegeElevationGrant,
+  AgentShellExecMode,
+  AgentShellPolicyMode,
+} from "./runtime_capabilities.ts";
+export type {
+  PrivilegeElevationGrant,
+  PrivilegeElevationGrantResource,
+  PrivilegeElevationScope,
+} from "./privilege_elevation.ts";

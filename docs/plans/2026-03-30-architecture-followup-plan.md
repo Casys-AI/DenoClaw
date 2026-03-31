@@ -93,7 +93,112 @@ Reason:
 
 ## Review findings to address
 
+### Immediate blockers that remain valid under ADR-017
+
+- `shell.mode = "direct"` currently over-promises what it prevents
+  - alternate shell entrypoints such as `/bin/sh -c`, `dash -c`, and wrapper
+    forms can still pass current detection
+  - redirection-only syntax is also not fully captured by the current guard
+  - either tighten detection to match the documented contract, or narrow the
+    documented promise
+
+- `AgentRuntimeCapabilities` currently projects the wrong shell model
+  - shell availability is derived from `run` permission only
+  - exec mode is derived from `execPolicy.security`, not from
+    `sandbox.shell.mode`
+  - `sandbox.shell.enabled` is ignored
+  - consequence: the prompt-level planning summary can advertise a shell shape
+    that does not match actual runtime behavior
+  - fix the projection, prompt summary, and capability fingerprint together
+
+- relay trust model must be explicit
+  - current relay execution trusts broker-side preflight and does not reapply
+    the shared exec-policy guard locally
+  - decide one of:
+    - relay is intentionally a trusted broker extension, and document that
+      contract clearly
+    - relay must enforce the same guard locally, and route execution through it
+  - do not keep the current half-state where the design text implies
+    centralization but relay semantics still depend on trust in the caller
+
+- `shell.enabled` consistency should be audited explicitly
+  - current mainline flows do propagate shell config, but there are still
+    low-level paths that instantiate `ShellTool` directly or execute tools
+    without obviously carrying the same shell config surface
+  - audit local no-backend paths, relay-local execution, and any direct
+    `ToolRegistry` / `ShellTool` instantiation paths
+  - decide whether `shell.enabled = false` is guaranteed everywhere, or only on
+    broker/sandbox-governed flows
+  - if the guarantee is universal, add tests and close any remaining holes
+  - if the guarantee is scoped, narrow the user-facing docs accordingly
+
+### ADR-017 migration debt to close explicitly
+
+- legacy command-approval vocabulary still lingers after the privilege elevation
+  migration
+  - `ask`, `askFallback`, and `allowAlways` still appear in config types,
+    defaults, docs, and some tests
+  - the shared backend guard is now static-policy only, so those fields no
+    longer describe the real enforcement path
+  - ADR-017 makes this compatibility residue, not target-state behavior
+  - near-term action:
+    - remove dead command-approval semantics from docs/schema/types where
+      possible
+    - keep only minimal parsing compatibility until final cleanup lands
+
+- explicit elevation-channel availability is still not modeled separately from
+  broker support
+  - today resumability is effectively gated by `privilegeElevation.supported`,
+    not by a separate “operator channel available” signal
+  - if we need a stronger distinction later, add it as a first-class broker
+    capability rather than reintroducing command-approval fallbacks
+
+### Process / verification follow-up
+
+- canonical `deno task test` coverage drifted
+  - `deno task test` now targets `src/` only
+  - `README.md` and `AGENTS.md` still describe it as the default verification
+    bar
+  - resolve this one way or the other:
+    - restore repo-wide default coverage, or
+    - keep the narrower task and update docs/CI expectations consistently
+
 ## Progress snapshot
+
+### Sandbox/runtime hardening started
+
+Current state from the ADR-017-aligned cleanup pass:
+
+- `shell.mode="direct"` is now hardened around a shared
+  `requiresSystemShell(...)` detection path
+- direct mode now rejects more shell-composition forms consistently, including:
+  - wrapper forms such as `env sh -c` and `busybox sh -c`
+  - interpreter path forms such as `/bin/sh -c`
+  - direct redirection syntax in the command string
+- direct mode still allows an explicit interpreter as a normal direct binary
+  when it is not delegating inline shell composition, for example
+  `bash ./script.sh`
+- `AgentRuntimeCapabilities` now separates:
+  - shell execution mode
+  - shell policy mode instead of conflating both into `execPolicy.security`
+- the capability projection now reflects:
+  - `sandbox.shell.enabled`
+  - `sandbox.shell.mode`
+  - a capability fingerprint that changes with shell configuration
+- user-facing shell docs were tightened to match the current direct/system-shell
+  contract more closely
+- verification for this slice is green:
+  - `deno task check`
+  - `deno task lint`
+  - `deno task test`
+
+Remaining work in this slice:
+
+- decide the relay trust model explicitly and encode that contract in docs/code
+- audit whether `shell.enabled = false` is guaranteed on every low-level path or
+  only on broker/sandbox-governed flows
+- decide whether to keep the legacy command-approval compatibility path working
+  end-to-end during migration, or remove it faster under ADR-017
 
 ### Track 1 started
 
@@ -117,9 +222,13 @@ Current migration state:
 
 Remaining work in Track 1:
 
-- introduce an explicit channel route resolver/config for the multi-agent case,
-  because built-in channels (`console`, `telegram`, `webhook`) still do not own
-  route selection themselves
+- encode the decided channel routing policy:
+  - Telegram stays on safe single-owner routing in `1:1`
+  - Discord/shared channels use explicit mention-based routing when multiple
+    bots/agents coexist
+- introduce an explicit channel route resolver/config for the remaining
+  multi-agent cases, because built-in channels still do not own route selection
+  themselves
 - replace the temporary `message.metadata.agentId` compatibility fallback with
   explicit route resolution owned by channel adapters or a dedicated router
 - decide whether the broker HTTP ingress should also interpret route-level model
@@ -154,7 +263,6 @@ Remaining work in Track 2:
 
 ### High priority
 
-- local human ingress still bypasses canonical broker-style task ingress
 - agent declaration state still exists in both workspace and config
 - federation latency aggregation stores unbounded `latencySamples` in KV
 - `/tasks/observations` does not reliably return the most recent entries
@@ -197,12 +305,16 @@ Target outcome:
 - direct `workerPool.send(...)` ingress paths stop being the primary behavior
 - continuation and `INPUT_REQUIRED` semantics are validated through the same
   conceptual boundary in both modes
+- Telegram can stay on simple single-owner routing
+- Discord/shared-channel routing is explicit rather than implicit broadcast
 
 Acceptance:
 
 - local ingress tests cover the same submit/get/continue model as broker ingress
 - no new human ingress path relies on implicit `message.metadata.agentId` beyond
   the temporary compatibility shim tracked above
+- shared-channel multi-agent routing has an explicit UX rule, not an accidental
+  fallback
 
 ### Track 2 — Canonical agent source of truth
 

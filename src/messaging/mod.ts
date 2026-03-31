@@ -1,7 +1,10 @@
 export type {
   ChannelMessage,
   ChannelsConfig,
+  DiscordAccountConfig,
+  DiscordConfig,
   Session,
+  TelegramAccountConfig,
   TelegramConfig,
   WebhookConfig,
 } from "./types.ts";

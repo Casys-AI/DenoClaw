@@ -3,7 +3,17 @@ import type { Task } from "../../messaging/a2a/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
 import type { AgentEntry } from "../../shared/types.ts";
+import { DenoClawError } from "../../shared/errors.ts";
 import { generateId } from "../../shared/helpers.ts";
+import {
+  requireDirectChannelIngressRoute,
+  requireDirectChannelIngressRouteFromPlan,
+} from "../channel_ingress/direct_route.ts";
+import type { DirectChannelIngressRouteInput } from "../channel_ingress/types.ts";
+import {
+  type ChannelRoutePlan,
+  createDirectChannelRoutePlan,
+} from "../channel_routing/types.ts";
 import { createSSEResponse } from "../monitoring.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
@@ -21,10 +31,8 @@ export interface BrokerHttpContext extends BrokerFederationHttpContext {
   submitChannelMessage(
     message: ChannelMessage,
     input: {
-      targetAgent: string;
+      routePlan: ChannelRoutePlan;
       taskId: string;
-      contextId?: string;
-      metadata?: Record<string, unknown>;
     },
   ): Promise<Task>;
   getTask(taskId: string): Promise<Task | null>;
@@ -141,12 +149,10 @@ export async function handleBrokerHttp(
   if (req.method === "POST" && url.pathname === "/ingress/messages") {
     const body = (await req.json().catch(() => null)) as {
       message?: ChannelMessage;
-      route?: {
-        agentId?: string;
-        taskId?: string;
-        contextId?: string;
-        metadata?: Record<string, unknown>;
-      };
+      route?:
+        | (DirectChannelIngressRouteInput & { taskId?: string })
+        | ChannelRoutePlan;
+      taskId?: string;
     } | null;
     const message = body?.message;
     if (!isChannelMessage(message)) {
@@ -161,30 +167,43 @@ export async function handleBrokerHttp(
         { status: 400 },
       );
     }
-    const routeAgentId = body?.route?.agentId ??
-      (
-        typeof message.metadata?.agentId === "string"
-          ? message.metadata.agentId
-          : undefined
-      );
-    if (!routeAgentId) {
+    let routePlan: ChannelRoutePlan;
+    try {
+      routePlan = normalizeBrokerIngressRoutePlan(message, body?.route);
+    } catch (error) {
+      const structured = error instanceof DenoClawError
+        ? error.toStructured()
+        : {
+          code: "CHANNEL_ROUTE_MISSING",
+          recovery: error instanceof Error ? error.message : undefined,
+        };
       return Response.json(
         {
           error: {
-            code: "CHANNEL_ROUTE_MISSING",
-            recovery: "Provide route.agentId or message.metadata.agentId",
+            code: structured.code,
+            ...(structured.context ? { context: structured.context } : {}),
+            recovery: structured.recovery ??
+              "Provide a direct ingress target via route.agentId or message.metadata.agentId",
           },
         },
         { status: 400 },
       );
     }
 
-    const task = await ctx.submitChannelMessage(message, {
-      targetAgent: routeAgentId,
-      taskId: body?.route?.taskId || generateId(),
-      contextId: body?.route?.contextId,
-      metadata: body?.route?.metadata,
-    });
+    let task: Task;
+    try {
+      task = await ctx.submitChannelMessage(message, {
+        routePlan,
+        taskId: body?.taskId ||
+          (hasTaskId(body?.route) ? body?.route.taskId : undefined) ||
+          generateId(),
+      });
+    } catch (error) {
+      return toStructuredBrokerErrorResponse(
+        error,
+        "Submit the ingress route with a valid direct or broadcast plan",
+      );
+    }
     return Response.json({ task });
   }
 
@@ -215,12 +234,19 @@ export async function handleBrokerHttp(
       );
     }
 
-    return Response.json({
-      task: await ctx.continueChannelTask(
-        body.message,
-        decodeURIComponent(ingressContinueMatch[1]),
-      ),
-    });
+    try {
+      return Response.json({
+        task: await ctx.continueChannelTask(
+          body.message,
+          decodeURIComponent(ingressContinueMatch[1]),
+        ),
+      });
+    } catch (error) {
+      return toStructuredBrokerErrorResponse(
+        error,
+        "Resume the task through the same channel session and a supported delivery mode",
+      );
+    }
   }
 
   const federationResponse = await handleBrokerFederationHttpRoute(
@@ -231,6 +257,43 @@ export async function handleBrokerHttp(
   if (federationResponse) return federationResponse;
 
   return new Response("Not Found", { status: 404 });
+}
+
+function normalizeBrokerIngressRoutePlan(
+  message: ChannelMessage,
+  route:
+    | (
+      | (DirectChannelIngressRouteInput & { taskId?: string })
+      | ChannelRoutePlan
+    )
+    | undefined,
+): ChannelRoutePlan {
+  if (!route) {
+    const directRoute = requireDirectChannelIngressRouteFromPlan(message);
+    return createDirectChannelRoutePlan(directRoute.agentId, {
+      ...(directRoute.contextId ? { contextId: directRoute.contextId } : {}),
+      ...(directRoute.metadata ? { metadata: directRoute.metadata } : {}),
+    });
+  }
+  if (isChannelRoutePlan(route)) return route;
+  const directRoute = requireDirectChannelIngressRoute(message, route);
+  return createDirectChannelRoutePlan(directRoute.agentId, {
+    ...(directRoute.contextId ? { contextId: directRoute.contextId } : {}),
+    ...(directRoute.metadata ? { metadata: directRoute.metadata } : {}),
+  });
+}
+
+function isChannelRoutePlan(value: unknown): value is ChannelRoutePlan {
+  if (typeof value !== "object" || value === null) return false;
+  const route = value as Record<string, unknown>;
+  return (route.delivery === "direct" || route.delivery === "broadcast") &&
+    Array.isArray(route.targetAgentIds);
+}
+
+function hasTaskId(
+  value: unknown,
+): value is DirectChannelIngressRouteInput & { taskId?: string } {
+  return typeof value === "object" && value !== null && "taskId" in value;
 }
 
 function isChannelMessage(value: unknown): value is ChannelMessage {
@@ -246,4 +309,24 @@ function isChannelMessage(value: unknown): value is ChannelMessage {
     typeof address === "object" &&
     address !== null &&
     typeof (address as Record<string, unknown>).channelType === "string";
+}
+
+function toStructuredBrokerErrorResponse(
+  error: unknown,
+  fallbackRecovery: string,
+): Response {
+  const structured = error instanceof DenoClawError ? error.toStructured() : {
+    code: "BROKER_INGRESS_ERROR",
+    recovery: error instanceof Error ? error.message : fallbackRecovery,
+  };
+  return Response.json(
+    {
+      error: {
+        code: structured.code,
+        ...(structured.context ? { context: structured.context } : {}),
+        recovery: structured.recovery ?? fallbackRecovery,
+      },
+    },
+    { status: 400 },
+  );
 }

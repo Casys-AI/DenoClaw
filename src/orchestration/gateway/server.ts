@@ -7,14 +7,21 @@ import type { BrokerChannelIngressClient } from "../channel_ingress/mod.ts";
 import type { AuthManager, AuthResult } from "../auth.ts";
 import type { WorkerPool } from "../../agent/worker_pool.ts";
 import type { MetricsCollector } from "../../telemetry/metrics.ts";
-import { TelegramChannel } from "../../messaging/channels/telegram.ts";
+import {
+  DiscordChannel,
+  resolveDiscordChannelConfigs,
+} from "../../messaging/channels/discord.ts";
+import {
+  resolveTelegramChannelConfigs,
+  TelegramChannel,
+} from "../../messaging/channels/telegram.ts";
 import { WebhookChannel } from "../../messaging/channels/webhook.ts";
 import { RateLimiter } from "../rate_limit.ts";
 import { GitHubOAuth } from "../github_oauth.ts";
 import { AgentStore } from "../agent_store.ts";
 import { log } from "../../shared/log.ts";
 import { getChannelTaskResponseText } from "../channel_ingress/mod.ts";
-import { resolveGatewayChannelRoute } from "./channel_routing.ts";
+import { resolveGatewayChannelRoutePlan } from "./channel_routing.ts";
 import {
   type DashboardAuthMode,
   getDashboardAllowedUsers,
@@ -106,10 +113,24 @@ export class Gateway {
     this.wsClients = new Map();
 
     // Register configured channels
-    if (this.config.channels?.telegram?.enabled) {
-      const tg = new TelegramChannel(this.config.channels.telegram);
+    for (
+      const telegramConfig of resolveTelegramChannelConfigs(
+        this.config.channels?.telegram,
+      )
+    ) {
+      const tg = new TelegramChannel(telegramConfig);
       await tg.initialize();
       this.channels.register(tg);
+    }
+
+    for (
+      const discordConfig of resolveDiscordChannelConfigs(
+        this.config.channels?.discord,
+      )
+    ) {
+      const discord = new DiscordChannel(discordConfig);
+      await discord.initialize();
+      this.channels.register(discord);
     }
 
     if (this.config.channels?.webhook?.enabled) {
@@ -161,12 +182,14 @@ export class Gateway {
         msg.sessionId,
         msg.userId,
         msg.channelType,
+        buildGatewaySessionMetadata(msg),
       );
-      const route = resolveGatewayChannelRoute(
+      const routePlan = resolveGatewayChannelRoutePlan(
         msg,
         this.workerPool.getAgentIds(),
+        this.config.channels,
       );
-      const submission = await this.channelIngress.submit(msg, route);
+      const submission = await this.channelIngress.submit(msg, routePlan);
       const content = getChannelTaskResponseText(submission.task) ??
         fallbackGatewayTaskText(submission.task.status.state);
       await this.channels.sendMessage(msg.channelType, {
@@ -255,6 +278,22 @@ export class Gateway {
   isRunning(): boolean {
     return this.running;
   }
+}
+
+function buildGatewaySessionMetadata(
+  msg: ChannelMessage,
+): Record<string, unknown> {
+  return {
+    channel: {
+      channelType: msg.channelType,
+      address: msg.address,
+      ...(typeof msg.metadata?.guildId === "string"
+        ? { guildId: msg.metadata.guildId }
+        : {}),
+      lastMessageAt: msg.timestamp,
+      lastUserId: msg.userId,
+    },
+  };
 }
 
 function fallbackGatewayTaskText(state: string): string {

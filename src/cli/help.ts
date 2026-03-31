@@ -15,6 +15,13 @@ Agents:
   denoclaw agent create <name>  Create an agent
   denoclaw agent delete <name>  Delete an agent
 
+Channels:
+  denoclaw setup channel        Configure Telegram / Discord / webhook transport
+  denoclaw channel route        Create or edit an ingress routing scope
+  denoclaw channel route list   List configured ingress routing scopes
+  denoclaw channel route discover  List observed Telegram/Discord scopes from sessions
+  denoclaw channel route delete Remove a configured ingress routing scope
+
 Advanced:
   denoclaw tunnel [url]         Connect a local tunnel to the broker
 

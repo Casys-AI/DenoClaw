@@ -35,6 +35,10 @@ function createCliDeps(
     runInitWizard: () => Promise.resolve(),
     setupProvider: () => Promise.resolve(),
     setupChannel: () => Promise.resolve(),
+    setupChannelRoute: () => Promise.resolve(),
+    listChannelRoutes: () => Promise.resolve(),
+    deleteChannelRoute: () => Promise.resolve(),
+    discoverChannelRoutes: () => Promise.resolve(),
     setupAgent: () => Promise.resolve(),
     deployBroker: () => Promise.resolve(),
     publishAgent: () => Promise.resolve(),
@@ -96,4 +100,60 @@ Deno.test("runCli forwards --yes to agent delete", async () => {
   await runCli(["agent", "delete", "alice", "--yes"], deps);
 
   assertEquals(receivedYes, true);
+});
+
+Deno.test("runCli dispatches channel route to setupChannelRoute", async () => {
+  let called = false;
+  const deps = createCliDeps({
+    setupChannelRoute: () => {
+      called = true;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["channel", "route"], deps);
+
+  assertEquals(called, true);
+});
+
+Deno.test("runCli dispatches channel route list", async () => {
+  let called = false;
+  const deps = createCliDeps({
+    listChannelRoutes: () => {
+      called = true;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["channel", "route", "list"], deps);
+
+  assertEquals(called, true);
+});
+
+Deno.test("runCli dispatches channel route delete", async () => {
+  let called = false;
+  const deps = createCliDeps({
+    deleteChannelRoute: () => {
+      called = true;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["channel", "route", "delete"], deps);
+
+  assertEquals(called, true);
+});
+
+Deno.test("runCli dispatches channel route discover", async () => {
+  let called = false;
+  const deps = createCliDeps({
+    discoverChannelRoutes: () => {
+      called = true;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["channel", "route", "discover"], deps);
+
+  assertEquals(called, true);
 });

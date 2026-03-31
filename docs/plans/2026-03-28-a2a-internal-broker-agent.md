@@ -54,11 +54,10 @@ Plan written against repository state:
   - broker-backed shell approvals now produce canonical `INPUT_REQUIRED` instead
     of silently bypassing lifecycle truth
 
-- **Approval semantics hardened**
-  - decision: keep one-shot grant model (honest for deployed agent app
-    constraints)
-  - grants now scoped to exact command+binary (security fix)
-  - multiple simultaneous approvals per task via `pendingResumes` record
+- **Privilege-elevation semantics hardened**
+  - decision: keep one-shot/task/session grant scopes
+  - grants remain broker-owned and machine-readable
+  - task/context persistence carries the effective temporary grants
 - **Phase 6 — BrokerClient transport extraction**
   - `BrokerTransport` interface + `KvQueueTransport` extracted
   - `BrokerClient` refactored to accept pluggable transport via DI
@@ -312,8 +311,8 @@ git commit -m "feat: define canonical internal a2a task invariants"
 **Step 2: Add a typed metadata helper** Create a typed structure for the task
 `INPUT_REQUIRED` reason, for example:
 
-- `kind: "approval" | "clarification" | "confirmation"`
-- machine-readable fields for command, binary, prompt, or continuation token
+- `kind: "privilege-elevation" | "clarification" | "confirmation"`
+- machine-readable fields for grants, scope, prompt, or continuation token
 
 **Step 3: Ensure it composes with existing `TaskStatus.message` and `metadata`**
 Do not explode the A2A schema. Keep the extra detail in structured

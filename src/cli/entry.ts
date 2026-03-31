@@ -5,10 +5,14 @@ import { printHelp } from "./help.ts";
 import { humanLog, humanWarn, initCliFlags, outputError } from "./output.ts";
 import { runInitWizard } from "./init.ts";
 import {
+  deleteChannelRoute,
   deployBroker,
+  discoverChannelRoutes,
+  listChannelRoutes,
   publishAgent,
   setupAgent,
   setupChannel,
+  setupChannelRoute,
   setupProvider,
   showStatus,
 } from "./setup/mod.ts";
@@ -25,6 +29,10 @@ export interface CliCommandDeps {
   runInitWizard: typeof runInitWizard;
   setupProvider: typeof setupProvider;
   setupChannel: typeof setupChannel;
+  setupChannelRoute: typeof setupChannelRoute;
+  listChannelRoutes: typeof listChannelRoutes;
+  deleteChannelRoute: typeof deleteChannelRoute;
+  discoverChannelRoutes: typeof discoverChannelRoutes;
   setupAgent: typeof setupAgent;
   deployBroker: typeof deployBroker;
   publishAgent: typeof publishAgent;
@@ -51,6 +59,10 @@ function createCliCommandDeps(): CliCommandDeps {
     runInitWizard,
     setupProvider,
     setupChannel,
+    setupChannelRoute,
+    listChannelRoutes,
+    deleteChannelRoute,
+    discoverChannelRoutes,
     setupAgent,
     deployBroker,
     publishAgent,
@@ -117,11 +129,16 @@ export async function runCli(
         case "channel":
           await deps.setupChannel();
           break;
+        case "channel-route":
+          await deps.setupChannelRoute();
+          break;
         case "agent":
           await deps.setupAgent();
           break;
         default:
-          deps.humanLog("Usage: denoclaw setup [provider|channel|agent]");
+          deps.humanLog(
+            "Usage: denoclaw setup [provider|channel|channel-route|agent]",
+          );
           break;
       }
       return;
@@ -191,6 +208,31 @@ export async function runCli(
       await deps.startAgentRuntime(config, args);
       return;
     }
+
+    case "channel":
+      if (subcommand === "route") {
+        const routeCommand = args._[2] as string | undefined;
+        if (routeCommand === "list") {
+          await deps.listChannelRoutes();
+          return;
+        }
+        if (routeCommand === "delete") {
+          await deps.deleteChannelRoute();
+          return;
+        }
+        if (routeCommand === "discover") {
+          await deps.discoverChannelRoutes();
+          return;
+        }
+        if (routeCommand === undefined) {
+          await deps.setupChannelRoute();
+          return;
+        }
+        deps.humanLog("Usage: denoclaw channel route [list|delete|discover]");
+        return;
+      }
+      deps.humanLog("Usage: denoclaw channel route [list|delete|discover]");
+      return;
 
     case "dev": {
       const config = await deps.getConfig();

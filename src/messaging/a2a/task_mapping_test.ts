@@ -76,6 +76,11 @@ Deno.test("task mapping turns privilege elevation pauses into INPUT_REQUIRED met
     prompt: "Need temporary write access",
     command: "write_file",
     binary: "write_file",
+    pendingTool: {
+      tool: "write_file",
+      args: { path: "note.txt", content: "hello" },
+      toolCallId: "tool-1",
+    },
     continuationToken: "resume-456",
   });
 
@@ -87,6 +92,11 @@ Deno.test("task mapping turns privilege elevation pauses into INPUT_REQUIRED met
     prompt: "Need temporary write access",
     command: "write_file",
     binary: "write_file",
+    pendingTool: {
+      tool: "write_file",
+      args: { path: "note.txt", content: "hello" },
+      toolCallId: "tool-1",
+    },
     continuationToken: "resume-456",
   });
 });

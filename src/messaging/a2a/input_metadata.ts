@@ -20,6 +20,11 @@ export interface PrivilegeElevationAwaitedInput {
   prompt?: string;
   command?: string;
   binary?: string;
+  pendingTool?: {
+    tool: string;
+    args: Record<string, unknown>;
+    toolCallId?: string;
+  };
   expiresAt?: string;
   continuationToken?: string;
 }
@@ -66,6 +71,29 @@ export function getAwaitedInputMetadata(
 ): AwaitedInputMetadata | undefined {
   const value = source.metadata?.[AWAITED_INPUT_METADATA_KEY];
   return isAwaitedInputMetadata(value) ? value : undefined;
+}
+
+export function getAwaitedPrivilegeElevationPendingTool(
+  source: Pick<TaskStatus, "metadata">,
+): PrivilegeElevationAwaitedInput["pendingTool"] | undefined {
+  const awaitedInput = getAwaitedInputMetadata(source);
+  if (awaitedInput?.kind !== "privilege-elevation") return undefined;
+  const pendingTool = awaitedInput.pendingTool;
+  if (!isRecord(pendingTool) || typeof pendingTool.tool !== "string") {
+    return undefined;
+  }
+  if (!isRecord(pendingTool.args)) return undefined;
+  if (
+    pendingTool.toolCallId !== undefined &&
+    typeof pendingTool.toolCallId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    tool: pendingTool.tool,
+    args: pendingTool.args,
+    ...(pendingTool.toolCallId ? { toolCallId: pendingTool.toolCallId } : {}),
+  };
 }
 
 export function createResumePayloadMetadata(

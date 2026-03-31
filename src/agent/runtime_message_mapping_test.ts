@@ -203,3 +203,34 @@ Deno.test("extractApprovedPrivilegeElevationGrant rebuilds a runtime grant from 
   assertEquals(grant?.grants, [{ permission: "write", paths: ["note.txt"] }]);
   assertEquals(grant?.source, "broker-resume");
 });
+
+Deno.test("extractApprovedPrivilegeElevationGrant falls back to awaited grants when resume grants are omitted", () => {
+  const grant = extractApprovedPrivilegeElevationGrant(
+    {
+      status: {
+        metadata: {
+          awaitedInput: {
+            kind: "privilege-elevation",
+            grants: [{ permission: "write", paths: ["note.txt"] }],
+            scope: "session",
+            prompt: "Need write access",
+          },
+        },
+      },
+    },
+    {
+      metadata: {
+        resume: {
+          kind: "privilege-elevation",
+          approved: true,
+          scope: "session",
+        },
+      },
+    },
+  );
+
+  assertEquals(grant?.kind, "privilege-elevation");
+  assertEquals(grant?.scope, "session");
+  assertEquals(grant?.grants, [{ permission: "write", paths: ["note.txt"] }]);
+  assertEquals(grant?.source, "broker-resume");
+});

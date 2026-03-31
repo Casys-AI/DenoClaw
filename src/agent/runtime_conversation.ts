@@ -6,7 +6,6 @@ import {
 import { transitionTask } from "../messaging/a2a/internal_contract.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import { log } from "../shared/log.ts";
-import { formatPrivilegeElevationGrantResources } from "../shared/privilege_elevation.ts";
 import type { AgentLlmToolPort, ToolDefinition } from "../shared/types.ts";
 import type { ContextBuilder } from "./context.ts";
 import type { MemoryPort } from "./memory_port.ts";
@@ -43,7 +42,9 @@ export async function executeAgentConversation(
     await input.reportTaskResult(canonicalTask);
   }
 
-  await input.memory.addMessage({ role: "user", content: input.inputText });
+  if (input.inputText.trim().length > 0) {
+    await input.memory.addMessage({ role: "user", content: input.inputText });
+  }
 
   try {
     let iteration = 0;
@@ -100,14 +101,6 @@ export async function executeAgentConversation(
 
           const privilegePause = extractRuntimePrivilegeElevationPause(result);
           if (privilegePause) {
-            await input.memory.addMessage({
-              role: "tool",
-              content: `Privilege elevation required: ${
-                formatPrivilegeElevationGrantResources(privilegePause.grants)
-              }`,
-              name: tc.function.name,
-              tool_call_id: tc.id,
-            });
             await input.reportTaskResult(
               mapPrivilegeElevationPauseToInputRequiredTask(canonicalTask, {
                 grants: privilegePause.grants,
@@ -115,6 +108,11 @@ export async function executeAgentConversation(
                 prompt: privilegePause.prompt,
                 command: privilegePause.command,
                 binary: privilegePause.binary,
+                pendingTool: {
+                  tool: tc.function.name,
+                  args,
+                  toolCallId: tc.id,
+                },
                 expiresAt: privilegePause.expiresAt,
               }),
             );

@@ -20,6 +20,8 @@ type BrokerTaskPortStub = AgentLlmToolPort & AgentCanonicalTaskPort<Task> & {
   reportedTasks: Task[];
   currentTask: Task | null;
   lastExecCorrelation?: { taskId?: string; contextId?: string };
+  lastExecTool?: string;
+  lastExecArgs?: Record<string, unknown>;
   lastTools?: ToolDefinition[];
   getTask(taskId: string): Promise<Task | null>;
   reportTaskResult(task: Task): Promise<Task>;
@@ -81,10 +83,12 @@ function createBrokerStub(responseText = "done"): BrokerTaskPortStub {
       return Promise.resolve({ content: responseText });
     },
     execTool(
-      _tool: string,
-      _args: Record<string, unknown>,
+      tool: string,
+      args: Record<string, unknown>,
       correlation?: { taskId?: string; contextId?: string },
     ): Promise<ToolResult> {
+      this.lastExecTool = tool;
+      this.lastExecArgs = args;
       this.lastExecCorrelation = correlation;
       return Promise.reject(
         new Error("execTool should not be called in this test"),
@@ -313,7 +317,6 @@ Deno.test("AgentRuntime handles broker privilege-elevation resumes by rebuilding
         resume: {
           kind: "privilege-elevation",
           approved: true,
-          grants: [{ permission: "write", paths: ["note.txt"] }],
           scope: "task",
         },
       },
@@ -404,6 +407,7 @@ Deno.test("AgentRuntime turns broker privilege elevation requirements into canon
       prompt?: string;
       command?: string;
       binary?: string;
+      pendingTool?: unknown;
     }
     | undefined;
   assertEquals(awaitedInput?.kind, "privilege-elevation");
@@ -417,9 +421,145 @@ Deno.test("AgentRuntime turns broker privilege elevation requirements into canon
   );
   assertEquals(awaitedInput?.command, "write_file");
   assertEquals(awaitedInput?.binary, "write_file");
+  assertEquals(awaitedInput?.pendingTool, {
+    tool: "write_file",
+    args: {
+      path: "note.txt",
+      content: "hello",
+    },
+    toolCallId: "tool-privilege",
+  });
   assertEquals(broker.lastExecCorrelation, {
     taskId: "task-privilege-pause",
     contextId: "ctx-privilege-pause",
+  });
+  assertEquals(memory.getMessages().length, 2);
+  assertEquals(memory.getMessages()[0]?.role, "user");
+  assertEquals(memory.getMessages()[1]?.role, "assistant");
+});
+
+Deno.test("AgentRuntime auto-retries a pending privileged tool after grant approval", async () => {
+  const broker = createBrokerStub("write completed");
+  broker.currentTask = {
+    id: "task-continue-pending-tool",
+    contextId: "ctx-continue-pending-tool",
+    status: {
+      state: "INPUT_REQUIRED",
+      timestamp: new Date().toISOString(),
+      metadata: {
+        awaitedInput: {
+          kind: "privilege-elevation",
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          scope: "task",
+          prompt: "Need temporary write access",
+          pendingTool: {
+            tool: "write_file",
+            args: {
+              path: "note.txt",
+              content: "hello",
+            },
+            toolCallId: "tool-retry-1",
+          },
+        },
+      },
+    },
+    artifacts: [],
+    history: [
+      {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Write note.txt" }],
+      },
+    ],
+  };
+  broker.execTool = (tool, args, correlation) => {
+    broker.lastExecTool = tool;
+    broker.lastExecArgs = args;
+    broker.lastExecCorrelation = correlation;
+    return Promise.resolve({
+      success: true,
+      output: "Written 5 chars to note.txt",
+    });
+  };
+
+  const memory = new MemoryStub();
+  memory.messages = [
+    { role: "user", content: "Write note.txt" },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "tool-retry-1",
+          type: "function",
+          function: {
+            name: "write_file",
+            arguments: JSON.stringify({
+              path: "note.txt",
+              content: "hello",
+            }),
+          },
+        },
+      ],
+    },
+  ];
+  const runtime = createRuntime(broker, memory);
+  const runtimeAny = runtime as unknown as {
+    handleTaskContinueMessage(msg: RuntimeTaskContinueMessage): Promise<void>;
+  };
+
+  await runtimeAny.handleTaskContinueMessage({
+    id: "msg-privilege-auto-retry",
+    from: "agent-alpha",
+    to: "agent-beta",
+    type: "task_continue",
+    timestamp: new Date().toISOString(),
+    payload: {
+      taskId: "task-continue-pending-tool",
+      continuationMessage: {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [{ kind: "text", text: "Grant write and continue" }],
+      },
+      metadata: {
+        resume: {
+          kind: "privilege-elevation",
+          approved: true,
+          grants: [{ permission: "write", paths: ["note.txt"] }],
+          scope: "task",
+        },
+      },
+    },
+  });
+
+  assertEquals(broker.lastExecTool, "write_file");
+  assertEquals(broker.lastExecArgs, {
+    path: "note.txt",
+    content: "hello",
+  });
+  assertEquals(broker.lastExecCorrelation, {
+    taskId: "task-continue-pending-tool",
+    contextId: "ctx-continue-pending-tool",
+  });
+  assertEquals(broker.reportedTasks.map((task) => task.status.state), [
+    "WORKING",
+    "COMPLETED",
+  ]);
+  assertEquals(memory.getMessages().map((message) => message.role), [
+    "user",
+    "assistant",
+    "tool",
+    "assistant",
+  ]);
+  assertEquals(memory.getMessages()[2], {
+    role: "tool",
+    content: "Written 5 chars to note.txt",
+    name: "write_file",
+    tool_call_id: "tool-retry-1",
+  });
+  assertEquals(broker.reportedTasks[1]?.artifacts[0]?.parts[0], {
+    kind: "text",
+    text: "write completed",
   });
 });
 

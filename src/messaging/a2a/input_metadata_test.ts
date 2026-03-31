@@ -2,6 +2,7 @@ import {
   createAwaitedInputMetadata,
   createResumePayloadMetadata,
   getAwaitedInputMetadata,
+  getAwaitedPrivilegeElevationPendingTool,
   getResumePayloadMetadata,
 } from "./input_metadata.ts";
 import { assertEquals } from "@std/assert";
@@ -56,6 +57,11 @@ Deno.test("createAwaitedInputMetadata supports privilege elevation requests", ()
     command: "git clone https://github.com/example/repo",
     binary: "git",
     prompt: "Grant temporary privileges?",
+    pendingTool: {
+      tool: "git",
+      args: { repo: "example/repo" },
+      toolCallId: "call-1",
+    },
     expiresAt: "2026-03-31T00:05:00.000Z",
     continuationToken: "cont-elev-1",
   });
@@ -76,8 +82,32 @@ Deno.test("createAwaitedInputMetadata supports privilege elevation requests", ()
     command: "git clone https://github.com/example/repo",
     binary: "git",
     prompt: "Grant temporary privileges?",
+    pendingTool: {
+      tool: "git",
+      args: { repo: "example/repo" },
+      toolCallId: "call-1",
+    },
     expiresAt: "2026-03-31T00:05:00.000Z",
     continuationToken: "cont-elev-1",
+  });
+});
+
+Deno.test("getAwaitedPrivilegeElevationPendingTool extracts the suspended tool call", () => {
+  const metadata = createAwaitedInputMetadata({
+    kind: "privilege-elevation",
+    grants: [{ permission: "write", paths: ["note.txt"] }],
+    scope: "task",
+    pendingTool: {
+      tool: "write_file",
+      args: { path: "note.txt", content: "hello" },
+      toolCallId: "tool-1",
+    },
+  });
+
+  assertEquals(getAwaitedPrivilegeElevationPendingTool({ metadata }), {
+    tool: "write_file",
+    args: { path: "note.txt", content: "hello" },
+    toolCallId: "tool-1",
   });
 });
 

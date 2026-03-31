@@ -38,6 +38,11 @@ export interface PrivilegeElevationPauseInput {
   prompt?: string;
   command?: string;
   binary?: string;
+  pendingTool?: {
+    tool: string;
+    args: Record<string, unknown>;
+    toolCallId?: string;
+  };
   expiresAt?: string;
   continuationToken?: string;
 }
@@ -129,6 +134,9 @@ export function mapPrivilegeElevationPauseToInputRequiredTask(
         ? { command: elevation.command }
         : {}),
       ...(elevation.binary !== undefined ? { binary: elevation.binary } : {}),
+      ...(elevation.pendingTool !== undefined
+        ? { pendingTool: elevation.pendingTool }
+        : {}),
       ...(elevation.expiresAt !== undefined
         ? { expiresAt: elevation.expiresAt }
         : {}),

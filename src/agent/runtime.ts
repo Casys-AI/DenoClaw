@@ -35,6 +35,15 @@ import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import { AgentRuntimeGrantStore } from "./runtime_capabilities.ts";
 import type { ToolDefinition } from "../shared/types.ts";
 import { createBrokerBackedRuntimeToolDefinitions } from "./runtime_tool_definitions.ts";
+import {
+  getAwaitedPrivilegeElevationPendingTool,
+} from "../messaging/a2a/input_metadata.ts";
+import {
+  mapPrivilegeElevationPauseToInputRequiredTask,
+} from "../messaging/a2a/task_mapping.ts";
+import {
+  extractRuntimePrivilegeElevationPause,
+} from "./runtime_message_mapping.ts";
 
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
@@ -207,8 +216,6 @@ export class AgentRuntime {
     });
     resumed.history = [...existing.history, continuationMessage];
     await this.reportCanonicalTaskResult(resumed);
-
-    const inputText = extractRuntimeTaskText(continuationMessage);
     const runtimeGrantStore = new AgentRuntimeGrantStore();
     const approvedPrivilegeGrant = extractApprovedPrivilegeElevationGrant(
       existing,
@@ -222,6 +229,74 @@ export class AgentRuntime {
         grantedAt: approvedPrivilegeGrant.grantedAt,
       });
     }
+    const pendingTool = approvedPrivilegeGrant
+      ? getAwaitedPrivilegeElevationPendingTool(existing.status)
+      : undefined;
+    const memory = await this.getMemory(`agent:${msg.from}:${this.agentId}`);
+
+    if (approvedPrivilegeGrant && pendingTool) {
+      log.info(
+        `Canonical continuation received from ${msg.from}: auto-retrying pending tool ${pendingTool.tool}`,
+      );
+      const result = await this.llmToolPort.execTool(
+        pendingTool.tool,
+        pendingTool.args,
+        {
+          taskId: resumed.id,
+          contextId: resumed.contextId,
+        },
+      );
+      const privilegePause = extractRuntimePrivilegeElevationPause(result);
+      if (privilegePause) {
+        await this.reportCanonicalTaskResult(
+          mapPrivilegeElevationPauseToInputRequiredTask(resumed, {
+            grants: privilegePause.grants,
+            scope: privilegePause.scope,
+            prompt: privilegePause.prompt,
+            command: privilegePause.command,
+            binary: privilegePause.binary,
+            pendingTool,
+            expiresAt: privilegePause.expiresAt,
+          }),
+        );
+        log.info(
+          `Canonical task paused again in INPUT_REQUIRED for privilege elevation (${msg.from})`,
+        );
+        return;
+      }
+
+      await memory.addMessage({
+        role: "tool",
+        content: result.success
+          ? result.output
+          : `Error [${result.error?.code}]: ${
+            JSON.stringify(result.error?.context)
+          }\nRecovery: ${result.error?.recovery ?? "none"}`,
+        name: pendingTool.tool,
+        ...(pendingTool.toolCallId
+          ? { tool_call_id: pendingTool.toolCallId }
+          : {}),
+      });
+
+      await executeAgentConversation({
+        config: this.config,
+        llmToolPort: this.llmToolPort,
+        tools: this.toolDefinitions,
+        context: this.context,
+        skills: this.skills,
+        memory,
+        fromAgentId: msg.from,
+        inputText: "",
+        canonicalTask: resumed,
+        getRuntimeGrants: () => runtimeGrantStore.list(),
+        reportWorkingTransition: false,
+        maxIterations: this.maxIterations,
+        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+      });
+      return;
+    }
+
+    const inputText = extractRuntimeTaskText(continuationMessage);
     log.info(
       `Canonical continuation received from ${msg.from}: ${
         inputText.slice(0, 100)
@@ -234,7 +309,7 @@ export class AgentRuntime {
       tools: this.toolDefinitions,
       context: this.context,
       skills: this.skills,
-      memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),
+      memory,
       fromAgentId: msg.from,
       inputText,
       canonicalTask: resumed,

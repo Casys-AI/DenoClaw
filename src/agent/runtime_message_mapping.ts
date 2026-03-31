@@ -33,19 +33,21 @@ export function extractApprovedPrivilegeElevationGrant(
     : undefined;
   if (
     !resume || resume.kind !== "privilege-elevation" ||
-    resume.approved !== true ||
-    !Array.isArray(resume.grants)
+    resume.approved !== true
   ) {
     return null;
   }
 
   const awaitedInput = getAwaitedInputMetadata(task.status);
   if (!awaitedInput || awaitedInput.kind !== "privilege-elevation") return null;
+  const grants = Array.isArray(resume.grants) && resume.grants.length > 0
+    ? resume.grants
+    : awaitedInput.grants;
 
   return {
     kind: "privilege-elevation",
     scope: resume.scope ?? awaitedInput.scope,
-    grants: resume.grants.length > 0 ? resume.grants : awaitedInput.grants,
+    grants,
     grantedAt: new Date().toISOString(),
     source: "broker-resume",
   };

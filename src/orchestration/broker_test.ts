@@ -22,6 +22,11 @@ import {
 import type { Config } from "../config/types.ts";
 import type { BrokerMessage } from "./types.ts";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import {
+  createBroadcastChannelRoutePlan,
+  createDirectChannelRoutePlan,
+} from "./channel_routing/types.ts";
+import type { BrokerTaskMetadata } from "./broker/persistence.ts";
 
 function createConfig(): Config {
   return {
@@ -40,6 +45,10 @@ function createMessage(text: string): A2AMessage {
     role: "user",
     parts: [{ kind: "text", text }],
   };
+}
+
+function bodyBrokerMetadata(task: Task): BrokerTaskMetadata {
+  return (task.metadata?.broker ?? {}) as BrokerTaskMetadata;
 }
 
 async function seedPeerPolicy(
@@ -1002,7 +1011,7 @@ Deno.test(
           },
         },
         {
-          targetAgent: "agent-alpha",
+          routePlan: createDirectChannelRoutePlan("agent-alpha"),
           taskId: "parent-channel-task",
         },
       );
@@ -1196,7 +1205,7 @@ Deno.test(
           },
         },
         {
-          targetAgent: "agent-beta",
+          routePlan: createDirectChannelRoutePlan("agent-beta"),
           taskId: "channel-elevation-task",
         },
       );
@@ -1290,7 +1299,7 @@ Deno.test(
           },
         },
         {
-          targetAgent: "agent-alpha",
+          routePlan: createDirectChannelRoutePlan("agent-alpha"),
           taskId: "channel-parent-task",
         },
       );
@@ -1393,7 +1402,7 @@ Deno.test(
           },
         },
         {
-          targetAgent: "agent-alpha",
+          routePlan: createDirectChannelRoutePlan("agent-alpha"),
           taskId: "channel-parent-mismatch-task",
         },
       );
@@ -1459,7 +1468,7 @@ Deno.test(
           },
         },
         {
-          targetAgent: "agent-alpha",
+          routePlan: createDirectChannelRoutePlan("agent-alpha"),
           taskId: "channel-parent-task",
         },
       );
@@ -3219,7 +3228,9 @@ Deno.test(
       assertEquals(body.task.contextId, "telegram-123");
       assertEquals(body.task.metadata?.broker, {
         submittedBy: "channel:telegram",
+        delivery: "direct",
         targetAgent: "agent-beta",
+        targetAgentIds: ["agent-beta"],
         request: {
           channelMessage: {
             username: "alice",
@@ -3255,6 +3266,397 @@ Deno.test(
         Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
       }
       await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer /ingress/messages accepts a direct route plan payload",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
+
+    try {
+      const forwardedPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "task_submit" && message.to === "agent-beta",
+      );
+
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/ingress/messages", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer ingress-secret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              id: "telegram-msg-plan-1",
+              sessionId: "telegram-plan-123",
+              userId: "123",
+              content: "Bonjour broker plan",
+              channelType: "telegram",
+              timestamp: new Date().toISOString(),
+              address: {
+                channelType: "telegram",
+                userId: "123",
+                roomId: "123",
+              },
+            },
+            route: {
+              delivery: "direct",
+              targetAgentIds: ["agent-beta"],
+              primaryAgentId: "agent-beta",
+              metadata: {
+                source: "route-plan",
+              },
+            },
+            taskId: "channel-task-plan-1",
+          }),
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { task: Task };
+      assertEquals(body.task.id, "channel-task-plan-1");
+      assertEquals(body.task.contextId, "telegram-plan-123");
+      assertEquals(body.task.metadata?.broker, {
+        submittedBy: "channel:telegram",
+        delivery: "direct",
+        targetAgent: "agent-beta",
+        targetAgentIds: ["agent-beta"],
+        request: {
+          ingress: {
+            source: "route-plan",
+          },
+        },
+        channel: {
+          channelType: "telegram",
+          sessionId: "telegram-plan-123",
+          userId: "123",
+          address: {
+            channelType: "telegram",
+            userId: "123",
+            roomId: "123",
+          },
+        },
+      });
+
+      const forwarded = (await forwardedPromise) as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
+      assertEquals(forwarded.payload.targetAgent, "agent-beta");
+      assertEquals(forwarded.from, "channel:telegram");
+      const forwardedMetadata = forwarded.payload.metadata as {
+        source?: string;
+        channel?: {
+          channelType?: string;
+          sessionId?: string;
+          userId?: string;
+          address?: Record<string, unknown>;
+          timestamp?: string;
+        };
+      };
+      assertEquals(forwardedMetadata.source, "route-plan");
+      assertEquals(forwardedMetadata.channel?.channelType, "telegram");
+      assertEquals(forwardedMetadata.channel?.sessionId, "telegram-plan-123");
+      assertEquals(forwardedMetadata.channel?.userId, "123");
+      assertEquals(forwardedMetadata.channel?.address, {
+        channelType: "telegram",
+        userId: "123",
+        roomId: "123",
+      });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer /ingress/messages accepts broadcast route plan payloads and fans out agent tasks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
+
+    try {
+      const messages = createQueueCollector(kv);
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/ingress/messages", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer ingress-secret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            message: {
+              id: "telegram-msg-plan-broadcast-1",
+              sessionId: "telegram-plan-broadcast-123",
+              userId: "123",
+              content: "Bonjour broker broadcast",
+              channelType: "telegram",
+              timestamp: new Date().toISOString(),
+              address: {
+                channelType: "telegram",
+                userId: "123",
+                roomId: "123",
+              },
+            },
+            route: {
+              delivery: "broadcast",
+              targetAgentIds: ["agent-alpha", "agent-beta"],
+            },
+            taskId: "channel-task-plan-broadcast-1",
+          }),
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { task: Task };
+      assertEquals(body.task.id, "channel-task-plan-broadcast-1");
+      assertEquals(body.task.contextId, "telegram-plan-broadcast-123");
+      assertEquals(body.task.metadata?.broker, {
+        submittedBy: "channel:telegram",
+        delivery: "broadcast",
+        targetAgentIds: ["agent-alpha", "agent-beta"],
+        channel: {
+          channelType: "telegram",
+          sessionId: "telegram-plan-broadcast-123",
+          userId: "123",
+          address: {
+            channelType: "telegram",
+            userId: "123",
+            roomId: "123",
+          },
+        },
+        shared: {
+          agentTasks: [
+            {
+              agentId: "agent-alpha",
+              taskId: "channel-task-plan-broadcast-1:1:agent-alpha",
+              state: "SUBMITTED",
+            },
+            {
+              agentId: "agent-beta",
+              taskId: "channel-task-plan-broadcast-1:2:agent-beta",
+              state: "SUBMITTED",
+            },
+          ],
+        },
+      });
+      assertEquals(body.task.metadata?.broadcast, {
+        delivery: "broadcast",
+        targetAgentIds: ["agent-alpha", "agent-beta"],
+        agentTasks: [
+          {
+            agentId: "agent-alpha",
+            agentTaskId: "channel-task-plan-broadcast-1:1:agent-alpha",
+            state: "SUBMITTED",
+          },
+          {
+            agentId: "agent-beta",
+            agentTaskId: "channel-task-plan-broadcast-1:2:agent-beta",
+            state: "SUBMITTED",
+          },
+        ],
+      });
+
+      const alphaForwarded = (await waitForCollectedMessage(
+        messages,
+        (message) =>
+          message.type === "task_submit" && message.to === "agent-alpha",
+      )) as Extract<BrokerMessage, { type: "task_submit" }>;
+      const betaForwarded = (await waitForCollectedMessage(
+        messages,
+        (message) =>
+          message.type === "task_submit" && message.to === "agent-beta",
+      )) as Extract<BrokerMessage, { type: "task_submit" }>;
+      assertEquals(
+        alphaForwarded.payload.taskId,
+        "channel-task-plan-broadcast-1:1:agent-alpha",
+      );
+      assertEquals(
+        betaForwarded.payload.taskId,
+        "channel-task-plan-broadcast-1:2:agent-beta",
+      );
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer.recordTaskResult aggregates broadcast agent task results onto the shared ingress task",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const broker = new BrokerServer(createConfig(), {
+        kv,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordAgentMessage: async () => {} } as any,
+      });
+
+      const sharedTask = await broker.submitChannelMessage(
+        {
+          id: "discord-msg-1",
+          sessionId: "discord-room-1",
+          userId: "user-1",
+          content: "shared prompt",
+          channelType: "discord",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "discord",
+            roomId: "room-1",
+            userId: "user-1",
+          },
+        },
+        {
+          routePlan: createBroadcastChannelRoutePlan([
+            "agent-alpha",
+            "agent-beta",
+          ]),
+          taskId: "broadcast-task-1",
+        },
+      );
+
+      const agentTaskRefs = bodyBrokerMetadata(sharedTask).shared?.agentTasks ??
+        [];
+      assertEquals(
+        agentTaskRefs.map((agentTask) => agentTask.taskId),
+        [
+          "broadcast-task-1:1:agent-alpha",
+          "broadcast-task-1:2:agent-beta",
+        ],
+      );
+
+      const alphaTask = await broker.getTask({
+        taskId: agentTaskRefs[0].taskId,
+      });
+      const betaTask = await broker.getTask({
+        taskId: agentTaskRefs[1].taskId,
+      });
+      assertExists(alphaTask);
+      assertExists(betaTask);
+
+      const alphaRecorded = await broker.recordTaskResult("agent-alpha", {
+        task: {
+          ...alphaTask,
+          status: {
+            state: "COMPLETED",
+            timestamp: new Date().toISOString(),
+            message: {
+              messageId: crypto.randomUUID(),
+              role: "agent",
+              parts: [{ kind: "text", text: "Alpha done" }],
+            },
+          },
+          artifacts: [
+            {
+              artifactId: `${alphaTask.id}:result`,
+              name: "result",
+              parts: [{ kind: "text", text: "Alpha done" }],
+            },
+          ],
+        },
+      });
+      assertExists(alphaRecorded);
+      assertEquals(alphaRecorded?.id, "broadcast-task-1:1:agent-alpha");
+
+      const sharedTaskWhileBetaPending = await broker.getTask({
+        taskId: "broadcast-task-1",
+      });
+      assertExists(sharedTaskWhileBetaPending);
+      assertEquals(sharedTaskWhileBetaPending?.status.state, "WORKING");
+
+      await broker.recordTaskResult("agent-beta", {
+        task: {
+          ...betaTask,
+          status: {
+            state: "REJECTED",
+            timestamp: new Date().toISOString(),
+            message: {
+              messageId: crypto.randomUUID(),
+              role: "agent",
+              parts: [{ kind: "text", text: "Beta refused" }],
+            },
+          },
+        },
+      });
+
+      const completedSharedTask = await broker.getTask({
+        taskId: "broadcast-task-1",
+      });
+      assertExists(completedSharedTask);
+      assertEquals(completedSharedTask?.status.state, "COMPLETED");
+      assertEquals(completedSharedTask?.metadata?.broadcast, {
+        delivery: "broadcast",
+        targetAgentIds: ["agent-alpha", "agent-beta"],
+        agentTasks: [
+          {
+            agentId: "agent-alpha",
+            agentTaskId: "broadcast-task-1:1:agent-alpha",
+            state: "COMPLETED",
+          },
+          {
+            agentId: "agent-beta",
+            agentTaskId: "broadcast-task-1:2:agent-beta",
+            state: "REJECTED",
+          },
+        ],
+      });
+      assertEquals(
+        completedSharedTask?.artifacts.at(-1)?.parts[0],
+        {
+          kind: "text",
+          text: "[agent-alpha] Alpha done\n\n[agent-beta] Beta refused",
+        },
+      );
+
+      await broker.stop();
+    } finally {
       kv.close();
       await Deno.remove(kvPath);
     }
@@ -3300,7 +3702,7 @@ Deno.test(
       const submitted = await broker.submitChannelMessage(
         initialMessage,
         {
-          targetAgent: "agent-beta",
+          routePlan: createDirectChannelRoutePlan("agent-beta"),
           taskId: "channel-task-2",
         },
       );
@@ -3353,6 +3755,159 @@ Deno.test(
       });
     } finally {
       globalThis.fetch = originalFetch;
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer /ingress/tasks/:id/continue fans out continuation to paused broadcast agent tasks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "ingress-secret");
+
+    try {
+      const sharedTask = await broker.submitChannelMessage(
+        {
+          id: "discord-msg-continue-1",
+          sessionId: "discord-session-continue-1",
+          userId: "user-1",
+          content: "shared prompt",
+          channelType: "discord",
+          timestamp: new Date().toISOString(),
+          address: {
+            channelType: "discord",
+            roomId: "room-continue-1",
+            userId: "user-1",
+          },
+        },
+        {
+          routePlan: createBroadcastChannelRoutePlan([
+            "agent-alpha",
+            "agent-beta",
+          ]),
+          taskId: "broadcast-continue-task-1",
+        },
+      );
+
+      const agentTaskRefs = bodyBrokerMetadata(sharedTask).shared?.agentTasks ??
+        [];
+      const pausedAgentTask = await broker.getTask({
+        taskId: agentTaskRefs[0].taskId,
+      });
+      assertExists(pausedAgentTask);
+
+      await broker.recordTaskResult("agent-alpha", {
+        task: {
+          ...pausedAgentTask,
+          status: {
+            state: "INPUT_REQUIRED",
+            timestamp: new Date().toISOString(),
+            metadata: createAwaitedInputMetadata({
+              kind: "privilege-elevation",
+              grants: [{ permission: "write", paths: ["note.txt"] }],
+              scope: "once",
+              prompt: "approve alpha?",
+              command: "git status",
+              binary: "git",
+            }),
+          },
+        },
+      });
+
+      const forwardedPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "task_continue" &&
+          message.to === "agent-alpha" &&
+          message.payload.taskId === agentTaskRefs[0].taskId,
+      );
+
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request(
+          "http://localhost/ingress/tasks/broadcast-continue-task-1/continue",
+          {
+            method: "POST",
+            headers: {
+              authorization: "Bearer ingress-secret",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              message: {
+                id: "discord-msg-continue-2",
+                sessionId: "discord-session-continue-1",
+                userId: "user-1",
+                content: "continue",
+                channelType: "discord",
+                timestamp: new Date().toISOString(),
+                address: {
+                  channelType: "discord",
+                  roomId: "room-continue-1",
+                  userId: "user-1",
+                },
+                metadata: {
+                  resume: { kind: "privilege-elevation", approved: true },
+                },
+              },
+            }),
+          },
+        ),
+      );
+
+      assertEquals(res.status, 200);
+      const body = await res.json() as { task: Task };
+      assertEquals(body.task.id, "broadcast-continue-task-1");
+      assertEquals(body.task.status.state, "INPUT_REQUIRED");
+
+      const forwarded = (await forwardedPromise) as Extract<
+        BrokerMessage,
+        { type: "task_continue" }
+      >;
+      assertEquals(forwarded.from, "channel:discord");
+      assertEquals(forwarded.payload.taskId, agentTaskRefs[0].taskId);
+      assertEquals(forwarded.payload.continuationMessage?.parts[0], {
+        kind: "text",
+        text: "continue",
+      });
+      assertEquals(forwarded.payload.metadata, {
+        resume: { kind: "privilege-elevation", approved: true },
+      });
+
+      const updatedPausedAgentTask = await broker.getTask({
+        taskId: agentTaskRefs[0].taskId,
+      });
+      assertExists(updatedPausedAgentTask);
+      const privilegeGrants = bodyBrokerMetadata(updatedPausedAgentTask)
+        .privilegeElevationGrants ?? [];
+      const grantedResume = privilegeGrants[0];
+      assertExists(grantedResume);
+      assertEquals(grantedResume.kind, "privilege-elevation");
+      assertEquals(grantedResume.scope, "once");
+      assertEquals(grantedResume.grants, [
+        { permission: "write", paths: ["note.txt"] },
+      ]);
+      assertEquals(grantedResume.source, "broker-resume");
+      assertEquals(typeof grantedResume.grantedAt, "string");
+    } finally {
       if (previousStaticToken === undefined) {
         Deno.env.delete("DENOCLAW_API_TOKEN");
       } else {

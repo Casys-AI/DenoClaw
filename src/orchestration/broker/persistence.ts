@@ -1,4 +1,5 @@
 import type { Task } from "../../messaging/a2a/types.ts";
+import type { TaskState } from "../../messaging/a2a/types.ts";
 import type { ChannelAddress } from "../../messaging/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import {
@@ -7,14 +8,21 @@ import {
   type PrivilegeElevationGrant,
 } from "../../shared/privilege_elevation.ts";
 import type { AgentEntry } from "../../shared/types.ts";
+import type { ChannelDeliveryMode } from "../channel_routing/types.ts";
 
 export interface BrokerTaskMetadata {
   submittedBy?: string;
+  delivery?: ChannelDeliveryMode;
   targetAgent?: string;
+  // Delegation lineage between broker/A2A tasks.
   parentTaskId?: string;
+  // Shared human-ingress grouping for explicit broadcast routes.
+  targetAgentIds?: string[];
+  sharedTaskId?: string;
   request?: Record<string, unknown>;
   privilegeElevationGrants?: PrivilegeElevationGrant[];
   channel?: BrokerTaskChannelMetadata;
+  shared?: BrokerSharedTaskMetadata;
 }
 
 export interface BrokerTaskChannelMetadata {
@@ -22,6 +30,16 @@ export interface BrokerTaskChannelMetadata {
   sessionId: string;
   userId: string;
   address: ChannelAddress;
+}
+
+export interface BrokerSharedTaskMetadata {
+  agentTasks: BrokerAgentTaskRef[];
+}
+
+export interface BrokerAgentTaskRef {
+  agentId: string;
+  taskId: string;
+  state: TaskState;
 }
 
 export interface BrokerTaskPersistenceDeps {

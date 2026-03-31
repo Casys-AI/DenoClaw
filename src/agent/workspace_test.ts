@@ -127,3 +127,38 @@ Deno.test({
   }),
   ...testOpts,
 });
+
+Deno.test({
+  name:
+    "WorkspaceLoader.load strips legacy channel routing fields from agent.json",
+  fn: withTempAgentsDir(async () => {
+    const id = `test-ws-legacy-${crypto.randomUUID().slice(0, 8)}`;
+    try {
+      await WorkspaceLoader.create(id, {
+        sandbox: { allowedPermissions: ["read"] },
+      });
+
+      await Deno.writeTextFile(
+        getAgentConfigPath(id),
+        JSON.stringify(
+          {
+            model: "test/model",
+            sandbox: { allowedPermissions: ["read"] },
+            channels: ["telegram"],
+            channelRouting: "broadcast",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const ws = await WorkspaceLoader.load(id);
+      assertEquals(ws?.entry.model, "test/model");
+      assertEquals("channels" in (ws?.entry ?? {}), false);
+      assertEquals("channelRouting" in (ws?.entry ?? {}), false);
+    } finally {
+      await WorkspaceLoader.delete(id);
+    }
+  }),
+  ...testOpts,
+});

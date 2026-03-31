@@ -233,9 +233,34 @@ Deno.test({
 
     assertEquals(payload, {
       type: "chat",
-      agentId: "agent-alpha",
       sessionId: "session-1",
       message: "hello",
+      routePlan: {
+        delivery: "direct",
+        targetAgentIds: ["agent-alpha"],
+        primaryAgentId: "agent-alpha",
+      },
+    });
+  },
+});
+
+Deno.test({
+  name: "parseGatewayWsChatPayload — accepts shared broadcast payload",
+  fn() {
+    const payload = parseGatewayWsChatPayload(JSON.stringify({
+      type: "chat",
+      agentIds: ["agent-alpha", "agent-beta"],
+      delivery: "broadcast",
+      message: "hello",
+    }));
+
+    assertEquals(payload, {
+      type: "chat",
+      message: "hello",
+      routePlan: {
+        delivery: "broadcast",
+        targetAgentIds: ["agent-alpha", "agent-beta"],
+      },
     });
   },
 });
@@ -268,7 +293,6 @@ Deno.test({
       try {
         parseGatewayWsChatPayload(JSON.stringify({
           type: "chat",
-          agentId: "agent-alpha",
           message: "",
         }));
       } catch (error) {
@@ -282,7 +306,6 @@ Deno.test({
       try {
         parseGatewayWsChatPayload(JSON.stringify({
           type: "chat",
-          agentId: "agent-alpha",
           message: "ok",
           sessionId: 42,
         }));

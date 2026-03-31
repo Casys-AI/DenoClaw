@@ -1,11 +1,13 @@
 import type { SessionManager } from "../../messaging/session.ts";
 import type { BrokerChannelIngressClient } from "../channel_ingress/mod.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 import {
   createChannelIngressMessage,
   getChannelTaskResponseText,
 } from "../channel_ingress/mod.ts";
+import { resolveGatewayInteractiveRoutePlan } from "./interactive_route.ts";
 
 export const GATEWAY_WS_IDLE_TIMEOUT_SECONDS = 30;
 const GATEWAY_WS_MAX_BUFFERED_AMOUNT = 1_000_000;
@@ -13,8 +15,8 @@ const GATEWAY_WS_MAX_BUFFERED_AMOUNT = 1_000_000;
 export interface GatewayWsChatPayload {
   type: "chat";
   message: string;
-  agentId: string;
   sessionId?: string;
+  routePlan: ChannelRoutePlan;
 }
 
 export function parseGatewayWsChatPayload(raw: string): GatewayWsChatPayload {
@@ -46,15 +48,6 @@ export function parseGatewayWsChatPayload(raw: string): GatewayWsChatPayload {
     );
   }
   if (
-    typeof record.agentId !== "string" || record.agentId.trim().length === 0
-  ) {
-    throw new DenoClawError(
-      "INVALID_INPUT",
-      { field: "agentId" },
-      "Provide a non-empty 'agentId' in the message",
-    );
-  }
-  if (
     typeof record.message !== "string" || record.message.trim().length === 0
   ) {
     throw new DenoClawError(
@@ -73,9 +66,9 @@ export function parseGatewayWsChatPayload(raw: string): GatewayWsChatPayload {
 
   return {
     type: "chat",
-    agentId: record.agentId,
     message: record.message,
     ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+    routePlan: resolveGatewayInteractiveRoutePlan(record),
   };
 }
 
@@ -143,7 +136,7 @@ export function handleGatewayWebSocketUpgrade(
           content: data.message,
           address: { roomId: token },
         }),
-        { agentId: data.agentId },
+        data.routePlan,
       );
       sendGatewayWsJson(socket, {
         type: "response",

@@ -17,11 +17,11 @@ agents at runtime.
 
 ### What triggers a reload
 
-| Change                  | Effect                                                          |
-| ----------------------- | --------------------------------------------------------------- |
-| `agent.json` modified   | Reload runtime config (peers, acceptFrom, execPolicy, channels) |
-| New agent directory     | Spawn new worker via `WorkerPool.addAgent()`                    |
-| Agent directory deleted | Graceful shutdown of worker                                     |
+| Change                  | Effect                                                |
+| ----------------------- | ----------------------------------------------------- |
+| `agent.json` modified   | Reload runtime config (peers, acceptFrom, execPolicy) |
+| New agent directory     | Spawn new worker via `WorkerPool.addAgent()`          |
+| Agent directory deleted | Graceful shutdown of worker                           |
 
 ### What does NOT trigger a reload
 
@@ -71,7 +71,6 @@ window per agent to avoid redundant reloads.
 
 - `peers`, `acceptFrom` — checked at routing time, not cached in worker
 - `execPolicy` — checked at tool execution time
-- `channels`, `channelRouting` — reassigned in ChannelManager
 
 **Requires worker restart** (identity change — destroy + recreate worker):
 

@@ -221,15 +221,15 @@ Current migration state:
 
 Remaining work in Track 1:
 
-- encode the decided channel routing policy:
-  - Telegram stays on safe single-owner routing in `1:1`
-  - Discord/shared channels use explicit mention-based routing when multiple
-    bots/agents coexist
-- introduce an explicit channel route resolver/config for the remaining
-  multi-agent cases, because built-in channels still do not own route selection
-  themselves
+- introduce an explicit ingress routing policy layer for the multi-agent case,
+  because built-in channels own transport but should not own higher-level route
+  selection themselves
+- stop treating “one message -> one owner” as a universal invariant:
+  - Telegram can stay `direct`
+  - shared Discord scopes may legitimately be `broadcast`
+- move routing policy out of agent-local config and into ingress-scope policy
 - replace the temporary `message.metadata.agentId` compatibility fallback with
-  explicit route resolution owned by channel adapters or a dedicated router
+  explicit route resolution owned by an ingress router
 - decide whether the broker HTTP ingress should also interpret route-level model
   metadata, or whether model override remains a strictly local concern
 - add at least one higher-level smoke path that exercises channel submit then
@@ -304,8 +304,9 @@ Target outcome:
 - direct `workerPool.send(...)` ingress paths stop being the primary behavior
 - continuation and `INPUT_REQUIRED` semantics are validated through the same
   conceptual boundary in both modes
-- Telegram can stay on simple single-owner routing
-- Discord/shared-channel routing is explicit rather than implicit broadcast
+- Telegram can stay on simple `direct` ingress
+- shared-channel routing is explicit instead of being faked through a single
+  universal owner rule
 
 Acceptance:
 

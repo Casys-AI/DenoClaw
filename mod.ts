@@ -136,7 +136,6 @@ export type {
   AgentBrokerPort,
   AgentEntry,
   BrokerEnvelope,
-  ChannelRouting,
   LLMResponse,
   Message,
   MessageRole,

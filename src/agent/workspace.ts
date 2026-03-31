@@ -142,6 +142,9 @@ export class WorkspaceLoader {
         "agent.json requires sandbox.allowedPermissions array",
       );
     }
-    return obj as unknown as AgentEntry;
+    const normalized: Record<string, unknown> = { ...obj };
+    delete normalized.channels;
+    delete normalized.channelRouting;
+    return normalized as unknown as AgentEntry;
   }
 }

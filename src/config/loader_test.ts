@@ -180,6 +180,236 @@ Deno.test({
   sanitizeOps: false,
 });
 
+Deno.test({
+  name: "loadConfig rejects legacy telegram root fields outside accounts[]",
+  async fn() {
+    const tmpDir = await Deno.makeTempDir();
+    const originalHome = Deno.env.get("HOME");
+    Deno.env.set("HOME", tmpDir);
+
+    try {
+      const configDir = `${tmpDir}/.denoclaw`;
+      const configPath = `${configDir}/config.json`;
+      await Deno.mkdir(configDir, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        JSON.stringify({
+          providers: {},
+          agents: {
+            defaults: {
+              model: "anthropic/claude-sonnet-4-6",
+              temperature: 0.7,
+              maxTokens: 4096,
+            },
+          },
+          tools: { restrictToWorkspace: false },
+          channels: {
+            telegram: {
+              enabled: true,
+              tokenEnvVar: "TG_PRIMARY_TOKEN",
+              allowFrom: ["123", "456"],
+            },
+          },
+        }),
+      );
+
+      await assertRejects(
+        () => loadConfig(),
+        ConfigError,
+        "Move Telegram bot settings under channels.telegram.accounts[]",
+      );
+    } finally {
+      if (originalHome) Deno.env.set("HOME", originalHome);
+      else Deno.env.delete("HOME");
+      await Deno.remove(tmpDir, { recursive: true });
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "getConfigOrDefault does not swallow invalid channel config",
+  async fn() {
+    const tmpDir = await Deno.makeTempDir();
+    const originalHome = Deno.env.get("HOME");
+    Deno.env.set("HOME", tmpDir);
+
+    try {
+      const configDir = `${tmpDir}/.denoclaw`;
+      const configPath = `${configDir}/config.json`;
+      await Deno.mkdir(configDir, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        JSON.stringify({
+          providers: {},
+          agents: {
+            defaults: {
+              model: "anthropic/claude-sonnet-4-6",
+              temperature: 0.7,
+              maxTokens: 4096,
+            },
+          },
+          tools: { restrictToWorkspace: false },
+          channels: {
+            telegram: {
+              enabled: true,
+              tokenEnvVar: "TG_PRIMARY_TOKEN",
+            },
+          },
+        }),
+      );
+
+      await assertRejects(
+        () => getConfigOrDefault(),
+        ConfigError,
+        "Move Telegram bot settings under channels.telegram.accounts[]",
+      );
+    } finally {
+      if (originalHome) Deno.env.set("HOME", originalHome);
+      else Deno.env.delete("HOME");
+      await Deno.remove(tmpDir, { recursive: true });
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "loadConfig and saveConfig preserve canonical telegram accounts[]",
+  async fn() {
+    const tmpDir = await Deno.makeTempDir();
+    const originalHome = Deno.env.get("HOME");
+    Deno.env.set("HOME", tmpDir);
+
+    try {
+      const config = createDefaultConfig();
+      config.channels.telegram = {
+        enabled: true,
+        accounts: [
+          {
+            accountId: "support-bot",
+            tokenEnvVar: "TG_SUPPORT_TOKEN",
+            allowFrom: ["123", "456"],
+          },
+        ],
+      };
+
+      await saveConfig(config);
+
+      const loaded = await loadConfig();
+      assertEquals(loaded.channels.telegram, {
+        enabled: true,
+        accounts: [
+          {
+            accountId: "support-bot",
+            tokenEnvVar: "TG_SUPPORT_TOKEN",
+            allowFrom: ["123", "456"],
+          },
+        ],
+      });
+    } finally {
+      if (originalHome) Deno.env.set("HOME", originalHome);
+      else Deno.env.delete("HOME");
+      await Deno.remove(tmpDir, { recursive: true });
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "loadConfig and saveConfig preserve canonical discord accounts[]",
+  async fn() {
+    const tmpDir = await Deno.makeTempDir();
+    const originalHome = Deno.env.get("HOME");
+    Deno.env.set("HOME", tmpDir);
+
+    try {
+      const config = createDefaultConfig();
+      config.channels.discord = {
+        enabled: true,
+        accounts: [
+          {
+            accountId: "ops-bot",
+            tokenEnvVar: "DISCORD_OPS_TOKEN",
+            allowFrom: ["123", "456"],
+          },
+        ],
+      };
+
+      await saveConfig(config);
+
+      const loaded = await loadConfig();
+      assertEquals(loaded.channels.discord, {
+        enabled: true,
+        accounts: [
+          {
+            accountId: "ops-bot",
+            tokenEnvVar: "DISCORD_OPS_TOKEN",
+            allowFrom: ["123", "456"],
+          },
+        ],
+      });
+    } finally {
+      if (originalHome) Deno.env.set("HOME", originalHome);
+      else Deno.env.delete("HOME");
+      await Deno.remove(tmpDir, { recursive: true });
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name:
+    "loadConfig strips legacy agent channel routing fields from registry entries",
+  async fn() {
+    const tmpDir = await Deno.makeTempDir();
+    const originalHome = Deno.env.get("HOME");
+    Deno.env.set("HOME", tmpDir);
+
+    try {
+      const configDir = `${tmpDir}/.denoclaw`;
+      const configPath = `${configDir}/config.json`;
+      await Deno.mkdir(configDir, { recursive: true });
+      await Deno.writeTextFile(
+        configPath,
+        JSON.stringify({
+          providers: {},
+          agents: {
+            defaults: {
+              model: "anthropic/claude-sonnet-4-6",
+              temperature: 0.7,
+              maxTokens: 4096,
+            },
+            registry: {
+              legacy: {
+                sandbox: { allowedPermissions: ["read"] },
+                channels: ["telegram"],
+                channelRouting: "broadcast",
+              },
+            },
+          },
+          tools: { restrictToWorkspace: false },
+          channels: {},
+        }),
+      );
+
+      const loaded = await loadConfig();
+      assertEquals(loaded.agents.registry?.legacy, {
+        sandbox: { allowedPermissions: ["read"] },
+      });
+    } finally {
+      if (originalHome) Deno.env.set("HOME", originalHome);
+      else Deno.env.delete("HOME");
+      await Deno.remove(tmpDir, { recursive: true });
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
 Deno.test("env vars override config providers", async () => {
   const tmpDir = await Deno.makeTempDir();
   const originalHome = Deno.env.get("HOME");

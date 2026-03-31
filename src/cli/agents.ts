@@ -1,8 +1,4 @@
-import type {
-  AgentEntry,
-  ChannelRouting,
-  SandboxPermission,
-} from "../shared/types.ts";
+import type { AgentEntry, SandboxPermission } from "../shared/types.ts";
 import {
   getConfigOrDefault,
   getPersistedConfigOrDefault,
@@ -31,7 +27,6 @@ export async function listAgents(): Promise<void> {
     const perms = agent.sandbox?.allowedPermissions?.join(",") || "defaults";
     const peers = agent.peers?.join(",") || "none";
     const accept = agent.acceptFrom?.join(",") || "none";
-    const channels = agent.channels?.join(",") || "none";
 
     print(
       `  ${name}${agent.description ? ` — ${agent.description}` : ""}${
@@ -42,7 +37,6 @@ export async function listAgents(): Promise<void> {
     print(`    Sandbox  : [${perms}]`);
     print(`    Peers    : [${peers}]     (can send to)`);
     print(`    Accept   : [${accept}]    (accepts from)`);
-    print(`    Channels : [${channels}]`);
     print("");
   }
 }
@@ -95,8 +89,6 @@ export async function createAgent(
   let permissions: string[];
   let peers: string[] = [];
   let acceptFrom: string[] = [];
-  let channels: string[] = [];
-  let channelRouting: ChannelRouting = "direct";
 
   if (interactive) {
     print("\n── Identity ──\n");
@@ -152,33 +144,6 @@ export async function createAgent(
         "  No other agents yet. You can configure peers later.",
       );
     }
-
-    print("\n── Channels ──\n");
-    const enabledChannels = Object.entries(config.channels)
-      .filter(([_, ch]) => ch && "enabled" in ch && ch.enabled)
-      .map(([n]) => n);
-    if (enabledChannels.length > 0) {
-      print(`  Active channels: ${enabledChannels.join(", ")}`);
-      const chInput = await ask(
-        "Assign to which channels (comma-separated, empty = none)",
-      );
-      channels = chInput ? chInput.split(",").map((s) => s.trim()) : [];
-      if (channels.length > 0) {
-        const routeChoice = await choose("Routing mode", [
-          "direct      — this agent receives all messages",
-          "by-intent   — a coordinator routes by intent",
-          "round-robin — alternates with other agents on the same channel",
-          "broadcast   — receives a copy of every message",
-        ]);
-        channelRouting = routeChoice.split("—")[0].trim().split(
-          /\s+/,
-        )[0] as ChannelRouting;
-      }
-    } else {
-      print(
-        "  No channels configured. Run 'denoclaw setup channel' first.",
-      );
-    }
   } else {
     description = opts?.description;
     model = opts?.model;
@@ -198,8 +163,6 @@ export async function createAgent(
     sandbox: { allowedPermissions: permissions as SandboxPermission[] },
     peers: peers.length > 0 ? peers : undefined,
     acceptFrom: acceptFrom.length > 0 ? acceptFrom : undefined,
-    channels: channels.length > 0 ? channels : undefined,
-    channelRouting: channels.length > 0 ? channelRouting : undefined,
   };
 
   await WorkspaceLoader.create(agentName, entry, systemPrompt);

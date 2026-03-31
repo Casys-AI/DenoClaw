@@ -45,6 +45,7 @@ import {
 } from "../../shared/deploy_credentials.ts";
 import { BrokerMessageRuntime } from "./message_runtime.ts";
 import { BrokerSandboxManager } from "./sandbox_manager.ts";
+import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -306,10 +307,8 @@ export class BrokerServer {
   async submitChannelMessage(
     message: ChannelMessage,
     input: {
-      targetAgent: string;
+      routePlan: ChannelRoutePlan;
       taskId: string;
-      contextId?: string;
-      metadata?: Record<string, unknown>;
     },
   ): Promise<Task> {
     return await this.taskDispatcher.submitChannelTask(message, input);

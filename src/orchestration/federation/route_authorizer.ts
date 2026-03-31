@@ -1,10 +1,7 @@
+import type { FederationDiscoveryPort, FederationPolicyPort } from "./ports.ts";
 import type {
-  FederationDiscoveryPort,
-  FederationPolicyPort,
-} from "./ports.ts";
-import type {
-  FederationAuthorizationDecision,
   FederatedRoutePolicy,
+  FederationAuthorizationDecision,
 } from "./types.ts";
 import { buildCorrelationContext } from "./correlation.ts";
 import type { FederationObservabilityRecorder } from "./observability_recorder.ts";
@@ -81,11 +78,10 @@ export class FederationRouteAuthorizer {
       linkId: `${input.requesterBrokerId}:${input.remoteBrokerId}`,
       traceId: input.traceId,
     });
-    const requesterPolicy =
-      (await this.deps.policy.getRoutePolicy(
-        input.requesterBrokerId,
-        correlation,
-      )) ?? DEFAULT_POLICY;
+    const requesterPolicy = (await this.deps.policy.getRoutePolicy(
+      input.requesterBrokerId,
+      correlation,
+    )) ?? DEFAULT_POLICY;
     const remotePolicy = await this.deps.policy.getRoutePolicy(
       input.remoteBrokerId,
       correlation,

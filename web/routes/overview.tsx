@@ -27,8 +27,8 @@ import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { AlertStrip } from "../components/AlertStrip.tsx";
 import type {
   AgentMetrics,
-  FederationLinkStats,
   AgentStatusEntry,
+  FederationLinkStats,
   MetricsSummary,
   TaskObservationEntry,
 } from "../lib/types.ts";
@@ -198,11 +198,11 @@ export default function Overview({ data }: { data: OverviewData }) {
       : `dead-letter: ${
         formatCompact(federationDeadLetters)
       } · partial coverage`;
-  const federationRefusalTotal =
-    federationDenials.policy + federationDenials.auth;
-  const federationRefusalText = `${formatCompact(federationDenials.policy)} policy · ${
-    formatCompact(federationDenials.auth)
-  } auth${
+  const federationRefusalTotal = federationDenials.policy +
+    federationDenials.auth;
+  const federationRefusalText = `${
+    formatCompact(federationDenials.policy)
+  } policy · ${formatCompact(federationDenials.auth)} auth${
     federationDenials.notFound > 0
       ? ` · ${formatCompact(federationDenials.notFound)} not found`
       : ""
@@ -314,7 +314,9 @@ export default function Overview({ data }: { data: OverviewData }) {
               : "unavailable"}
           </div>
           <div class="stat-desc">
-            {hasFederation ? federationRefusalText : "stats endpoint unavailable"}
+            {hasFederation
+              ? federationRefusalText
+              : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">

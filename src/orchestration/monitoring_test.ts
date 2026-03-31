@@ -4,7 +4,10 @@ import {
   createSSEResponse,
   kvEntryToDashboardEvent,
 } from "./monitoring.ts";
-import type { AgentStatusValue, TaskObservationEntry } from "./monitoring_types.ts";
+import type {
+  AgentStatusValue,
+  TaskObservationEntry,
+} from "./monitoring_types.ts";
 
 // ── buildWatchKeys ─────────────────────────────────────────
 

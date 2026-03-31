@@ -395,7 +395,9 @@ Deno.test(
       for await (const entry of kv.list({ prefix: ["federation", "events"] })) {
         await kv.delete(entry.key);
       }
-      for await (const entry of kv.list({ prefix: ["federation", "denials"] })) {
+      for await (
+        const entry of kv.list({ prefix: ["federation", "denials"] })
+      ) {
         await kv.delete(entry.key);
       }
       for await (

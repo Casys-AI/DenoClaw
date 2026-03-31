@@ -78,7 +78,10 @@ export async function handleBrokerAgentSocketUpgrade(
             await ctx.agentRegistry.saveAgentConfig(raw.agentId, raw.config);
           }
           if (raw.endpoint) {
-            await ctx.agentRegistry.saveAgentEndpoint(raw.agentId, raw.endpoint);
+            await ctx.agentRegistry.saveAgentEndpoint(
+              raw.agentId,
+              raw.endpoint,
+            );
           }
 
           socket.send(

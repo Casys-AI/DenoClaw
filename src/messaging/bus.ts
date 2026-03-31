@@ -113,7 +113,10 @@ export class MessageBus {
     try {
       await handler(message);
     } catch (e) {
-      log.error(`Bus handler error (channel: ${message.channelType}, msg: ${message.id})`, e);
+      log.error(
+        `Bus handler error (channel: ${message.channelType}, msg: ${message.id})`,
+        e,
+      );
     }
   }
 

@@ -187,7 +187,9 @@ export class KvdexMemory implements MemoryPort {
         timestamp: new Date().toISOString(),
       };
       await db.longTermFacts.add(doc);
-      log.debug(`Remembered fact [${fact.topic}]: ${fact.content.slice(0, 80)}`);
+      log.debug(
+        `Remembered fact [${fact.topic}]: ${fact.content.slice(0, 80)}`,
+      );
     } catch (e) {
       log.error(`Failed to remember (${fact.topic})`, e);
     }

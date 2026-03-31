@@ -121,7 +121,9 @@ export class WorkspaceLoader {
     agentId: string,
     parsed: unknown,
   ): AgentEntry {
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+    ) {
       throw new DenoClawError(
         "INVALID_AGENT_CONFIG",
         { agentId },

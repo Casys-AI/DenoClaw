@@ -118,9 +118,7 @@ export function getDashboardAuthMode(): DashboardAuthMode {
   const explicitMode = Deno.env.get("DENOCLAW_DASHBOARD_AUTH_MODE");
   if (explicitMode) return normalizeAuthMode(explicitMode);
 
-  return Deno.env.get("DENO_DEPLOYMENT_ID")
-    ? "github-oauth"
-    : "local-open";
+  return Deno.env.get("DENO_DEPLOYMENT_ID") ? "github-oauth" : "local-open";
 }
 
 export function getDashboardAllowedUsers(): string[] | undefined {
@@ -132,7 +130,9 @@ export function getDashboardAllowedUsers(): string[] | undefined {
   return users.length > 0 ? users : undefined;
 }
 
-export function getDashboardRequestConfig(req: Request): DashboardRequestConfig {
+export function getDashboardRequestConfig(
+  req: Request,
+): DashboardRequestConfig {
   const url = new URL(req.url);
   const basePath = getDashboardBasePath(url.pathname);
   const authMode = getDashboardAuthMode();

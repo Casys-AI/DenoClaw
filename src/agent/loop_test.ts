@@ -13,7 +13,7 @@ import type {
 import type { AgentResponse } from "./types.ts";
 import { BaseTool } from "./tools/registry.ts";
 import { ProviderManager } from "../llm/manager.ts";
-import { TraceWriter, type TraceCorrelationIds } from "../telemetry/traces.ts";
+import { type TraceCorrelationIds, TraceWriter } from "../telemetry/traces.ts";
 
 // Minimal AgentLoopConfig with no providers configured — enough to construct a loop
 const minimalConfig = {
@@ -83,14 +83,34 @@ class FakeMemory implements MemoryPort {
     return Promise.resolve();
   }
 
-  remember(fact: { topic: string; content: string; source?: "user" | "agent" | "tool"; confidence?: number }): Promise<void> {
+  remember(
+    fact: {
+      topic: string;
+      content: string;
+      source?: "user" | "agent" | "tool";
+      confidence?: number;
+    },
+  ): Promise<void> {
     const existing = this.#facts.get(fact.topic) ?? [];
-    existing.push({ content: fact.content, timestamp: new Date().toISOString() });
+    existing.push({
+      content: fact.content,
+      timestamp: new Date().toISOString(),
+    });
     this.#facts.set(fact.topic, existing);
     return Promise.resolve();
   }
 
-  recall(topic: string): Promise<{ topic: string; content: string; source?: "user" | "agent" | "tool"; confidence?: number; timestamp: string }[]> {
+  recall(
+    topic: string,
+  ): Promise<
+    {
+      topic: string;
+      content: string;
+      source?: "user" | "agent" | "tool";
+      confidence?: number;
+      timestamp: string;
+    }[]
+  > {
     return Promise.resolve(
       (this.#facts.get(topic) ?? []).map((fact) => ({
         topic,
@@ -111,7 +131,9 @@ class FakeMemory implements MemoryPort {
 }
 
 class RecordingTraceWriter extends TraceWriter {
-  startedWith: Array<{ agentId: string; sessionId: string; ids: TraceCorrelationIds }> = [];
+  startedWith: Array<
+    { agentId: string; sessionId: string; ids: TraceCorrelationIds }
+  > = [];
   iterationIds: TraceCorrelationIds[] = [];
 
   constructor() {
@@ -260,8 +282,8 @@ Deno.test({
   fn() {
     const loop = new AgentLoop("session-interface", minimalConfig);
     const loopPort: AgentLoopLike = loop;
-    const processMessage: (message: string) => Promise<AgentResponse> =
-      loopPort.processMessage.bind(loopPort);
+    const processMessage: (message: string) => Promise<AgentResponse> = loopPort
+      .processMessage.bind(loopPort);
 
     assertEquals(typeof processMessage, "function");
 

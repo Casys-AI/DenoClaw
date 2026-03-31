@@ -1,9 +1,9 @@
 import type { BrokerTaskSubmitPayload } from "../types.ts";
+import type { FederationDeliveryPort, FederationRoutingPort } from "./ports.ts";
 import type {
-  FederationDeliveryPort,
-  FederationRoutingPort,
-} from "./ports.ts";
-import type { FederatedSubmissionRecord, FederationDeadLetter } from "./types.ts";
+  FederatedSubmissionRecord,
+  FederationDeadLetter,
+} from "./types.ts";
 import { canonicalJson, sha256Base64Url } from "./crypto.ts";
 import { buildCorrelationContext } from "./correlation.ts";
 import type { FederationObservabilityRecorder } from "./observability_recorder.ts";

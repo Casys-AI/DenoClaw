@@ -29,7 +29,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "GitHubOAuth.verifySession — returns null when cookie does not contain session cookie",
+  name:
+    "GitHubOAuth.verifySession — returns null when cookie does not contain session cookie",
   async fn() {
     const kv = await Deno.openKv(await Deno.makeTempFile({ suffix: ".db" }));
     const oauth = new GitHubOAuth(kv);
@@ -122,7 +123,8 @@ Deno.test({
 });
 
 Deno.test({
-  name: "GitHubOAuth.verifySession — handles multiple cookies, extracts correct one",
+  name:
+    "GitHubOAuth.verifySession — handles multiple cookies, extracts correct one",
   async fn() {
     const kv = await Deno.openKv(await Deno.makeTempFile({ suffix: ".db" }));
     const oauth = new GitHubOAuth(kv);

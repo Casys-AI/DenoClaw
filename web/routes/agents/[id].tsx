@@ -1,9 +1,6 @@
 import { page } from "@fresh/core";
 import type { FreshContext } from "@fresh/core";
-import {
-  getAgent,
-  getAgentMetrics,
-} from "../../lib/api-client.ts";
+import { getAgent, getAgentMetrics } from "../../lib/api-client.ts";
 import {
   getDashboardRequestConfig,
   requireDashboardSession,

@@ -39,12 +39,14 @@ function buildReplayAlert(status: string | null): ReplayAlert | null {
     case "deduplicated":
       return {
         tone: "success",
-        message: "Dead-letter replay resolved as an already-settled submission.",
+        message:
+          "Dead-letter replay resolved as an already-settled submission.",
       };
     case "dead_letter":
       return {
         tone: "warning",
-        message: "Dead-letter replay ran, but the submission returned to dead-letter.",
+        message:
+          "Dead-letter replay ran, but the submission returned to dead-letter.",
       };
     case "missing":
       return {
@@ -227,7 +229,9 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
               hasFederation ? "text-error" : "text-warning text-base"
             }`}
           >
-            {hasFederation ? formatCompact(federationRefusalTotal) : "unavailable"}
+            {hasFederation
+              ? formatCompact(federationRefusalTotal)
+              : "unavailable"}
           </div>
           <div class="stat-desc">
             {federationRefusalText}
@@ -275,7 +279,9 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                       <td class="font-data text-neutral-content">
                         {formatCompact(link.denials.notFound)}
                       </td>
-                      <td class="font-data">{formatLatency(link.p95LatencyMs)}</td>
+                      <td class="font-data">
+                        {formatLatency(link.p95LatencyMs)}
+                      </td>
                       <td>
                         {link.lastTraceId
                           ? (
@@ -296,7 +302,11 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                               )}
                             </div>
                           )
-                          : <span class="text-xs text-neutral-content">none</span>}
+                          : (
+                            <span class="text-xs text-neutral-content">
+                              none
+                            </span>
+                          )}
                       </td>
                       <td class="text-xs text-neutral-content">
                         {link.lastOccurredAt
@@ -371,7 +381,9 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                             </div>
                           </div>
                         </td>
-                        <td class="font-data">{formatCompact(entry.attempts)}</td>
+                        <td class="font-data">
+                          {formatCompact(entry.attempts)}
+                        </td>
                         <td
                           class="max-w-md text-xs text-neutral-content"
                           title={entry.reason}
@@ -393,7 +405,10 @@ export default function Tunnels({ data }: { data: TunnelsData }) {
                               name="deadLetterId"
                               value={entry.deadLetterId}
                             />
-                            <button class="btn btn-sm btn-primary" type="submit">
+                            <button
+                              class="btn btn-sm btn-primary"
+                              type="submit"
+                            >
                               Replay
                             </button>
                           </form>

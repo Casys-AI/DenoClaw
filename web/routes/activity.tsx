@@ -27,7 +27,11 @@ export const handler = {
       token: config.token,
     });
     const latestFederationLink = selectLatestFederationLink(federation);
-    return page({ brokerUrl: config.brokerUrl, federation, latestFederationLink });
+    return page({
+      brokerUrl: config.brokerUrl,
+      federation,
+      latestFederationLink,
+    });
   },
 };
 
@@ -47,11 +51,11 @@ export default function Activity({
     ...(federation?.links.map((link) => link.p95LatencyMs) ?? []),
   );
   const federationDenials = getFederationDenialTotals(federation);
-  const federationRefusalTotal =
-    federationDenials.policy + federationDenials.auth;
-  const federationRefusalText = `${formatCompact(federationDenials.policy)} policy · ${
-    formatCompact(federationDenials.auth)
-  } auth${
+  const federationRefusalTotal = federationDenials.policy +
+    federationDenials.auth;
+  const federationRefusalText = `${
+    formatCompact(federationDenials.policy)
+  } policy · ${formatCompact(federationDenials.auth)} auth${
     federationDenials.notFound > 0
       ? ` · ${formatCompact(federationDenials.notFound)} not found`
       : ""
@@ -100,7 +104,9 @@ export default function Activity({
           </div>
           <div class="stat-desc">
             {hasFederation
-              ? `dead-letter: ${formatCompact(federation?.deadLetterBacklog ?? 0)}`
+              ? `dead-letter: ${
+                formatCompact(federation?.deadLetterBacklog ?? 0)
+              }`
               : "stats endpoint unavailable"}
           </div>
         </div>
@@ -116,7 +122,9 @@ export default function Activity({
               : "unavailable"}
           </div>
           <div class="stat-desc">
-            {hasFederation ? federationRefusalText : "stats endpoint unavailable"}
+            {hasFederation
+              ? federationRefusalText
+              : "stats endpoint unavailable"}
           </div>
         </div>
         <div class="stat">

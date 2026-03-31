@@ -2,9 +2,26 @@ import type { A2AMessage, Artifact, Task, TaskState } from "./types.ts";
 import { TERMINAL_STATES } from "./types.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 
-export const ALLOWED_TASK_STATE_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  SUBMITTED: ["WORKING", "INPUT_REQUIRED", "COMPLETED", "FAILED", "REJECTED", "CANCELED"],
-  WORKING: ["WORKING", "INPUT_REQUIRED", "COMPLETED", "FAILED", "CANCELED", "REJECTED"],
+export const ALLOWED_TASK_STATE_TRANSITIONS: Record<
+  TaskState,
+  readonly TaskState[]
+> = {
+  SUBMITTED: [
+    "WORKING",
+    "INPUT_REQUIRED",
+    "COMPLETED",
+    "FAILED",
+    "REJECTED",
+    "CANCELED",
+  ],
+  WORKING: [
+    "WORKING",
+    "INPUT_REQUIRED",
+    "COMPLETED",
+    "FAILED",
+    "CANCELED",
+    "REJECTED",
+  ],
   INPUT_REQUIRED: ["WORKING", "CANCELED", "FAILED", "REJECTED"],
   COMPLETED: [],
   FAILED: [],
@@ -40,7 +57,10 @@ export interface TaskTransitionOptions {
   timestamp?: string;
 }
 
-export function resolveTaskContextId(taskId: string, contextId?: string): string {
+export function resolveTaskContextId(
+  taskId: string,
+  contextId?: string,
+): string {
   return contextId ?? taskId;
 }
 
@@ -71,11 +91,17 @@ export function isTerminalTaskState(state: TaskState): boolean {
   return TERMINAL_STATES.includes(state);
 }
 
-export function canTransitionTaskState(from: TaskState, to: TaskState): boolean {
+export function canTransitionTaskState(
+  from: TaskState,
+  to: TaskState,
+): boolean {
   return ALLOWED_TASK_STATE_TRANSITIONS[from].includes(to);
 }
 
-export function assertValidTaskTransition(from: TaskState, to: TaskState): void {
+export function assertValidTaskTransition(
+  from: TaskState,
+  to: TaskState,
+): void {
   if (!canTransitionTaskState(from, to)) {
     throw new DenoClawError(
       "INVALID_TASK_TRANSITION",

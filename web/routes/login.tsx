@@ -39,7 +39,10 @@ export const handler = {
   GET(ctx: FreshContext) {
     const config = getDashboardRequestConfig(ctx.req);
     const url = new URL(ctx.req.url);
-    const next = getSafeDashboardRedirectTarget(url.searchParams.get("next"), config);
+    const next = getSafeDashboardRedirectTarget(
+      url.searchParams.get("next"),
+      config,
+    );
 
     if (config.authMode === "local-open") {
       return Response.redirect(new URL(config.overviewPath, url.origin), 302);
@@ -73,7 +76,9 @@ export const handler = {
       ? form.get("token")!.toString().trim()
       : "";
     const next = getSafeDashboardRedirectTarget(
-      typeof form.get("next") === "string" ? form.get("next")!.toString() : null,
+      typeof form.get("next") === "string"
+        ? form.get("next")!.toString()
+        : null,
       config,
     );
 

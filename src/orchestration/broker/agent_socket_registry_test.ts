@@ -38,7 +38,10 @@ Deno.test("BrokerAgentSocketRegistry only unregisters the current socket", () =>
   registry.register("agent-alpha", first.socket, "session:first");
   registry.register("agent-alpha", second.socket, "session:second");
 
-  assertEquals(registry.unregisterIfCurrent("agent-alpha", first.socket), false);
+  assertEquals(
+    registry.unregisterIfCurrent("agent-alpha", first.socket),
+    false,
+  );
   assertExists(registry.get("agent-alpha"));
 
   assertEquals(

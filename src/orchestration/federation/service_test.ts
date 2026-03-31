@@ -777,7 +777,10 @@ Deno.test(
         traceId: "trace-replay-fail-1",
       });
       assertEquals(initial.status, "dead_letter");
-      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 1);
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        1,
+      );
 
       const [deadLetter] = await adapter.listDeadLetters("broker-b");
       const replayed = await service.replayDeadLetter({
@@ -788,7 +791,10 @@ Deno.test(
       });
       assertEquals(replayed.status, "dead_letter");
       assertEquals((await adapter.listDeadLetters("broker-b")).length, 1);
-      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 1);
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        1,
+      );
       assertEquals(routing.calls, 2);
     } finally {
       kv.close();
@@ -870,8 +876,14 @@ Deno.test(
         }),
       ]);
 
-      assertEquals(first.status === "fulfilled" || second.status === "fulfilled", true);
-      assertEquals(first.status === "rejected" || second.status === "rejected", true);
+      assertEquals(
+        first.status === "fulfilled" || second.status === "fulfilled",
+        true,
+      );
+      assertEquals(
+        first.status === "rejected" || second.status === "rejected",
+        true,
+      );
       const rejected = first.status === "rejected"
         ? first.reason
         : second.status === "rejected"
@@ -881,7 +893,10 @@ Deno.test(
       assertEquals(rejected?.name, "FederationDeadLetterNotFoundError");
       assertEquals(calls, 2);
       assertEquals((await adapter.listDeadLetters("broker-b")).length, 0);
-      assertEquals((await adapter.getFederationStats("broker-b")).deadLetterBacklog, 0);
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        0,
+      );
     } finally {
       kv.close();
       await Deno.remove(kvPath);

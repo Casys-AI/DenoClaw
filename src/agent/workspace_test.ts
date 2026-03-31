@@ -20,7 +20,9 @@ function withTempAgentsDir(
     } finally {
       Deno.env.delete("DENOCLAW_AGENTS_DIR");
       if (prev) Deno.env.set("DENOCLAW_AGENTS_DIR", prev);
-      try { await Deno.remove(tmpDir, { recursive: true }); } catch { /* ok */ }
+      try {
+        await Deno.remove(tmpDir, { recursive: true });
+      } catch { /* ok */ }
     }
   };
 }

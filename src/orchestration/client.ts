@@ -33,7 +33,8 @@ export interface BrokerClientDeps {
  * Transport is pluggable via BrokerTransport (KV Queue locally, HTTP/SSE on network).
  * The client operates in canonical task terms above the transport layer.
  */
-export class BrokerClient implements AgentLlmToolPort, AgentCanonicalTaskPort<Task> {
+export class BrokerClient
+  implements AgentLlmToolPort, AgentCanonicalTaskPort<Task> {
   private transport: BrokerTransport;
 
   constructor(agentId: string, deps: BrokerClientDeps = {}) {

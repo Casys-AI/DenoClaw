@@ -1,6 +1,6 @@
 import { getConfig, getConfigOrDefault } from "../config/loader.ts";
 import { createAgent, deleteAgent, listAgents } from "./agents.ts";
-import { parseCliArgs, type CliArgs } from "./args.ts";
+import { type CliArgs, parseCliArgs } from "./args.ts";
 import { printHelp } from "./help.ts";
 import { humanLog, humanWarn, initCliFlags, outputError } from "./output.ts";
 import { runInitWizard } from "./init.ts";

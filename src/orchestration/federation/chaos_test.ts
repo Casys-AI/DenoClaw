@@ -36,7 +36,9 @@ class ScenarioRoutingPort implements FederationRoutingPort {
   }
 }
 
-function sampleTask(taskId: string): BrokerTaskSubmitPayload & { contextId: string } {
+function sampleTask(
+  taskId: string,
+): BrokerTaskSubmitPayload & { contextId: string } {
   return {
     targetAgent: "agent-1",
     taskId,

@@ -138,11 +138,11 @@ export default function Network({ data }: { data: NetworkData }) {
       : `dead-letter: ${
         formatCompact(federationDeadLetters)
       } · partial coverage`;
-  const federationRefusalTotal =
-    federationDenials.policy + federationDenials.auth;
-  const federationRefusalText = `${formatCompact(federationDenials.policy)} policy · ${
-    formatCompact(federationDenials.auth)
-  } auth${
+  const federationRefusalTotal = federationDenials.policy +
+    federationDenials.auth;
+  const federationRefusalText = `${
+    formatCompact(federationDenials.policy)
+  } policy · ${formatCompact(federationDenials.auth)} auth${
     federationDenials.notFound > 0
       ? ` · ${formatCompact(federationDenials.notFound)} not found`
       : ""
@@ -221,7 +221,9 @@ export default function Network({ data }: { data: NetworkData }) {
               <div class="stat-title">Policy/Auth Refusals</div>
               <div
                 class={`stat-value font-data ${
-                  hasFederation ? "text-error text-lg" : "text-warning text-base"
+                  hasFederation
+                    ? "text-error text-lg"
+                    : "text-warning text-base"
                 }`}
               >
                 {hasFederation

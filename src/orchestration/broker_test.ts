@@ -198,6 +198,29 @@ function createSocketCollector(): {
   };
 }
 
+function createRegisterCronStub(
+  callbacks: Map<string, () => Promise<void> | void>,
+): typeof Deno.cron {
+  return ((
+    name: string,
+    _schedule: string | Deno.CronSchedule,
+    ...rest: [
+      (() => Promise<void> | void) | {
+        backoffSchedule?: number[];
+        signal?: AbortSignal;
+      },
+      (() => Promise<void> | void)?,
+    ]
+  ) => {
+    const callback = typeof rest[0] === "function" ? rest[0] : rest[1];
+    if (!callback) {
+      throw new Error("Expected cron handler callback");
+    }
+    callbacks.set(name, callback);
+    return Promise.resolve();
+  }) as typeof Deno.cron;
+}
+
 function registerConnectedAgentSocket(
   broker: BrokerServer,
   agentId: string,
@@ -1106,6 +1129,88 @@ Deno.test(
       assertEquals(reply.payload.context?.denied, ["schedule"]);
 
       await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "Broker cron fire dispatches a canonical task_submit with cron metadata",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const registeredCronCallbacks = new Map<
+      string,
+      () => Promise<void> | void
+    >();
+
+    try {
+      const cronManager = new BrokerCronManager(kv, {
+        registerDenoCron: true,
+        registerCron: createRegisterCronStub(registeredCronCallbacks),
+      });
+      const broker = createTestBroker(createConfig(), {
+        kv,
+        cronManager,
+        metrics: new MetricsCollector(kv),
+      });
+      const betaMessages = attachConnectedAgentInbox(broker, "agent-beta");
+      const brokerAny = broker as unknown as {
+        taskDispatcher: {
+          submitInternalTask(
+            targetAgent: string,
+            taskMessage: A2AMessage,
+            metadata?: Record<string, unknown>,
+          ): Promise<Task>;
+        };
+      };
+      cronManager.setOnFire(async (job) => {
+        await brokerAny.taskDispatcher.submitInternalTask(
+          job.agentId,
+          {
+            messageId: crypto.randomUUID(),
+            role: "user",
+            parts: [{ kind: "text", text: job.prompt }],
+          },
+          {
+            cronJobId: job.id,
+            cronName: job.name,
+            cronSchedule: job.schedule,
+          },
+        );
+      });
+
+      const job = await cronManager.create({
+        agentId: "agent-beta",
+        name: "daily-check",
+        schedule: "0 8 * * *",
+        prompt: "Check inbox",
+      });
+      const callback = registeredCronCallbacks.get(
+        `cron-${job.agentId}-${job.id}`,
+      );
+      assertExists(callback);
+
+      await callback();
+
+      assertEquals(betaMessages.length, 1);
+      const forwarded = betaMessages[0] as Extract<
+        BrokerMessage,
+        { type: "task_submit" }
+      >;
+      assertEquals(forwarded.from, "broker");
+      assertEquals(forwarded.payload.targetAgent, "agent-beta");
+      assertEquals(forwarded.payload.taskMessage?.parts[0], {
+        kind: "text",
+        text: "Check inbox",
+      });
+      assertEquals(forwarded.payload.metadata, {
+        cronJobId: job.id,
+        cronName: "daily-check",
+        cronSchedule: "0 8 * * *",
+      });
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -3554,6 +3659,100 @@ Deno.test(
         kind: "text",
         text: "Bonjour broker",
       });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer GET /cron/jobs lists persisted cron jobs and supports agent filtering",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "cron-secret");
+
+    try {
+      await kv.set(["cron", "agent-alpha", "job-1"], {
+        id: "job-1",
+        agentId: "agent-alpha",
+        name: "alpha-job",
+        schedule: "0 8 * * *",
+        prompt: "alpha",
+        enabled: true,
+        createdAt: new Date().toISOString(),
+      });
+      await kv.set(["cron", "agent-beta", "job-2"], {
+        id: "job-2",
+        agentId: "agent-beta",
+        name: "beta-job",
+        schedule: "0 9 * * *",
+        prompt: "beta",
+        enabled: false,
+        createdAt: new Date().toISOString(),
+      });
+
+      const allResponse = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/cron/jobs", {
+          headers: {
+            authorization: "Bearer cron-secret",
+          },
+        }),
+      );
+      assertEquals(allResponse.status, 200);
+      const allJobs = await allResponse.json() as Array<{
+        id: string;
+        createdAt: string;
+      }>;
+      assertEquals(allJobs.map((job) => job.id).sort(), ["job-1", "job-2"]);
+
+      const filteredResponse = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/cron/jobs?agent=agent-alpha", {
+          headers: {
+            authorization: "Bearer cron-secret",
+          },
+        }),
+      );
+      assertEquals(filteredResponse.status, 200);
+      const filteredJobs = await filteredResponse.json() as Array<{
+        id: string;
+        agentId: string;
+        name: string;
+        schedule: string;
+        prompt: string;
+        enabled: boolean;
+        createdAt: string;
+      }>;
+      assertEquals(filteredJobs.length, 1);
+      assertEquals(filteredJobs[0]?.id, "job-1");
+      assertEquals(filteredJobs[0]?.agentId, "agent-alpha");
+      assertEquals(filteredJobs[0]?.name, "alpha-job");
+      assertEquals(filteredJobs[0]?.schedule, "0 8 * * *");
+      assertEquals(filteredJobs[0]?.prompt, "alpha");
+      assertEquals(filteredJobs[0]?.enabled, true);
+      assertEquals(typeof filteredJobs[0]?.createdAt, "string");
     } finally {
       if (previousStaticToken === undefined) {
         Deno.env.delete("DENOCLAW_API_TOKEN");

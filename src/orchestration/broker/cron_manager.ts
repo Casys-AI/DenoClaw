@@ -19,6 +19,7 @@ export class BrokerCronManager {
   private registerDenoCron: boolean;
   private registerCronImpl: typeof Deno.cron;
   private disabledJobIds = new Set<string>();
+  private registeredJobIds = new Set<string>();
   private onFireCallback?: (job: BrokerCronJob) => Promise<void>;
 
   constructor(kv: Deno.Kv, opts?: CronManagerOptions) {
@@ -46,13 +47,17 @@ export class BrokerCronManager {
       await this.kv.delete(["cron", job.agentId, job.id]);
       throw error;
     }
-    log.info(`Cron created: ${job.name} for agent ${job.agentId} (${job.schedule})`);
+    log.info(
+      `Cron created: ${job.name} for agent ${job.agentId} (${job.schedule})`,
+    );
     return job;
   }
 
   async listByAgent(agentId: string): Promise<BrokerCronJob[]> {
     const jobs: BrokerCronJob[] = [];
-    for await (const entry of this.kv.list<BrokerCronJob>({ prefix: ["cron", agentId] })) {
+    for await (
+      const entry of this.kv.list<BrokerCronJob>({ prefix: ["cron", agentId] })
+    ) {
       if (entry.value) jobs.push(entry.value);
     }
     return jobs;
@@ -60,7 +65,9 @@ export class BrokerCronManager {
 
   async listAll(): Promise<BrokerCronJob[]> {
     const jobs: BrokerCronJob[] = [];
-    for await (const entry of this.kv.list<BrokerCronJob>({ prefix: ["cron"] })) {
+    for await (
+      const entry of this.kv.list<BrokerCronJob>({ prefix: ["cron"] })
+    ) {
       if (entry.value) jobs.push(entry.value);
     }
     return jobs;
@@ -75,7 +82,20 @@ export class BrokerCronManager {
     return true;
   }
 
-  async reloadAll(onFire?: (job: BrokerCronJob) => Promise<void>): Promise<number> {
+  async enable(agentId: string, jobId: string): Promise<BrokerCronJob | null> {
+    return await this.setEnabled(agentId, jobId, true);
+  }
+
+  async disable(
+    agentId: string,
+    jobId: string,
+  ): Promise<BrokerCronJob | null> {
+    return await this.setEnabled(agentId, jobId, false);
+  }
+
+  async reloadAll(
+    onFire?: (job: BrokerCronJob) => Promise<void>,
+  ): Promise<number> {
     const jobs = await this.listAll();
     let count = 0;
     for (const job of jobs) {
@@ -84,7 +104,10 @@ export class BrokerCronManager {
         this.registerCronHandler(job, onFire);
         count++;
       } catch (e) {
-        log.error(`Failed to reload cron ${job.name} (${job.id}): invalid schedule?`, e);
+        log.error(
+          `Failed to reload cron ${job.name} (${job.id}): invalid schedule?`,
+          e,
+        );
         await this.kv.delete(["cron", job.agentId, job.id]);
       }
     }
@@ -96,12 +119,22 @@ export class BrokerCronManager {
     this.onFireCallback = callback;
   }
 
-  private registerCronHandler(job: BrokerCronJob, onFire?: (job: BrokerCronJob) => Promise<void>): void {
+  private registerCronHandler(
+    job: BrokerCronJob,
+    onFire?: (job: BrokerCronJob) => Promise<void>,
+  ): void {
+    if (this.registeredJobIds.has(job.id)) {
+      return;
+    }
     const callback = onFire ?? this.onFireCallback;
     const cronName = `cron-${job.agentId}-${job.id}`;
     this.registerCronImpl(cronName, job.schedule, async () => {
       if (this.disabledJobIds.has(job.id)) return;
-      const current = await this.kv.get<BrokerCronJob>(["cron", job.agentId, job.id]);
+      const current = await this.kv.get<BrokerCronJob>([
+        "cron",
+        job.agentId,
+        job.id,
+      ]);
       if (!current.value || !current.value.enabled) return;
       current.value.lastRun = new Date().toISOString();
       await this.kv.set(["cron", job.agentId, job.id], current.value);
@@ -110,9 +143,43 @@ export class BrokerCronManager {
           await callback(current.value);
           log.info(`Cron fired: ${job.name} for agent ${job.agentId}`);
         } catch (e) {
-          log.error(`Cron fire failed: ${job.name} for agent ${job.agentId}`, e);
+          log.error(
+            `Cron fire failed: ${job.name} for agent ${job.agentId}`,
+            e,
+          );
         }
       }
     });
+    this.registeredJobIds.add(job.id);
+  }
+
+  private async setEnabled(
+    agentId: string,
+    jobId: string,
+    enabled: boolean,
+  ): Promise<BrokerCronJob | null> {
+    const entry = await this.kv.get<BrokerCronJob>(["cron", agentId, jobId]);
+    if (!entry.value) {
+      return null;
+    }
+
+    const job = {
+      ...entry.value,
+      enabled,
+    } satisfies BrokerCronJob;
+    await this.kv.set(["cron", agentId, jobId], job);
+
+    if (enabled) {
+      this.disabledJobIds.delete(jobId);
+      if (this.registerDenoCron) {
+        this.registerCronHandler(job);
+      }
+      log.info(`Cron enabled: ${job.name} for agent ${agentId}`);
+    } else {
+      this.disabledJobIds.add(jobId);
+      log.info(`Cron disabled: ${job.name} for agent ${agentId}`);
+    }
+
+    return job;
   }
 }

@@ -98,7 +98,9 @@ export async function handleGatewayMonitoringRoute(
         status: 503,
       });
     }
-    return Response.json(await listCronJobs(ctx.kv));
+    return Response.json(
+      await listCronJobs(ctx.kv, url.searchParams.get("agent") ?? undefined),
+    );
   }
 
   if (url.pathname === "/traces") {

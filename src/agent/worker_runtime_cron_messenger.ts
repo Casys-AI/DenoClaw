@@ -23,10 +23,14 @@ export class WorkerCronMessenger {
       create: (args) => this.request("create_cron", args),
       list: () => this.request("list_crons", {}),
       delete: (cronJobId) => this.request("delete_cron", { cronJobId }),
+      enable: (cronJobId) => this.request("enable_cron", { cronJobId }),
+      disable: (cronJobId) => this.request("disable_cron", { cronJobId }),
     };
   }
 
-  handleCronResponse(msg: Extract<WorkerRequest, { type: "cron_response" }>): void {
+  handleCronResponse(
+    msg: Extract<WorkerRequest, { type: "cron_response" }>,
+  ): void {
     const pending = this.pending.get(msg.requestId);
     if (!pending) {
       return;
@@ -47,7 +51,12 @@ export class WorkerCronMessenger {
   }
 
   private request(
-    tool: "create_cron" | "list_crons" | "delete_cron",
+    tool:
+      | "create_cron"
+      | "list_crons"
+      | "delete_cron"
+      | "enable_cron"
+      | "disable_cron",
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     const requestId = generateId();

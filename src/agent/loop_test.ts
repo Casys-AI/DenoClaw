@@ -211,13 +211,15 @@ Deno.test({
     const loop = new AgentLoop("test-session-defaults", minimalConfig);
 
     const tools = loop.getTools();
-    // 7 built-in tools + memory tool
-    assertEquals(tools.size, 8);
+    // 9 built-in tools + memory tool
+    assertEquals(tools.size, 10);
 
     const names = tools.getDefinitions().map((d) => d.function.name).sort();
     assertEquals(names, [
       "create_cron",
       "delete_cron",
+      "disable_cron",
+      "enable_cron",
       "list_crons",
       "memory",
       "read_file",
@@ -278,11 +280,17 @@ Deno.test({
       return Promise.resolve({ content: "done" });
     };
 
-    const loop = new AgentLoop("test-session-skill-reload", minimalConfig, {}, 3, {
-      providers: provider,
-      workspaceDir,
-      agentId: "agent-skill-reload",
-    });
+    const loop = new AgentLoop(
+      "test-session-skill-reload",
+      minimalConfig,
+      {},
+      3,
+      {
+        providers: provider,
+        workspaceDir,
+        agentId: "agent-skill-reload",
+      },
+    );
 
     const response = await loop.processMessage("Create a skill then use it");
 

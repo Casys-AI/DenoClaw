@@ -1,6 +1,12 @@
 import type { ToolDefinition } from "../shared/types.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
-import { CreateCronTool, DeleteCronTool, ListCronsTool } from "./tools/cron.ts";
+import {
+  CreateCronTool,
+  DeleteCronTool,
+  DisableCronTool,
+  EnableCronTool,
+  ListCronsTool,
+} from "./tools/cron.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { WebFetchTool } from "./tools/web.ts";
 
@@ -20,5 +26,7 @@ export function createBrokerBackedRuntimeToolDefinitions(): ToolDefinition[] {
     new CreateCronTool().getDefinition(),
     new ListCronsTool().getDefinition(),
     new DeleteCronTool().getDefinition(),
+    new EnableCronTool().getDefinition(),
+    new DisableCronTool().getDefinition(),
   ];
 }

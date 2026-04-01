@@ -64,9 +64,13 @@ export async function getAgentStatus(
   };
 }
 
-export async function listCronJobs(kv: Deno.Kv): Promise<BrokerCronJob[]> {
+export async function listCronJobs(
+  kv: Deno.Kv,
+  agentId?: string,
+): Promise<BrokerCronJob[]> {
   const jobs: BrokerCronJob[] = [];
-  for await (const entry of kv.list<BrokerCronJob>({ prefix: ["cron"] })) {
+  const prefix = agentId ? ["cron", agentId] : ["cron"];
+  for await (const entry of kv.list<BrokerCronJob>({ prefix })) {
     if (entry.value) jobs.push(entry.value);
   }
   return jobs;

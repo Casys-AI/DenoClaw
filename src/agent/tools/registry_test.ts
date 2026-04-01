@@ -94,6 +94,28 @@ class ShellPermissionedTool extends BaseTool {
   }
 }
 
+class DirectPermissionedTool extends BaseTool {
+  name = "create_cron";
+  description = "Needs schedule";
+  permissions = ["schedule" as const];
+  override usesSandboxBackend = false;
+
+  getDefinition(): ToolDefinition {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    };
+  }
+
+  execute(): Promise<ToolResult> {
+    return Promise.resolve(this.ok("scheduled"));
+  }
+}
+
 class DenyBackend implements SandboxBackend {
   readonly kind = "local" as const;
 
@@ -286,4 +308,67 @@ Deno.test("ToolRegistry includes shell command context in privilege elevation er
     result.error?.recovery,
     "Update agent sandbox.allowedPermissions or broker policy to allow git (run groups=[shell])",
   );
+});
+
+Deno.test("ToolRegistry enforces permissions for direct broker-owned tools", async () => {
+  const registry = new ToolRegistry();
+  registry.register(new DirectPermissionedTool());
+  const sandboxConfig: SandboxConfig = {
+    allowedPermissions: [],
+    execPolicy: {
+      security: "allowlist",
+      allowedCommands: [],
+    },
+  };
+  registry.setBackend(
+    new DenyBackend(),
+    sandboxConfig.execPolicy,
+    undefined,
+    undefined,
+    undefined,
+    sandboxConfig,
+    deriveAgentRuntimeCapabilities({ sandboxConfig }),
+  );
+
+  const result = await registry.execute("create_cron", {
+    name: "daily-check",
+    schedule: "0 8 * * *",
+    prompt: "Check messages",
+  });
+
+  assertEquals(result.success, false);
+  assertEquals(result.error?.code, "PRIVILEGE_ELEVATION_REQUIRED");
+  assertEquals(result.error?.context?.tool, "create_cron");
+  assertEquals(result.error?.context?.requiredPermissions, ["schedule"]);
+  assertEquals(result.error?.context?.denied, ["schedule"]);
+});
+
+Deno.test("ToolRegistry executes direct broker-owned tools when allowed", async () => {
+  const registry = new ToolRegistry();
+  registry.register(new DirectPermissionedTool());
+  const sandboxConfig: SandboxConfig = {
+    allowedPermissions: ["schedule"],
+    execPolicy: {
+      security: "allowlist",
+      allowedCommands: [],
+    },
+  };
+  registry.setBackend(
+    new DenyBackend(),
+    sandboxConfig.execPolicy,
+    undefined,
+    undefined,
+    undefined,
+    sandboxConfig,
+    deriveAgentRuntimeCapabilities({ sandboxConfig }),
+  );
+
+  const result = await registry.execute("create_cron", {
+    name: "daily-check",
+    schedule: "0 8 * * *",
+    prompt: "Check messages",
+  });
+
+  assertEquals(result.success, true);
+  assertEquals(result.output, "scheduled");
 });

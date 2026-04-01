@@ -7,13 +7,14 @@ import type {
 import { log } from "../shared/log.ts";
 import { generateId } from "../shared/helpers.ts";
 import { AgentError } from "../shared/errors.ts";
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry, ToolResult } from "../shared/types.ts";
 import { WorkerPoolObservability } from "./worker_pool_observability.ts";
 import { WorkerPoolRequestTracker } from "./worker_pool_request_tracker.ts";
 import { WorkerPoolPeerRouter } from "./worker_pool_peer_router.ts";
 import { WorkerPoolLifecycle } from "./worker_pool_lifecycle.ts";
 import { AgentRuntimeRegistry, getResolvedAgentRegistry } from "./registry.ts";
 import type { WorkerPeerSendMessage } from "./worker_protocol.ts";
+import type { WorkerCronRequestMessage } from "./worker_protocol.ts";
 import type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
 export type { WorkerPoolCallbacks } from "./worker_pool_types.ts";
 
@@ -30,6 +31,12 @@ export class WorkerPool {
   private readonly runtimeRegistry: AgentRuntimeRegistry;
   private readonly lifecycle: WorkerPoolLifecycle;
   private peerRouter: WorkerPoolPeerRouter;
+  private cronHandler:
+    | ((
+      agentId: string,
+      request: WorkerCronRequestMessage,
+    ) => Promise<ToolResult>)
+    | null = null;
 
   constructor(
     private readonly config: WorkerConfig,
@@ -56,6 +63,15 @@ export class WorkerPool {
   /** Inject shared KV for observability writes (task tracking, agent status). */
   setSharedKv(kv: Deno.Kv): void {
     this.observability.setSharedKv(kv);
+  }
+
+  setCronHandler(
+    handler: (
+      agentId: string,
+      request: WorkerCronRequestMessage,
+    ) => Promise<ToolResult>,
+  ): void {
+    this.cronHandler = handler;
   }
 
   async start(agentIds: string[]): Promise<void> {
@@ -113,6 +129,11 @@ export class WorkerPool {
 
       case "task_observe": {
         this.observability.writeTaskObservation(msg);
+        break;
+      }
+
+      case "cron_request": {
+        void this.handleCronRequest(fromAgentId, msg);
         break;
       }
 
@@ -198,6 +219,51 @@ export class WorkerPool {
     msg: WorkerPeerSendMessage,
   ): void {
     this.peerRouter.routeAgentMessage(fromAgent, msg);
+  }
+
+  private async handleCronRequest(
+    fromAgentId: string,
+    msg: WorkerCronRequestMessage,
+  ): Promise<void> {
+    const entry = this.lifecycle.getAgent(fromAgentId);
+    if (!entry) {
+      return;
+    }
+
+    let result: ToolResult;
+    try {
+      result = this.cronHandler
+        ? await this.cronHandler(fromAgentId, msg)
+        : {
+          success: false,
+          output: "",
+          error: {
+            code: "CRON_UNAVAILABLE",
+            context: { tool: msg.tool },
+            recovery:
+              "Configure a local cron handler on WorkerPool before using cron tools",
+          },
+        };
+    } catch (error) {
+      result = {
+        success: false,
+        output: "",
+        error: {
+          code: "CRON_EXEC_FAILED",
+          context: {
+            tool: msg.tool,
+            message: error instanceof Error ? error.message : String(error),
+          },
+          recovery: "Check broker/gateway cron logs and retry",
+        },
+      };
+    }
+
+    entry.worker.postMessage({
+      type: "cron_response",
+      requestId: msg.requestId,
+      result,
+    });
   }
 
   getAgentIds(): string[] {

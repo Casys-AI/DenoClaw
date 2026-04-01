@@ -1,10 +1,34 @@
 import type { SandboxPermission, ToolDefinition, ToolResult } from "../../shared/types.ts";
 import { BaseTool } from "./registry.ts";
 
-export class CreateCronTool extends BaseTool {
+export interface CronToolPort {
+  create(
+    args: { name: string; schedule: string; prompt: string },
+  ): Promise<ToolResult>;
+  list(): Promise<ToolResult>;
+  delete(cronJobId: string): Promise<ToolResult>;
+}
+
+abstract class CronToolBase extends BaseTool {
+  permissions: SandboxPermission[] = ["schedule"];
+  override usesSandboxBackend = false;
+
+  constructor(protected readonly port?: CronToolPort) {
+    super();
+  }
+
+  protected unavailable(): ToolResult {
+    return this.fail(
+      "CRON_UNAVAILABLE",
+      { tool: this.name },
+      "Run this agent behind a broker or gateway with cron support enabled",
+    );
+  }
+}
+
+export class CreateCronTool extends CronToolBase {
   name = "create_cron";
   description = "Create a scheduled task that runs on a cron schedule";
-  permissions: SandboxPermission[] = [];
 
   getDefinition(): ToolDefinition {
     return {
@@ -25,15 +49,29 @@ export class CreateCronTool extends BaseTool {
     };
   }
 
-  async execute(_args: Record<string, unknown>): Promise<ToolResult> {
-    return this.ok("create_cron is broker-backed — should not be called locally");
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.port) {
+      return this.unavailable();
+    }
+
+    const name = typeof args.name === "string" ? args.name.trim() : "";
+    const schedule = typeof args.schedule === "string" ? args.schedule.trim() : "";
+    const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+    if (!name || !schedule || !prompt) {
+      return this.fail(
+        "INVALID_CRON_ARGS",
+        { name, schedule, prompt },
+        "Provide non-empty name, schedule (cron expression), and prompt",
+      );
+    }
+
+    return await this.port.create({ name, schedule, prompt });
   }
 }
 
-export class ListCronsTool extends BaseTool {
+export class ListCronsTool extends CronToolBase {
   name = "list_crons";
   description = "List all scheduled cron jobs for this agent";
-  permissions: SandboxPermission[] = [];
 
   getDefinition(): ToolDefinition {
     return {
@@ -47,14 +85,16 @@ export class ListCronsTool extends BaseTool {
   }
 
   async execute(_args: Record<string, unknown>): Promise<ToolResult> {
-    return this.ok("list_crons is broker-backed — should not be called locally");
+    if (!this.port) {
+      return this.unavailable();
+    }
+    return await this.port.list();
   }
 }
 
-export class DeleteCronTool extends BaseTool {
+export class DeleteCronTool extends CronToolBase {
   name = "delete_cron";
   description = "Delete a scheduled cron job";
-  permissions: SandboxPermission[] = [];
 
   getDefinition(): ToolDefinition {
     return {
@@ -73,7 +113,22 @@ export class DeleteCronTool extends BaseTool {
     };
   }
 
-  async execute(_args: Record<string, unknown>): Promise<ToolResult> {
-    return this.ok("delete_cron is broker-backed — should not be called locally");
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.port) {
+      return this.unavailable();
+    }
+
+    const cronJobId = typeof args.cronJobId === "string"
+      ? args.cronJobId.trim()
+      : "";
+    if (!cronJobId) {
+      return this.fail(
+        "INVALID_CRON_ARGS",
+        { cronJobId },
+        "Provide a non-empty cronJobId",
+      );
+    }
+
+    return await this.port.delete(cronJobId);
   }
 }

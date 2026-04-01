@@ -4,6 +4,7 @@ import { log } from "../../shared/log.ts";
 
 export interface CronManagerOptions {
   registerDenoCron?: boolean;
+  registerCron?: typeof Deno.cron;
 }
 
 export interface CreateCronParams {
@@ -16,12 +17,14 @@ export interface CreateCronParams {
 export class BrokerCronManager {
   private kv: Deno.Kv;
   private registerDenoCron: boolean;
+  private registerCronImpl: typeof Deno.cron;
   private disabledJobIds = new Set<string>();
   private onFireCallback?: (job: BrokerCronJob) => Promise<void>;
 
   constructor(kv: Deno.Kv, opts?: CronManagerOptions) {
     this.kv = kv;
     this.registerDenoCron = opts?.registerDenoCron ?? true;
+    this.registerCronImpl = opts?.registerCron ?? Deno.cron;
   }
 
   async create(params: CreateCronParams): Promise<BrokerCronJob> {
@@ -34,10 +37,15 @@ export class BrokerCronManager {
       enabled: true,
       createdAt: new Date().toISOString(),
     };
-    if (this.registerDenoCron) {
-      this.registerCronHandler(job);
-    }
     await this.kv.set(["cron", job.agentId, job.id], job);
+    try {
+      if (this.registerDenoCron) {
+        this.registerCronHandler(job);
+      }
+    } catch (error) {
+      await this.kv.delete(["cron", job.agentId, job.id]);
+      throw error;
+    }
     log.info(`Cron created: ${job.name} for agent ${job.agentId} (${job.schedule})`);
     return job;
   }
@@ -91,7 +99,7 @@ export class BrokerCronManager {
   private registerCronHandler(job: BrokerCronJob, onFire?: (job: BrokerCronJob) => Promise<void>): void {
     const callback = onFire ?? this.onFireCallback;
     const cronName = `cron-${job.agentId}-${job.id}`;
-    Deno.cron(cronName, job.schedule, async () => {
+    this.registerCronImpl(cronName, job.schedule, async () => {
       if (this.disabledJobIds.has(job.id)) return;
       const current = await this.kv.get<BrokerCronJob>(["cron", job.agentId, job.id]);
       if (!current.value || !current.value.enabled) return;

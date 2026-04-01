@@ -1,5 +1,6 @@
 import type {
   ExecPolicy,
+  SandboxExecRequest,
   SandboxBackend,
   SandboxConfig,
   SandboxPermission,
@@ -12,6 +13,10 @@ import { log } from "../../shared/log.ts";
 import type { AgentRuntimeCapabilities } from "../../shared/runtime_capabilities.ts";
 import { normalizeAgentFacingToolResult } from "../../shared/tool_result_normalization.ts";
 import { suggestPrivilegeElevationGrantResources } from "../../shared/privilege_elevation.ts";
+import {
+  computePermissionIntersection,
+  createPermissionDeniedResult,
+} from "./backends/sandbox_permissions.ts";
 
 /** Default exec policy — deny-first, allowlist, no interactive approval by default. */
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
@@ -23,6 +28,7 @@ export abstract class BaseTool {
   abstract name: string;
   abstract description: string;
   abstract permissions: SandboxPermission[];
+  usesSandboxBackend = true;
   abstract getDefinition(): ToolDefinition;
   abstract execute(args: Record<string, unknown>): Promise<ToolResult>;
 
@@ -109,7 +115,7 @@ export class ToolRegistry {
 
     try {
       // ADR-010: tools with permissions execute via SandboxBackend
-      if (this.backend && tool.permissions.length > 0) {
+      if (this.backend && tool.permissions.length > 0 && tool.usesSandboxBackend) {
         log.info(`Tool execution (sandbox ${this.backend.kind}): ${name}`);
         const result = await this.backend.execute({
           tool: name,
@@ -144,6 +150,11 @@ export class ToolRegistry {
         });
       }
 
+      const localPermissionDenied = this.checkDirectToolPermissions(tool, args);
+      if (localPermissionDenied) {
+        return localPermissionDenied;
+      }
+
       log.info(`Tool execution: ${name}`);
       return await tool.execute(args);
     } catch (e) {
@@ -158,6 +169,62 @@ export class ToolRegistry {
         },
       };
     }
+  }
+
+  private checkDirectToolPermissions(
+    tool: BaseTool,
+    args: Record<string, unknown>,
+  ): ToolResult | null {
+    if (tool.permissions.length === 0 || !this.sandboxConfig) {
+      return null;
+    }
+
+    const { denied } = computePermissionIntersection(
+      tool.permissions,
+      this.sandboxConfig.allowedPermissions,
+    );
+    if (denied.length === 0) {
+      return null;
+    }
+
+    const deniedResult = createPermissionDeniedResult(
+      {
+        tool: tool.name,
+        args,
+        permissions: tool.permissions,
+        execPolicy: this.execPolicy,
+        ...(this.networkAllow ? { networkAllow: this.networkAllow } : {}),
+        ...(this.toolsConfig ? { toolsConfig: this.toolsConfig } : {}),
+        ...(this.shellConfig ? { shell: this.shellConfig } : {}),
+      } satisfies SandboxExecRequest,
+      this.sandboxConfig,
+      denied,
+    );
+
+    const command = tool.name === "shell" && typeof args.command === "string"
+      ? args.command
+      : undefined;
+    const binary = command ? command.trim().split(/\s+/)[0] : undefined;
+
+    return normalizeAgentFacingToolResult(deniedResult, {
+      tool: tool.name,
+      command,
+      binary,
+      requiredPermissions: tool.permissions,
+      agentAllowed: this.sandboxConfig.allowedPermissions,
+      denied,
+      suggestedGrants: suggestPrivilegeElevationGrantResources(
+        tool.name,
+        args,
+        denied,
+      ),
+      capabilities: this.runtimeCapabilities,
+      elevationAvailable: false,
+      elevationReason:
+        this.runtimeCapabilities?.sandbox.privilegeElevation.supported
+          ? "no_channel"
+          : "broker_unsupported",
+    });
   }
 
   /** Close the sandbox backend and release resources. Never throws — logs errors. */

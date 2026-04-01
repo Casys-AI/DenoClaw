@@ -10,6 +10,9 @@ import {
   InProcessBrokerChannelIngressClient,
   LocalChannelIngressRuntime,
 } from "../orchestration/channel_ingress/mod.ts";
+import { createDirectChannelRoutePlan } from "../orchestration/channel_routing/types.ts";
+import { BrokerCronManager } from "../orchestration/broker/cron_manager.ts";
+import { executeCronToolRequest } from "../orchestration/broker/cron_tool_actions.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import {
   updateAgentsList,
@@ -17,6 +20,8 @@ import {
 } from "../orchestration/monitoring.ts";
 import { log } from "../shared/log.ts";
 import { createDashboardHandler } from "../../web/mod.ts";
+import type { ChannelMessage } from "../messaging/types.ts";
+import type { BrokerCronJob } from "../orchestration/broker/cron_types.ts";
 
 export async function startLocalGateway(config: Config): Promise<void> {
   const agentIds = Object.keys(getResolvedAgentRegistry(config));
@@ -58,11 +63,30 @@ export async function startLocalGateway(config: Config): Promise<void> {
   await updateAgentsList(kv, workerPool.getAgentIds());
 
   const taskStore = new TaskStore(kv);
+  const localChannelIngress = new LocalChannelIngressRuntime({
+    workerPool,
+    taskStore,
+  });
   const channelIngress = new InProcessBrokerChannelIngressClient(
-    new LocalChannelIngressRuntime({
-      workerPool,
-      taskStore,
-    }),
+    localChannelIngress,
+  );
+  const cronManager = new BrokerCronManager(kv);
+  cronManager.setOnFire(async (job) => {
+    await localChannelIngress.submit(
+      createLocalCronChannelMessage(job),
+      createDirectChannelRoutePlan(job.agentId, {
+        contextId: `cron:${job.agentId}:${job.id}`,
+        metadata: {
+          cronJobId: job.id,
+          cronName: job.name,
+          cronSchedule: job.schedule,
+        },
+      }),
+    );
+  });
+  await cronManager.reloadAll();
+  workerPool.setCronHandler(async (agentId, request) =>
+    await executeCronToolRequest(cronManager, agentId, request.tool, request.args)
   );
 
   const bus = new MessageBus(kv);
@@ -96,4 +120,26 @@ export async function startLocalGateway(config: Config): Promise<void> {
     await gateway.stop();
     workerPool.shutdown();
   }
+}
+
+function createLocalCronChannelMessage(job: BrokerCronJob): ChannelMessage {
+  const timestamp = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    sessionId: `cron:${job.agentId}:${job.id}`,
+    userId: "broker",
+    content: job.prompt,
+    channelType: "broker",
+    timestamp,
+    address: {
+      channelType: "broker",
+      roomId: `cron:${job.agentId}`,
+    },
+    metadata: {
+      cronJobId: job.id,
+      cronName: job.name,
+      cronSchedule: job.schedule,
+      submittedBy: "broker",
+    },
+  };
 }

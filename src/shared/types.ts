@@ -137,6 +137,7 @@ export type SandboxPermission =
   | "read"
   | "write"
   | "run"
+  | "schedule"
   | "net"
   | "env"
   | "ffi";

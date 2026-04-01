@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { BrokerCronManager } from "./cron_manager.ts";
 
 Deno.test("BrokerCronManager.create persists job and returns it", async () => {
@@ -50,4 +50,33 @@ Deno.test("BrokerCronManager.delete returns false for unknown job", async () => 
     const deleted = await mgr.delete("alice", "nonexistent");
     assertEquals(deleted, false);
   } finally { kv.close(); }
+});
+
+Deno.test("BrokerCronManager.create rolls back KV when cron registration fails", async () => {
+  const kv = await Deno.openKv(":memory:");
+  try {
+    const mgr = new BrokerCronManager(kv, {
+      registerDenoCron: true,
+      registerCron: () => {
+        throw new Error("invalid schedule");
+      },
+    });
+
+    await assertRejects(
+      () =>
+        mgr.create({
+          agentId: "alice",
+          name: "broken",
+          schedule: "bad cron",
+          prompt: "noop",
+        }),
+      Error,
+      "invalid schedule",
+    );
+
+    const jobs = await mgr.listByAgent("alice");
+    assertEquals(jobs, []);
+  } finally {
+    kv.close();
+  }
 });

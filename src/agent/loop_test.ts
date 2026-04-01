@@ -211,11 +211,14 @@ Deno.test({
     const loop = new AgentLoop("test-session-defaults", minimalConfig);
 
     const tools = loop.getTools();
-    // 4 built-in tools + memory tool
-    assertEquals(tools.size, 5);
+    // 7 built-in tools + memory tool
+    assertEquals(tools.size, 8);
 
     const names = tools.getDefinitions().map((d) => d.function.name).sort();
     assertEquals(names, [
+      "create_cron",
+      "delete_cron",
+      "list_crons",
       "memory",
       "read_file",
       "shell",

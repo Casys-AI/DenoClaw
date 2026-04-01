@@ -39,6 +39,7 @@ import type {
 import { createWorkerTaskEventEmitter } from "./worker_runtime_observability.ts";
 import { handleWorkerPeerDeliverRequest } from "./worker_runtime_peer_delivery.ts";
 import { WorkerPeerMessenger } from "./worker_runtime_peer_messenger.ts";
+import { WorkerCronMessenger } from "./worker_runtime_cron_messenger.ts";
 import { handleWorkerRunRequest } from "./worker_runtime_run.ts";
 import { deriveAgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeCapabilities } from "../shared/runtime_capabilities.ts";
@@ -152,6 +153,7 @@ const peerMessenger = new WorkerPeerMessenger(
   taskEvents,
   () => agentId,
 );
+const cronMessenger = new WorkerCronMessenger(respond);
 
 export function resolveEffectiveLoopModel(
   requestedModel?: string,
@@ -166,6 +168,7 @@ const broadcast = new BroadcastChannel("denoclaw");
 broadcast.onmessage = (e: MessageEvent) => {
   if (e.data?.type === "shutdown") {
     peerMessenger.shutdown();
+    cronMessenger.shutdown();
     if (sharedKv) {
       sharedKv.close();
       sharedKv = null;
@@ -213,6 +216,7 @@ function createAgentLoop(
     {
       memory,
       sendToAgent: peerMessenger.createSendToAgent(taskId, contextId, traceId),
+      cronTools: cronMessenger.createCronToolPort(),
       availablePeers: peers,
       sandboxConfig,
       traceWriter: traceWriter ?? undefined,
@@ -310,8 +314,14 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       break;
     }
 
+    case "cron_response": {
+      cronMessenger.handleCronResponse(msg);
+      break;
+    }
+
     case "shutdown": {
       peerMessenger.shutdown();
+      cronMessenger.shutdown();
       if (sharedKv) {
         sharedKv.close();
         sharedKv = null;

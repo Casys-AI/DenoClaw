@@ -351,7 +351,7 @@ export class AgentRuntime {
     await this.canonicalTaskPort.reportTaskResult(task);
   }
 
-  async stop(): Promise<void> {
+  stop(): void {
     this.llmToolPort.close();
     for (const mem of this.memories.values()) {
       mem.close();

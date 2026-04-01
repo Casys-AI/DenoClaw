@@ -22,6 +22,12 @@ import type { SkillLoader } from "./skills.ts";
 import { EmptySkillLoader, KvSkillsLoader, SkillsLoader } from "./skills.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
+import {
+  CreateCronTool,
+  DeleteCronTool,
+  ListCronsTool,
+  type CronToolPort,
+} from "./tools/cron.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 import type { WorkspaceContext } from "./tools/file.ts";
 import { WebFetchTool } from "./tools/web.ts";
@@ -54,6 +60,7 @@ export interface AgentLoopDeps {
   memory?: MemoryPort;
   tools?: ToolRegistry;
   sendToAgent?: SendToAgentFn;
+  cronTools?: CronToolPort;
   availablePeers?: string[];
   sandboxConfig?: SandboxConfig;
   traceWriter?: TraceWriter;
@@ -159,6 +166,9 @@ export class AgentLoop implements AgentLoopLike {
     this.tools.register(new ReadFileTool(wsCtx));
     this.tools.register(new WriteFileTool(wsCtx));
     this.tools.register(new WebFetchTool());
+    this.tools.register(new CreateCronTool(deps?.cronTools));
+    this.tools.register(new ListCronsTool(deps?.cronTools));
+    this.tools.register(new DeleteCronTool(deps?.cronTools));
   }
 
   private createSkillsLoader(deps?: AgentLoopDeps): SkillLoader {

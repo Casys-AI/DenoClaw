@@ -20,7 +20,7 @@ export const BUILTIN_TOOL_PERMISSIONS: Readonly<
   read_file: ["read"],
   write_file: ["write"],
   web_fetch: ["net"],
-  create_cron: [],
-  list_crons: [],
-  delete_cron: [],
+  create_cron: ["schedule"],
+  list_crons: ["schedule"],
+  delete_cron: ["schedule"],
 } as const;

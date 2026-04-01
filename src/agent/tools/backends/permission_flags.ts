@@ -12,6 +12,10 @@ export function permissionToFlag(
       return "--allow-write";
     case "run":
       return "--allow-run";
+    case "schedule":
+      throw new Error(
+        "schedule is a broker-owned permission and has no sandbox CLI flag",
+      );
     case "net":
       return networkAllow?.length
         ? `--allow-net=${networkAllow.join(",")}`

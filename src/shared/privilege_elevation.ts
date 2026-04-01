@@ -36,13 +36,19 @@ export interface RunPrivilegeGrantResource {
   groups: string[];
 }
 
+export interface SchedulePrivilegeGrantResource {
+  permission: "schedule";
+  groups: string[];
+}
+
 export type PrivilegeElevationGrantResource =
   | NetPrivilegeGrantResource
   | WritePrivilegeGrantResource
   | ReadPrivilegeGrantResource
   | EnvPrivilegeGrantResource
   | FfiPrivilegeGrantResource
-  | RunPrivilegeGrantResource;
+  | RunPrivilegeGrantResource
+  | SchedulePrivilegeGrantResource;
 
 export interface PrivilegeElevationGrant {
   kind: "privilege-elevation";
@@ -116,6 +122,8 @@ export function formatPrivilegeElevationGrantResource(
       return `ffi libraries=[${grant.libraries.join(", ")}]`;
     case "run":
       return `run groups=[${grant.groups.join(", ")}]`;
+    case "schedule":
+      return `schedule groups=[${grant.groups.join(", ")}]`;
   }
 }
 
@@ -220,6 +228,8 @@ export function matchesPrivilegeElevationGrantResource(
     case "run":
       return grant.groups.includes("*") || grant.groups.includes(tool) ||
         (tool === "shell" && grant.groups.includes("shell"));
+    case "schedule":
+      return grant.groups.includes("*") || grant.groups.includes(tool);
   }
 }
 
@@ -274,6 +284,14 @@ export function isPrivilegeElevationGrantResourceSubset(
       const allowedRun = allowed as RunPrivilegeGrantResource;
       return requested.groups.every((group) =>
         allowedRun.groups.some((allowedGroup: string) =>
+          allowedGroup === "*" || allowedGroup === group
+        )
+      );
+    }
+    case "schedule": {
+      const allowedSchedule = allowed as SchedulePrivilegeGrantResource;
+      return requested.groups.every((group) =>
+        allowedSchedule.groups.some((allowedGroup: string) =>
           allowedGroup === "*" || allowedGroup === group
         )
       );
@@ -365,6 +383,11 @@ function suggestPrivilegeElevationGrantResource(
       return {
         permission,
         groups: [tool === "shell" ? "shell" : tool],
+      };
+    case "schedule":
+      return {
+        permission,
+        groups: [tool],
       };
   }
 }

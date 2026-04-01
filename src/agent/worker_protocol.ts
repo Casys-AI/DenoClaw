@@ -15,7 +15,7 @@
  */
 import type { AgentDefaults, ToolsConfig } from "./types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
-import type { AgentEntry } from "../shared/types.ts";
+import type { AgentEntry, ToolResult } from "../shared/types.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
 import type { AgentRuntimeCapabilities } from "../shared/runtime_capabilities.ts";
 
@@ -51,13 +51,18 @@ export type InfraResponseType =
  * through the worker transport. They remain internal plumbing, while the
  * canonical task contract continues to live in A2A.
  */
-export type ExecutionRequestType = "run" | "peer_deliver" | "peer_response";
+export type ExecutionRequestType =
+  | "run"
+  | "peer_deliver"
+  | "peer_response"
+  | "cron_response";
 export type ExecutionResponseType =
   | "run_result"
   | "run_error"
   | "peer_send"
   | "peer_result"
-  | "task_observe";
+  | "task_observe"
+  | "cron_request";
 
 // ── Main → Worker ────────────────────────────────────────
 
@@ -100,6 +105,12 @@ export type WorkerRequest =
     requestId: string;
     content: string;
     error?: boolean;
+  }
+  // execution: main process resolves a broker-owned cron tool request
+  | {
+    type: "cron_response";
+    requestId: string;
+    result: ToolResult;
   };
 
 // ── Worker → Main ────────────────────────────────────────
@@ -154,6 +165,13 @@ export type WorkerResponse =
     result?: string;
     traceId?: string;
     contextId?: string;
+  }
+  // execution: worker asks main process to execute a broker-owned cron tool
+  | {
+    type: "cron_request";
+    requestId: string;
+    tool: "create_cron" | "list_crons" | "delete_cron";
+    args: Record<string, unknown>;
   };
 
 export type WorkerRunRequest = Extract<WorkerRequest, { type: "run" }>;
@@ -164,6 +182,10 @@ export type WorkerPeerDeliverRequest = Extract<
 export type WorkerPeerResponseRequest = Extract<
   WorkerRequest,
   { type: "peer_response" }
+>;
+export type WorkerCronResponseRequest = Extract<
+  WorkerRequest,
+  { type: "cron_response" }
 >;
 export type WorkerPeerSendMessage = Extract<
   WorkerResponse,
@@ -177,6 +199,10 @@ export type WorkerTaskObserveMessage = Extract<
   WorkerResponse,
   { type: "task_observe" }
 >;
+export type WorkerCronRequestMessage = Extract<
+  WorkerResponse,
+  { type: "cron_request" }
+>;
 
 // ── Classification helpers ───────────────────────────────
 
@@ -189,6 +215,7 @@ const EXECUTION_REQUEST_TYPES: ReadonlySet<ExecutionRequestType> = new Set([
   "run",
   "peer_deliver",
   "peer_response",
+  "cron_response",
 ]);
 
 const INFRA_RESPONSE_TYPES: ReadonlySet<InfraResponseType> = new Set([
@@ -203,6 +230,7 @@ const EXECUTION_RESPONSE_TYPES: ReadonlySet<ExecutionResponseType> = new Set([
   "peer_send",
   "peer_result",
   "task_observe",
+  "cron_request",
 ]);
 
 // test utilities

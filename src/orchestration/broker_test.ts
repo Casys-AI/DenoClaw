@@ -7,6 +7,7 @@ import {
 import { DenoClawError } from "../shared/errors.ts";
 import { DENOCLAW_AGENT_PROTOCOL } from "./agent_socket_protocol.ts";
 import { BrokerServer, type BrokerServerDeps } from "./broker/server.ts";
+import { BrokerCronManager } from "./broker/cron_manager.ts";
 import { AuthManager } from "./auth.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { TunnelRegistry } from "./broker/tunnel_registry.ts";
@@ -960,6 +961,73 @@ Deno.test(
         "runtime-capabilities-v1",
       );
       assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer gates broker-owned cron tools behind schedule permission",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      const cronManager = new BrokerCronManager(kv, {
+        registerDenoCron: false,
+      });
+      const broker = createTestBroker(config, {
+        kv,
+        cronManager,
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+      const alphaMessages = attachConnectedAgentInbox(broker, "agent-alpha");
+
+      const replyPromise = waitForCollectedMessage(
+        alphaMessages,
+        (message) => message.type === "error" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-cron-denied",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "create_cron",
+          args: {
+            name: "daily-check",
+            schedule: "0 8 * * *",
+            prompt: "Check messages",
+          },
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "error" }
+      >;
+      assertEquals(reply.payload.code, "PRIVILEGE_ELEVATION_REQUIRED");
+      assertEquals(reply.payload.context?.requiredPermissions, ["schedule"]);
+      assertEquals(reply.payload.context?.agentAllowed, ["read"]);
+      assertEquals(reply.payload.context?.denied, ["schedule"]);
 
       await broker.stop();
     } finally {

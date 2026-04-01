@@ -164,7 +164,7 @@ export async function runCli(
     case "publish": {
       const { publishAgents } = await import("./publish.ts");
       const target = args._[1] as string | undefined;
-      await publishAgents(target);
+      await publishAgents(target, { force: !!args.force });
       return;
     }
 

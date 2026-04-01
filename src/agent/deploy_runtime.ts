@@ -11,10 +11,15 @@ import {
   resolveBrokerAuthToken,
 } from "./deploy_runtime_auth.ts";
 import { deriveAgentRuntimeCapabilitiesFromEntry } from "../shared/runtime_capabilities.ts";
+import {
+  type PublishedWorkspaceSnapshot,
+  syncPublishedWorkspaceSnapshot,
+} from "./published_workspace.ts";
 
 export interface DeployedAgentRuntimeOptions {
   agentId: string;
   entry: AgentEntry;
+  workspaceSnapshot?: PublishedWorkspaceSnapshot;
 }
 
 export async function startDeployedAgentRuntime(
@@ -26,6 +31,28 @@ export async function startDeployedAgentRuntime(
     brokerUrl;
   const agentEndpoint = Deno.env.get("DENOCLAW_AGENT_URL");
   const runtimeConfig = resolveRuntimeConfig(agentId, options.entry);
+
+  if (options.workspaceSnapshot) {
+    const kv = await Deno.openKv();
+    try {
+      const workspaceSync = await syncPublishedWorkspaceSnapshot(
+        kv,
+        agentId,
+        options.workspaceSnapshot,
+      );
+      if (!workspaceSync.alreadyApplied) {
+        log.info(`Applied published workspace sync for ${agentId}`, {
+          mode: workspaceSync.mode,
+          files: workspaceSync.fileCount,
+          created: workspaceSync.created,
+          updated: workspaceSync.updated,
+          skipped: workspaceSync.skipped,
+        });
+      }
+    } finally {
+      kv.close();
+    }
+  }
 
   let runtime: AgentRuntime | null = null;
 

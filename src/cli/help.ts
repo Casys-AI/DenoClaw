@@ -32,6 +32,7 @@ Options:
   --model          Override the LLM model
   --org            Deno Deploy organization
   --app            Deno Deploy app name
+  --force          Overwrite tracked workspace files during publish sync
   --json           Structured JSON output (AX mode)
   --yes, -y        Skip all confirmations
 `);

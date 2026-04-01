@@ -1,4 +1,5 @@
 import type { AgentEntry } from "../../shared/types.ts";
+import type { PublishedWorkspaceSnapshot } from "../../agent/published_workspace.ts";
 import { getConfigOrDefault } from "../../config/mod.ts";
 import { getDeployOrgToken } from "../../shared/deploy_credentials.ts";
 import { ask, error, print, success } from "../prompt.ts";
@@ -13,6 +14,7 @@ import {
   resolveBrokerUrl,
 } from "../deploy_api.ts";
 import { requireInteractive } from "../output.ts";
+import { buildPublishedWorkspaceSnapshot } from "../publish_workspace.ts";
 
 export async function publishAgent(): Promise<void> {
   requireInteractive("denoclaw deploy agent");
@@ -57,7 +59,12 @@ export async function publishAgent(): Promise<void> {
       model,
       sandbox: { allowedPermissions: sandboxPerms },
     };
-    const entrypoint = generateAgentEntrypoint(agentName, entry);
+    const workspaceSnapshot = await buildPublishedWorkspaceSnapshot(agentName);
+    const entrypoint = generateAgentEntrypoint(
+      agentName,
+      entry,
+      workspaceSnapshot,
+    );
     const assets = await buildDeployAssets(entrypoint);
     const endpoint = getDeployAppEndpoint(app, config.deploy?.org);
     const envVars = createDeployEnvVars({
@@ -108,15 +115,16 @@ export async function publishAgent(): Promise<void> {
 export function generateAgentEntrypoint(
   agentId: string,
   entry: AgentEntry,
+  workspaceSnapshot?: PublishedWorkspaceSnapshot,
 ): string {
+  const runtimeOptions = workspaceSnapshot
+    ? { agentId, entry, workspaceSnapshot }
+    : { agentId, entry };
   return `// Auto-generated DenoClaw Agent Runtime
 // Agent: ${agentId} | Model: ${entry.model ?? "unknown"}
 
 import { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
 
-await startDeployedAgentRuntime({
-  agentId: ${JSON.stringify(agentId)},
-  entry: ${JSON.stringify(entry, null, 2)},
-});
+await startDeployedAgentRuntime(${JSON.stringify(runtimeOptions, null, 2)});
 `;
 }

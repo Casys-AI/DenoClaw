@@ -21,3 +21,10 @@ Deno.test("parseCliArgs strips only the deno task separator", () => {
   assertEquals(args._, ["publish", "--yes"]);
   assertEquals(args.yes, false);
 });
+
+Deno.test("parseCliArgs supports --force for publish", () => {
+  const args = parseCliArgs(["publish", "alice", "--force"]);
+
+  assertEquals(args._, ["publish", "alice"]);
+  assertEquals(args.force, true);
+});

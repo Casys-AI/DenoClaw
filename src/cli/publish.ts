@@ -7,6 +7,7 @@ import { cliFlags, output, outputError } from "./output.ts";
 import { generateAgentEntrypoint } from "./setup/mod.ts";
 import { materializePublishedEntry } from "./publish_entry.ts";
 import { ensureAgentKvDatabase as ensureAgentKvDatabaseAssignment } from "./publish_kv.ts";
+import { buildPublishedWorkspaceSnapshot } from "./publish_workspace.ts";
 import {
   buildDeployAssets,
   createDeployApiHeaders,
@@ -18,11 +19,18 @@ import {
   resolveBrokerUrl,
 } from "./deploy_api.ts";
 
+export interface PublishAgentsOptions {
+  force?: boolean;
+}
+
 /**
  * Publish one or all agents to Deno Deploy v2 apps/revisions.
  * Each agent gets its own Deploy app + revision.
  */
-export async function publishAgents(agentName?: string): Promise<void> {
+export async function publishAgents(
+  agentName?: string,
+  options: PublishAgentsOptions = {},
+): Promise<void> {
   const config = await getConfigOrDefault();
   const interactive = cliFlags().interactive;
   const deployOrg = config.deploy?.org ||
@@ -176,7 +184,29 @@ export async function publishAgents(agentName?: string): Promise<void> {
       continue;
     }
 
-    const entrypoint = generateAgentEntrypoint(id, resolvedEntry);
+    let workspaceSnapshot;
+    try {
+      workspaceSnapshot = await buildPublishedWorkspaceSnapshot(id, {
+        syncMode: options.force ? "force" : "preserve",
+      });
+    } catch (workspaceError) {
+      const message = workspaceError instanceof Error
+        ? workspaceError.message
+        : String(workspaceError);
+      error(`${id}: failed to snapshot workspace (${message})`);
+      results.push({ id, ok: false, error: message });
+      continue;
+    }
+
+    print(
+      `  Workspace sync: ${workspaceSnapshot.syncMode} (${workspaceSnapshot.files.length} file(s))`,
+    );
+
+    const entrypoint = generateAgentEntrypoint(
+      id,
+      resolvedEntry,
+      workspaceSnapshot,
+    );
     const assets = await buildDeployAssets(entrypoint);
     const envVars = createDeployEnvVars({
       DENOCLAW_AGENT_ID: id,

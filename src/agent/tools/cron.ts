@@ -1,4 +1,8 @@
-import type { SandboxPermission, ToolDefinition, ToolResult } from "../../shared/types.ts";
+import type {
+  SandboxPermission,
+  ToolDefinition,
+  ToolResult,
+} from "../../shared/types.ts";
 import { BaseTool } from "./registry.ts";
 
 export interface CronToolPort {
@@ -7,6 +11,8 @@ export interface CronToolPort {
   ): Promise<ToolResult>;
   list(): Promise<ToolResult>;
   delete(cronJobId: string): Promise<ToolResult>;
+  enable(cronJobId: string): Promise<ToolResult>;
+  disable(cronJobId: string): Promise<ToolResult>;
 }
 
 abstract class CronToolBase extends BaseTool {
@@ -39,9 +45,20 @@ export class CreateCronTool extends CronToolBase {
         parameters: {
           type: "object",
           properties: {
-            name: { type: "string", description: "Short name for the cron job (e.g. 'email-check')" },
-            schedule: { type: "string", description: "Cron expression (e.g. '0 8 * * *' for daily at 8am, '*/30 * * * *' for every 30 minutes)" },
-            prompt: { type: "string", description: "The instruction to execute each time the cron fires" },
+            name: {
+              type: "string",
+              description: "Short name for the cron job (e.g. 'email-check')",
+            },
+            schedule: {
+              type: "string",
+              description:
+                "Cron expression (e.g. '0 8 * * *' for daily at 8am, '*/30 * * * *' for every 30 minutes)",
+            },
+            prompt: {
+              type: "string",
+              description:
+                "The instruction to execute each time the cron fires",
+            },
           },
           required: ["name", "schedule", "prompt"],
         },
@@ -55,7 +72,9 @@ export class CreateCronTool extends CronToolBase {
     }
 
     const name = typeof args.name === "string" ? args.name.trim() : "";
-    const schedule = typeof args.schedule === "string" ? args.schedule.trim() : "";
+    const schedule = typeof args.schedule === "string"
+      ? args.schedule.trim()
+      : "";
     const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
     if (!name || !schedule || !prompt) {
       return this.fail(
@@ -105,7 +124,10 @@ export class DeleteCronTool extends CronToolBase {
         parameters: {
           type: "object",
           properties: {
-            cronJobId: { type: "string", description: "The ID of the cron job to delete" },
+            cronJobId: {
+              type: "string",
+              description: "The ID of the cron job to delete",
+            },
           },
           required: ["cronJobId"],
         },
@@ -130,5 +152,86 @@ export class DeleteCronTool extends CronToolBase {
     }
 
     return await this.port.delete(cronJobId);
+  }
+}
+
+abstract class ToggleCronToolBase extends CronToolBase {
+  protected getCronJobId(args: Record<string, unknown>): string | null {
+    const cronJobId = typeof args.cronJobId === "string"
+      ? args.cronJobId.trim()
+      : "";
+    if (!cronJobId) {
+      return null;
+    }
+    return cronJobId;
+  }
+
+  protected getCronJobIdDefinition(description: string): ToolDefinition {
+    return {
+      type: "function",
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: {
+          type: "object",
+          properties: {
+            cronJobId: { type: "string", description },
+          },
+          required: ["cronJobId"],
+        },
+      },
+    };
+  }
+}
+
+export class EnableCronTool extends ToggleCronToolBase {
+  name = "enable_cron";
+  description = "Enable a scheduled cron job";
+
+  getDefinition(): ToolDefinition {
+    return this.getCronJobIdDefinition("The ID of the cron job to enable");
+  }
+
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.port) {
+      return this.unavailable();
+    }
+
+    const cronJobId = this.getCronJobId(args);
+    if (!cronJobId) {
+      return this.fail(
+        "INVALID_CRON_ARGS",
+        { cronJobId: args.cronJobId },
+        "Provide a non-empty cronJobId",
+      );
+    }
+
+    return await this.port.enable(cronJobId);
+  }
+}
+
+export class DisableCronTool extends ToggleCronToolBase {
+  name = "disable_cron";
+  description = "Disable a scheduled cron job without deleting it";
+
+  getDefinition(): ToolDefinition {
+    return this.getCronJobIdDefinition("The ID of the cron job to disable");
+  }
+
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    if (!this.port) {
+      return this.unavailable();
+    }
+
+    const cronJobId = this.getCronJobId(args);
+    if (!cronJobId) {
+      return this.fail(
+        "INVALID_CRON_ARGS",
+        { cronJobId: args.cronJobId },
+        "Provide a non-empty cronJobId",
+      );
+    }
+
+    return await this.port.disable(cronJobId);
   }
 }

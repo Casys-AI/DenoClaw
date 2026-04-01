@@ -39,6 +39,8 @@ const CRON_TOOLS = new Set<CronToolName>([
   "create_cron",
   "list_crons",
   "delete_cron",
+  "enable_cron",
+  "disable_cron",
 ]);
 
 const DEFAULT_EXEC_POLICY: ExecPolicy = {

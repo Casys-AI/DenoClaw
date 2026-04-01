@@ -14,7 +14,7 @@ import {
   type ChannelRoutePlan,
   createDirectChannelRoutePlan,
 } from "../channel_routing/types.ts";
-import { createSSEResponse } from "../monitoring.ts";
+import { createSSEResponse, listCronJobs } from "../monitoring.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
 import {
@@ -108,6 +108,13 @@ export async function handleBrokerHttp(
 
   if (url.pathname === "/stats/agents") {
     return Response.json(await ctx.metrics.getAllMetrics());
+  }
+
+  if (url.pathname === "/cron/jobs") {
+    const kv = await ctx.getKv();
+    return Response.json(
+      await listCronJobs(kv, url.searchParams.get("agent") ?? undefined),
+    );
   }
 
   if (url.pathname === "/events") {

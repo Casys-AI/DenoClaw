@@ -222,6 +222,65 @@ Deno.test(
   },
 );
 
+Deno.test("FederationService.probeRoute rejects revoked broker identities", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+
+  try {
+    const adapter = new KvFederationAdapter(kv);
+    const service = new FederationService(adapter, adapter, adapter, adapter);
+
+    await adapter.setRemoteCatalog(
+      "broker-b",
+      [{
+        remoteBrokerId: "broker-b",
+        agentId: "agent-1",
+        card: {},
+        capabilities: [],
+        visibility: "public",
+      }],
+      {
+        remoteBrokerId: "broker-b",
+        traceId: "trace-catalog-revocation-1",
+      },
+    );
+
+    await service.upsertIdentity({
+      brokerId: "broker-b",
+      instanceUrl: "https://broker-b.example.com",
+      publicKeys: ["pub-1"],
+      status: "trusted",
+    });
+
+    const beforeRevocation = await service.probeRoute({
+      requesterBrokerId: "broker-a",
+      remoteBrokerId: "broker-b",
+      targetAgent: "agent-1",
+      taskId: "task-route-revocation-1",
+      contextId: "ctx-route-revocation-1",
+      traceId: "trace-route-revocation-1",
+    });
+    assertEquals(beforeRevocation.accepted, true);
+    assertEquals(beforeRevocation.reason, "route_available");
+
+    await service.revokeIdentity("broker-b");
+
+    const afterRevocation = await service.probeRoute({
+      requesterBrokerId: "broker-a",
+      remoteBrokerId: "broker-b",
+      targetAgent: "agent-1",
+      taskId: "task-route-revocation-2",
+      contextId: "ctx-route-revocation-2",
+      traceId: "trace-route-revocation-2",
+    });
+    assertEquals(afterRevocation.accepted, false);
+    assertEquals(afterRevocation.reason, "revoked_identity");
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
 Deno.test(
   "FederationService.syncSignedCatalog accepts trusted signed catalogs",
   async () => {

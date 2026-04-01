@@ -51,6 +51,7 @@ export interface FederationRouteProbeResult {
   accepted: boolean;
   reason:
     | "route_available"
+    | "revoked_identity"
     | "denied_by_policy"
     | "outside_allow_list"
     | "target_agent_not_found";
@@ -230,6 +231,21 @@ export class FederationService {
   async probeRoute(
     input: FederationRouteProbeInput,
   ): Promise<FederationRouteProbeResult> {
+    const requesterIdentity = await this.identity.getIdentity(
+      input.requesterBrokerId,
+    );
+    const remoteIdentity = await this.identity.getIdentity(input.remoteBrokerId);
+    if (
+      requesterIdentity?.status === "revoked" ||
+      remoteIdentity?.status === "revoked"
+    ) {
+      return {
+        linkId: `${input.requesterBrokerId}:${input.remoteBrokerId}`,
+        accepted: false,
+        reason: "revoked_identity",
+      };
+    }
+
     return await this.routeAuthorizer.probeRoute(input);
   }
 

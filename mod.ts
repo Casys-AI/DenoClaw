@@ -16,7 +16,6 @@ export { WorkspaceLoader } from "./src/agent/workspace.ts";
 export type { AgentWorkspace } from "./src/agent/workspace.ts";
 export { ContextBuilder } from "./src/agent/context.ts";
 export { SkillsLoader } from "./src/agent/skills.ts";
-export { CronManager } from "./src/agent/cron.ts";
 export { BaseTool, ToolRegistry } from "./src/agent/tools/registry.ts";
 export { ShellTool } from "./src/agent/tools/shell.ts";
 export { ReadFileTool, WriteFileTool } from "./src/agent/tools/file.ts";
@@ -146,7 +145,8 @@ export type {
   ToolDefinition,
   ToolResult,
 } from "./src/shared/types.ts";
-export type { CronJob, Skill } from "./src/agent/types.ts";
+export type { Skill } from "./src/agent/types.ts";
+export type { BrokerCronJob } from "./src/orchestration/broker/cron_types.ts";
 export {
   ChannelError,
   ConfigError,

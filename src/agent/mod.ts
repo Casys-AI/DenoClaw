@@ -15,13 +15,11 @@ export {
   formatAgentRuntimeCapabilities,
 } from "./runtime_capabilities.ts";
 export { KvSkillsLoader, SkillsLoader } from "./skills.ts";
-export { CronManager } from "./cron.ts";
 export type {
   AgentConfig,
   AgentDefaults,
   AgentResponse,
   AgentsConfig,
-  CronJob,
   Skill,
   ToolsConfig,
 } from "./types.ts";

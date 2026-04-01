@@ -20,7 +20,6 @@ import { KvdexMemory } from "./memory_kvdex.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
 import { KvSkillsLoader, SkillsLoader } from "./skills.ts";
-import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
 import {
   assertRuntimeTaskMessage,
@@ -73,7 +72,6 @@ export class AgentRuntime {
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
   private skills: SkillLoader;
-  private cron!: CronManager;
   private maxIterations: number;
   private memories: Map<string, MemoryPort> = new Map();
   private toolDefinitions: ToolDefinition[];
@@ -118,24 +116,6 @@ export class AgentRuntime {
     this.skills = await this.createSkillsLoader();
     await this.skills.loadSkills();
     await this.llmToolPort.startListening();
-
-    const kv = await this.getKv();
-    this.cron = new CronManager(kv);
-
-    await this.cron.heartbeat(async () => {
-      log.debug(`Heartbeat: ${this.agentId}`);
-      const kv = await this.getKv();
-      await kv.set(["agents", this.agentId, "status"], {
-        status: "alive",
-        lastHeartbeat: new Date().toISOString(),
-      });
-    }, 5);
-
-    await kv.set(["agents", this.agentId, "status"], {
-      status: "running",
-      startedAt: new Date().toISOString(),
-      model: this.config.model,
-    });
   }
 
   private async createSkillsLoader(): Promise<SkillLoader> {
@@ -372,17 +352,12 @@ export class AgentRuntime {
   }
 
   async stop(): Promise<void> {
-    this.cron.close();
     this.llmToolPort.close();
     for (const mem of this.memories.values()) {
       mem.close();
     }
     this.memories.clear();
     if (this.kv) {
-      await this.kv.set(["agents", this.agentId, "status"], {
-        status: "stopped",
-        stoppedAt: new Date().toISOString(),
-      });
       this.kv.close();
       this.kv = null;
     }

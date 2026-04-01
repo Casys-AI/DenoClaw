@@ -25,16 +25,6 @@ export interface Skill {
   path: string;
 }
 
-export interface CronJob {
-  id: string;
-  name: string;
-  schedule: string;
-  task: string;
-  enabled: boolean;
-  lastRun?: string;
-  nextRun?: string;
-}
-
 export interface AgentDefaults {
   model: string;
   temperature: number;

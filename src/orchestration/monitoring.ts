@@ -80,6 +80,20 @@ export async function updateAgentsList(
   await kv.set(["_dashboard", "agents_list"], agentIds);
 }
 
+export async function ensureAgentListed(
+  kv: Deno.Kv,
+  agentId: string,
+): Promise<void> {
+  const key: Deno.KvKey = ["_dashboard", "agents_list"];
+  const current = await kv.get<string[]>(key);
+  const next = new Set(current.value ?? []);
+  if (next.has(agentId)) {
+    return;
+  }
+  next.add(agentId);
+  await kv.set(key, [...next].sort());
+}
+
 /** Write agent status to shared KV. */
 export async function writeAgentStatus(
   kv: Deno.Kv,

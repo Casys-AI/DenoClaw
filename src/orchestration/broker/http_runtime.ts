@@ -39,6 +39,7 @@ export interface BrokerHttpRuntimeDeps {
   ): Promise<Task | null>;
   handleIncomingMessage(msg: BrokerMessage): Promise<void>;
   handleTunnelMessage(tunnelId: string, data: string): Promise<void>;
+  markAgentAlive?(agentId: string): Promise<void>;
 }
 
 export class BrokerHttpRuntime {
@@ -63,6 +64,8 @@ export class BrokerHttpRuntime {
         agentRegistry: this.deps.agentRegistry,
         getAuth: () => this.deps.getAuth(),
         handleIncomingMessage: (msg) => this.deps.handleIncomingMessage(msg),
+        markAgentAlive: (agentId) => this.deps.markAgentAlive?.(agentId) ??
+          Promise.resolve(),
       },
       req,
     );

@@ -14,6 +14,7 @@ export interface BrokerAgentSocketUpgradeContext {
   agentRegistry: BrokerAgentRegistry;
   getAuth(): Promise<AuthManager>;
   handleIncomingMessage(msg: BrokerMessage): Promise<void>;
+  markAgentAlive?: (agentId: string) => Promise<void>;
 }
 
 export async function handleBrokerAgentSocketUpgrade(
@@ -83,6 +84,7 @@ export async function handleBrokerAgentSocketUpgrade(
               raw.endpoint,
             );
           }
+          await ctx.markAgentAlive?.(raw.agentId);
 
           socket.send(
             JSON.stringify({

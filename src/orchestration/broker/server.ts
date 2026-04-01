@@ -6,6 +6,7 @@ import type {
   BrokerTaskSubmitPayload,
 } from "../types.ts";
 import type { StructuredError, ToolResult } from "../../shared/types.ts";
+import type { AgentStatusValue } from "../monitoring_types.ts";
 import type { ExecPolicy } from "../../agent/sandbox_types.ts";
 import type { Config } from "../../config/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
@@ -45,8 +46,9 @@ import {
 } from "../../shared/deploy_credentials.ts";
 import { BrokerMessageRuntime } from "./message_runtime.ts";
 import { BrokerSandboxManager } from "./sandbox_manager.ts";
-import { BrokerCronManager } from "./cron_manager.ts";
+import type { BrokerCronManager } from "./cron_manager.ts";
 import type { ChannelRoutePlan } from "../channel_routing/types.ts";
+import { ensureAgentListed } from "../monitoring.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -169,6 +171,7 @@ export class BrokerServer {
       handleIncomingMessage: (msg) => this.handleIncomingMessage(msg),
       handleTunnelMessage: (tunnelId, data) =>
         this.handleTunnelMessage(tunnelId, data),
+      markAgentAlive: (agentId) => this.markAgentAlive(agentId),
     });
     this.lifecycleRuntime = new BrokerLifecycleRuntime({
       connectedAgents: this.connectedAgents,
@@ -220,13 +223,7 @@ export class BrokerServer {
       federationRuntime: this.federationRuntime,
       sendStructuredError: (to, requestId, error) =>
         this.sendStructuredError(to, requestId, error),
-      writeAgentLiveness: async (agentId: string) => {
-        const kv = await this.getKv();
-        await kv.set(["agents", agentId, "status"], {
-          status: "alive",
-          lastHeartbeat: new Date().toISOString(),
-        });
-      },
+      writeAgentLiveness: (agentId: string) => this.markAgentAlive(agentId),
     });
   }
 
@@ -276,6 +273,19 @@ export class BrokerServer {
       }
     }
     return this.auth;
+  }
+
+  private async markAgentAlive(agentId: string): Promise<void> {
+    const kv = await this.getKv();
+    const now = new Date().toISOString();
+    const current = await kv.get<AgentStatusValue>(["agents", agentId, "status"]);
+    await kv.set(["agents", agentId, "status"], {
+      ...(current.value ?? {}),
+      status: "alive",
+      startedAt: current.value?.startedAt ?? now,
+      lastHeartbeat: now,
+    } satisfies AgentStatusValue);
+    await ensureAgentListed(kv, agentId);
   }
 
   async start(port = 3000): Promise<void> {

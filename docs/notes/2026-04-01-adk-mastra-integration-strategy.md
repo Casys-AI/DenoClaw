@@ -155,25 +155,14 @@ Even without ADK as dependency, the adapter pattern remains:
 - **Prisma Postgres + pgvector**: data plane (sessions, state, conversations,
   embeddings, long-term memory)
 
-## A2A implementation plan
+## A2A implementation status
 
-Implement A2A protocol natively in DenoClaw:
-
-### Client (consuming remote agents)
-- `fetch()` + SSE parsing
-- Agent Card resolution (`.well-known/agent.json`)
-- JSON-RPC 2.0 task lifecycle (send/cancel/get)
-
-### Server (exposing agents)
-- `Deno.serve()` HTTP handler
-- JSON-RPC 2.0 request routing
-- SSE streaming for task updates
-- Agent Card endpoint
-
-### Federation alignment
-- Replace custom `BrokerTaskSubmitPayload` with A2A JSON-RPC messages
-- Replace `RemoteAgentCatalogEntry` with A2A Agent Cards
-- Keep tunnel infrastructure (trust, routing, dead letters, stats)
+A2A client + server are implemented natively (`A2AClient`, `A2AServer`).
+Federation alignment is done (ADR-019):
+- ~~Replace custom `BrokerTaskSubmitPayload` with A2A JSON-RPC messages~~ — payloads are A2A-shaped
+- ~~Replace `RemoteAgentCatalogEntry` with A2A Agent Cards~~ — `card: AgentCard | null`, propagated via catalog sync
+- Tunnel infrastructure preserved (trust, routing, dead letters, stats)
+- SEC-19 fixed: broker identity verified before catalog sync
 
 ## Potential JSR publication
 
@@ -185,11 +174,12 @@ If the agent core matures enough, extract as:
 
 - [x] POC: ADK runs on Deno (validated, but won't import — too heavy)
 - [x] POC: Mastra Memory runs standalone on Deno (validated)
+- [x] Implement A2A client (fetch + SSE) — `A2AClient`
+- [x] Implement A2A server (Deno.serve handler) — `A2AServer`
+- [x] Federation A2A consolidation (ADR-019) — typed cards, catalog propagation, SSE compliance, deprecated alias cleanup, SEC-19
+- [x] Move cron to broker
 - [ ] Design event types + middleware interface (Kaku core)
 - [ ] Implement minimal event loop with 1 middleware
 - [ ] Implement session.state with scoped prefixes
 - [ ] Wire Mastra Memory behind MemoryService adapter
-- [ ] Implement A2A client (fetch + SSE)
-- [ ] Implement A2A server (Deno.serve handler)
 - [ ] Migrate `loop_process.ts` to new event loop
-- [ ] Move cron to broker

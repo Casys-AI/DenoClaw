@@ -4,6 +4,21 @@
 
 # DenoClaw
 
+<p align="center">
+  <a href="https://jsr.io/@denoclaw/denoclaw">
+    <img alt="JSR" src="https://jsr.io/badges/@denoclaw/denoclaw">
+  </a>
+  <a href="https://jsr.io/@denoclaw/denoclaw">
+    <img alt="JSR Score" src="https://jsr.io/badges/@denoclaw/denoclaw/score">
+  </a>
+  <a href="https://jsr.io/@denoclaw/denoclaw">
+    <img alt="JSR Downloads" src="https://jsr.io/badges/@denoclaw/denoclaw/total-downloads">
+  </a>
+  <a href="./LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg">
+  </a>
+</p>
+
 DenoClaw is a Deno-native runtime for brokered multi-agent workflows. It runs
 the control plane on Deno Deploy, agent runtimes as dedicated Deno Deploy apps,
 and arbitrary code execution in Deno Sandbox.

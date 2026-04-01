@@ -1,126 +1,195 @@
-# ADK + Mastra integration strategy for DenoClaw
+# Agent core evolution strategy for DenoClaw
 
-Date: 2026-03-31
+Date: 2026-03-31 (updated 2026-04-01)
 Status: open discussion
 
 ## Summary
 
-After evaluating LangChain, LangGraph, Mastra, Vercel AI SDK, Google ADK, and
-several smaller Deno-native libs, the best strategy for DenoClaw is a **hybrid
-ADK + Mastra** approach:
+After evaluating LangChain, LangGraph, Mastra, Vercel AI SDK, Google ADK,
+AgentForce ADK, @alphaxiv/agents, and several Deno-native libs, the strategy
+is:
 
-- **ADK** for the runtime layer (events, runner, A2A, workflow agents, session
-  state, resume)
-- **Mastra** for the memory layer (observational memory, semantic recall,
-  working memory, memory processors)
+- **Implement a Deno-native agent core** (working name: **Kaku** 核) inspired
+  by ADK patterns but without the ADK dependency
+- **Use Mastra `@mastra/memory`** for the memory layer (pluggable, swappable
+  with Cognee or custom later)
+- **Implement A2A protocol natively** (JSON-RPC 2.0 + SSE on `Deno.serve`,
+  no `@a2a-js/sdk` dependency)
 
-## Why ADK for runtime
+## Why not import ADK directly
 
-- Event loop with yield/pause/resume — each step observable, persistable,
-  interruptible
-- Crash recovery via event replay (resume stopped workflows)
-- Workflow agents (Sequential, Parallel, Loop, Custom) — deterministic
-  orchestration built-in
-- A2A native (A2AServer + RemoteA2aAgent) — interop with entire ecosystem
-- session.state with scoped prefixes (session/user/app/temp)
-- Model-agnostic, TypeScript SDK available (`npm:@google/adk`)
-- Philosophy aligns with DenoClaw: autonomous agents that collaborate, not
-  nodes in a centralized graph
+ADK (`@google/adk`) was validated on Deno (POC passes), but:
 
-### What ADK doesn't do well (self-hosted)
+- **No selective imports** — single barrel export, no subpath exports
+- **Heavy dependencies** — MikroORM (all DB drivers), express, winston,
+  google-auth-library, Google Cloud exporters, protobuf/gRPC
+- 300+ npm packages installed for ~15-20% useful surface
+- Node-centric assumptions (express server, MikroORM, winston logging)
 
-- Advanced memory (observational, semantic recall, consolidation) is locked
-  behind Vertex AI Memory Bank — not available self-hosted
-- No Deno KV integration — custom adapters needed for SessionService
-- No Prisma Postgres integration — custom adapters needed
+Decision: **inspire from ADK patterns, implement Deno-native**.
 
-## Why Mastra for memory
+## Why not import @a2a-js/sdk
 
-- Observational Memory: Observer + Reflector background agents compress old
-  messages into dense observations (5-40× compression), fully self-hosted
-- Semantic Recall: RAG-based search with 17+ vector store backends including
-  PostgreSQL (pgvector)
-- Working Memory: structured persistent data (names, prefs, goals) scoped per
-  resource or thread
-- Memory Processors: trim, filter, prioritize when context exceeds limits
-- Multi-agent memory scoping: resource/thread isolation native, memory sharing
-  between agents via matching identifiers
-- Retrieval mode (experimental): recall tool to browse raw source messages
-  behind compressed observations
-- Storage backends: LibSQL, PostgreSQL, MongoDB, Upstash, Cloudflare D1,
-  DynamoDB, LanceDB, MSSQL, Convex
+- npm-only, peer deps on express + gRPC + protobuf
+- A2A protocol is simple: JSON-RPC 2.0 over HTTP + SSE + Agent Cards
+- Implementable in a few hundred lines with `Deno.serve` + `fetch`
 
-### Mastra coupling concern
+Decision: **implement A2A client/server natively**.
 
-`@mastra/memory` depends on `@mastra/core` (Agent, storage interfaces). Two
-approaches:
+## What we take from ADK (patterns, not code)
 
-1. **Use @mastra/memory directly** — accept the dependency, wrap Mastra's
-   Memory class behind ADK's MemoryService interface. Mastra handles the
-   complex memory logic, ADK runner calls it via adapter.
-2. **Reimplement Mastra patterns** — build Observer/Reflector/semantic recall
-   on top of ADK's MemoryService interface using Prisma Postgres + pgvector.
-   No Mastra dependency, but significant implementation work.
+### Event loop (yield/pause/resume)
 
-Decision: TBD — test option 1 first (evaluate coupling overhead).
+Replace the current `while` loop in `loop_process.ts` and
+`runtime_conversation.ts` with an event-driven model:
 
-## Comparison matrix
+- Agent yields typed events (LLM response, tool call, state delta, delegation)
+- Runner receives event, commits side effects (state, memory), forwards
+  upstream
+- Agent resumes only after commit
+- Each event is observable, persistable, interruptible
 
-| Capability | ADK | Mastra | DenoClaw today |
-|---|---|---|---|
-| Event loop | yield/resume | generate/stream | while loop |
-| Crash recovery | resume native | not documented | none |
-| Workflow agents | Sequential/Parallel/Loop | separate workflows | none |
-| A2A standard | native | supported | custom protocol |
-| Session state | scoped prefixes | via working memory | none |
-| Observational memory | Vertex AI only | self-hosted ✅ | none |
-| Semantic recall | Vertex AI only | self-hosted ✅ | none |
-| Working memory | via session.state | structured ✅ | none |
-| Memory processors | none | native ✅ | none |
-| Multi-agent memory | not documented | scoped ✅ | none |
-| MCP tools | native | native | none |
-| Storage | InMemory, Vertex AI | 10+ backends | Deno KV only |
+### Middleware/onion pattern (Koa/Hono style)
 
-## Persistence architecture (from companion note)
+The agent loop becomes a composable pipeline:
 
-- **Deno KV**: control plane (auth, agent status, workspace files, caches)
-- **Prisma Postgres + pgvector**: data plane (sessions, state, conversations,
-  embeddings, long-term memory)
+```typescript
+agent
+  .use(sessionMiddleware(store))       // session.state management
+  .use(memoryMiddleware(mastraMemory)) // long-term memory injection
+  .use(toolMiddleware(tools))          // tool execution
+  .use(a2aMiddleware())                // A2A delegation
+  .use(observabilityMiddleware())      // tracing/events
+```
 
-## Integration points in DenoClaw
+This allows users to plug in what they want. Memory is swappable
+(Mastra today, Cognee tomorrow, custom later).
 
-### ADK integration (runtime)
+### Session state with scoped prefixes
 
-- `src/agent/runtime.ts` → ADK Runner wrapping broker as transport
-- `src/agent/runtime_conversation.ts` → replaced by ADK event loop
-- `src/agent/loop.ts` + `loop_process.ts` → replaced by ADK agent.runAsync()
-- New: `DenoKvSessionService` (session.state in KV)
-- New: `PrismaSessionService` (conversation history in Postgres)
-- `src/messaging/a2a/` → align with ADK A2A types
+New concept not present in DenoClaw today:
 
-### Mastra integration (memory)
+- No prefix → session-scoped (current conversation)
+- `user:` prefix → user-scoped (across sessions)
+- `app:` prefix → app-scoped (across users)
+- `temp:` prefix → invocation-scoped (discarded after)
 
-- New: `MastraMemoryAdapter` implementing ADK MemoryService interface
-- Uses `@mastra/memory` with `@mastra/pg` storage (Prisma Postgres)
-- Observational Memory with configurable LLM (via broker proxy)
-- Semantic Recall with pgvector embeddings
-- Working Memory for persistent agent scratchpad
+Persisted via `SessionService` adapter (KV or Prisma Postgres).
+
+### Workflow agents
+
+Deterministic orchestration primitives:
+
+- Sequential (steps in order)
+- Parallel (branches)
+- Loop (until condition)
+- Custom (user-defined)
+
+### Resume / crash recovery
+
+Events are persisted. On restart, replay completed events and resume from
+last uncommitted step.
+
+## Mastra for memory (kept)
+
+POC validated: `@mastra/memory` works standalone on Deno without full Mastra
+runtime. `@mastra/pg` (PostgresStore) works independently.
+
+### What Mastra provides
+
+- Observational Memory (Observer + Reflector, 5-40× compression, self-hosted)
+- Semantic Recall (RAG with pgvector, 17+ vector stores)
+- Working Memory (structured persistent data)
+- Memory Processors (trim, filter, prioritize)
+- Multi-agent memory scoping (resource/thread isolation)
+- Retrieval mode (experimental recall tool)
+
+### Pluggability
+
+Memory is behind a port/interface. Mastra is the default implementation.
+Can be swapped for Cognee or custom without touching the core.
+
+## Validation schema
+
+Using `@cfworker/json-schema` (JSR, zero deps, Deno-native) instead of
+Ajv (Node-centric) or Zod (if lighter validation suffices).
+
+## Scope of changes in src/agent/
+
+The refactoring is **targeted**, not a rewrite:
+
+| What changes | Files | ~Lines |
+|---|---|---|
+| Event loop (middleware/onion) | `loop.ts`, `loop_process.ts`, `runtime_conversation.ts` | ~400 |
+| Memory port v2 (Mastra compat) | `memory.ts`, `memory_kvdex.ts`, `memory_port.ts` | ~350 |
+| Session state (new) | new file(s) | ~150 |
+| Cron → broker (move) | `cron.ts` | ~100 |
+
+**Total: ~1000 lines touched/added.**
 
 ### Unchanged
 
-- Broker (control plane, routing, sandbox management)
-- Federation (tunnels, trust, policies — payload format → A2A standard)
-- Channels (Telegram, Discord, webhook)
-- Worker pool + sandbox isolation
+- Tools + tool registry (`tools/`)
+- Sandbox backends (`tools/backends/`)
+- Worker pool + lifecycle (`worker_*.ts`)
+- Workspace loader (`workspace.ts`)
+- Context builder (`context.ts`)
+- Skills loader (`skills.ts`)
+- Deploy runtime (`deploy_runtime.ts`)
+- Broker, federation, channels, transport
+
+## Adapters (still needed)
+
+Even without ADK as dependency, the adapter pattern remains:
+
+- **`SessionService`** interface (our own, inspired by ADK)
+  - `DenoKvSessionService` — lightweight, for session.state in KV
+  - `PrismaSessionService` — full, for conversation history + state in Postgres
+- **`MemoryService`** interface (our own, wrapping Mastra)
+  - `MastraMemoryAdapter` — delegates to `@mastra/memory` + `@mastra/pg`
+  - Future: CogneeAdapter, custom, etc.
+
+## Persistence architecture (unchanged from companion note)
+
+- **Deno KV**: control plane (auth, status, workspace files, caches)
+- **Prisma Postgres + pgvector**: data plane (sessions, state, conversations,
+  embeddings, long-term memory)
+
+## A2A implementation plan
+
+Implement A2A protocol natively in DenoClaw:
+
+### Client (consuming remote agents)
+- `fetch()` + SSE parsing
+- Agent Card resolution (`.well-known/agent.json`)
+- JSON-RPC 2.0 task lifecycle (send/cancel/get)
+
+### Server (exposing agents)
+- `Deno.serve()` HTTP handler
+- JSON-RPC 2.0 request routing
+- SSE streaming for task updates
+- Agent Card endpoint
+
+### Federation alignment
+- Replace custom `BrokerTaskSubmitPayload` with A2A JSON-RPC messages
+- Replace `RemoteAgentCatalogEntry` with A2A Agent Cards
+- Keep tunnel infrastructure (trust, routing, dead letters, stats)
+
+## Potential JSR publication
+
+If the agent core matures enough, extract as:
+- `jsr:@denoclaw/kaku` or `jsr:@casys/kaku` — the agent runtime core
+- Separate from DenoClaw (the full platform with broker, federation, channels)
 
 ## Next steps
 
-- [ ] POC: import `@google/adk` in DenoClaw, create one LlmAgent with
-      FunctionTool, verify it runs on Deno
-- [ ] POC: import `@mastra/memory` with `@mastra/pg`, test Memory class
-      standalone (without full Mastra runtime)
-- [ ] Design ADK Runner adapter that uses broker as LLM/tool proxy
-- [ ] Design DenoKvSessionService + PrismaSessionService
-- [ ] Design MastraMemoryAdapter implementing ADK MemoryService
-- [ ] Evaluate @mastra/memory coupling — can it work without @mastra/core
-      Agent class?
+- [x] POC: ADK runs on Deno (validated, but won't import — too heavy)
+- [x] POC: Mastra Memory runs standalone on Deno (validated)
+- [ ] Design event types + middleware interface (Kaku core)
+- [ ] Implement minimal event loop with 1 middleware
+- [ ] Implement session.state with scoped prefixes
+- [ ] Wire Mastra Memory behind MemoryService adapter
+- [ ] Implement A2A client (fetch + SSE)
+- [ ] Implement A2A server (Deno.serve handler)
+- [ ] Migrate `loop_process.ts` to new event loop
+- [ ] Move cron to broker

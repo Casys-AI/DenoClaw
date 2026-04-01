@@ -33,16 +33,20 @@ export function materializePublishedEntry(
   };
 }
 
+export function createBrokerOwnedAgentConfig(entry: AgentEntry): AgentEntry {
+  const { systemPrompt: _systemPrompt, ...brokerOwnedConfig } = entry;
+  return brokerOwnedConfig;
+}
+
 export function generateAgentEntrypoint(
   agentId: string,
-  entry: AgentEntry,
   workspaceSnapshot?: PublishedWorkspaceSnapshot,
 ): string {
   const runtimeOptions = workspaceSnapshot
-    ? { agentId, entry, workspaceSnapshot }
-    : { agentId, entry };
+    ? { agentId, workspaceSnapshot }
+    : { agentId };
   return `// Auto-generated DenoClaw Agent Runtime
-// Agent: ${agentId} | Model: ${entry.model ?? "unknown"}
+// Agent: ${agentId}
 
 import { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
 

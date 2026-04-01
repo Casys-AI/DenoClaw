@@ -49,9 +49,7 @@ export class AgentStore {
   async list(): Promise<Record<string, AgentEntry>> {
     const registry: Record<string, AgentEntry> = {};
 
-    for await (
-      const entry of this.kv.list<AgentEntry>({ prefix: AGENTS_PREFIX })
-    ) {
+    for await (const entry of this.kv.list<AgentEntry>({ prefix: AGENTS_PREFIX })) {
       if (!isCanonicalAgentConfigKey(entry.key)) continue;
       const agentId = entry.key[1];
       registry[agentId] = entry.value;

@@ -13,6 +13,7 @@ interface BuildPublishedWorkspaceSnapshotOptions {
   agentDir?: string;
   syncId?: string;
   syncMode?: WorkspaceSyncMode;
+  systemPrompt?: string;
 }
 
 export async function buildPublishedWorkspaceSnapshot(
@@ -20,7 +21,16 @@ export async function buildPublishedWorkspaceSnapshot(
   options: BuildPublishedWorkspaceSnapshotOptions = {},
 ): Promise<PublishedWorkspaceSnapshot> {
   const agentDir = options.agentDir ?? getAgentDefDir(agentId);
+  const soulFiles = await collectTopLevelWorkspaceFile(
+    join(agentDir, "soul.md"),
+    "soul.md",
+  );
   const files = [
+    ...(soulFiles.length > 0
+      ? soulFiles
+      : options.systemPrompt
+      ? [{ path: "soul.md", content: options.systemPrompt }]
+      : []),
     ...await collectWorkspaceFiles(join(agentDir, "skills"), "skills"),
     ...await collectWorkspaceFiles(join(agentDir, "memories"), "memories"),
   ].sort((a, b) => a.path.localeCompare(b.path));
@@ -30,6 +40,20 @@ export async function buildPublishedWorkspaceSnapshot(
     syncMode: options.syncMode ?? "preserve",
     files,
   };
+}
+
+async function collectTopLevelWorkspaceFile(
+  fullPath: string,
+  relativePath: string,
+): Promise<PublishedWorkspaceFile[]> {
+  if (!await fileExists(fullPath)) {
+    return [];
+  }
+
+  return [{
+    path: relativePath,
+    content: await Deno.readTextFile(fullPath),
+  }];
 }
 
 async function collectWorkspaceFiles(

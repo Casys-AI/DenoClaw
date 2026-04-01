@@ -5,6 +5,7 @@ import { getDeployOrgToken } from "../shared/deploy_credentials.ts";
 import { ask, confirm, error, print, success } from "./prompt.ts";
 import { cliFlags, output, outputError } from "./output.ts";
 import {
+  createBrokerOwnedAgentConfig,
   generateAgentEntrypoint,
   materializePublishedEntry,
 } from "./publish_entry.ts";
@@ -208,6 +209,7 @@ export async function publishAgents(
     try {
       workspaceSnapshot = await buildPublishedWorkspaceSnapshot(id, {
         syncMode: options.force ? "force" : "preserve",
+        systemPrompt: resolvedEntry.systemPrompt,
       });
     } catch (workspaceError) {
       const message = workspaceError instanceof Error
@@ -224,7 +226,6 @@ export async function publishAgents(
 
     const entrypoint = generateAgentEntrypoint(
       id,
-      resolvedEntry,
       workspaceSnapshot,
     );
     const assets = await buildDeployAssets(entrypoint);
@@ -273,7 +274,7 @@ export async function publishAgents(
         authToken: brokerToken,
         agentId: id,
         endpoint,
-        config: resolvedEntry,
+        config: createBrokerOwnedAgentConfig(resolvedEntry),
       });
       success(`  Registered with broker: ${id}`);
     } catch (registerError) {

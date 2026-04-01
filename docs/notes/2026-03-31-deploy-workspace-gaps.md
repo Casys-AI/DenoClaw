@@ -2,23 +2,35 @@
 
 ## Status
 
-Identified during architecture review. Not yet addressed.
+Historical snapshot from the 2026-03-31 review.
 
-## Context
+Validated update as of 2026-04-01:
+
+- `skills/*` deploy loading has landed
+- `memories/*` workspace KV routing/listing has landed
+- the remaining active gap is the `soul.md` / `agent.json` source-of-truth
+  split
+
+See:
+
+- `docs/adrs/adr-018-workspace-kv-backend-for-deploy.md`
+- `docs/plans/2026-04-01-agent-config-workspace-source-of-truth-plan.md`
+
+## Historical context
 
 In local mode, agents load all their workspace data from the filesystem
 (`data/agents/<id>/`). In deployed mode (Deno Deploy), there is no persistent
 filesystem. ADR-009 planned a KV-backed workspace for Deploy, but the
 implementation is incomplete.
 
-## What works in Deploy
+## What worked in Deploy at review time
 
 - `agent.json` + `soul.md`: baked as string literals in the generated `main.ts`
   at publish time. Functional but requires re-publish on any change.
 - Short-term memory (conversations): KV via kvdex with `Deno.openKv()` (no path
   = Deploy managed KV). Fully operational.
 
-## What does NOT work in Deploy
+## What was missing at review time
 
 ### skills/*.md
 

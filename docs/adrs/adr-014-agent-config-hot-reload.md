@@ -4,22 +4,30 @@
 
 ## Context
 
-When an agent's configuration changes (agent.json, soul.md, skills/, or exec
-policy), the gateway must currently be restarted. This breaks all active
-conversations and disconnects all agents.
+When local authoring files under `data/agents/<id>/` change, the gateway must
+currently be restarted. This breaks active local conversations and disconnects
+running workers.
 
-The gateway should detect config changes and apply them without restart.
+The ownership split is now clearer:
+
+- `agent.json` is the local authoring surface for broker-owned control-plane
+  config
+- `soul.md` and `skills/` are local authoring surfaces for agent-owned
+  workspace content
+
+This ADR covers **local filesystem watch behavior only**. It does not define
+how Deploy picks up those changes after publish.
 
 ## Decision
 
 Use `Deno.watchFs()` to monitor `data/agents/` for changes and reload affected
-agents at runtime.
+agents at runtime in local mode.
 
 ### What triggers a reload
 
 | Change                  | Effect                                                |
 | ----------------------- | ----------------------------------------------------- |
-| `agent.json` modified   | Reload runtime config (peers, acceptFrom, execPolicy) |
+| `agent.json` modified   | Reload local runtime config (peers, acceptFrom, execPolicy) |
 | New agent directory     | Spawn new worker via `WorkerPool.addAgent()`          |
 | Agent directory deleted | Graceful shutdown of worker                           |
 
@@ -65,9 +73,19 @@ Reload strategy:
 File watchers emit multiple events for a single save. Debounce with a 500ms
 window per agent to avoid redundant reloads.
 
+### Scope exclusions
+
+This ADR does **not** cover:
+
+- broker KV synchronization for deploy-time agent config
+- agent-private workspace KV synchronization for deploy-time `soul.md` or
+  `skills/*`
+- publish/reconcile behavior for Deploy
+
 ### What is reloadable vs what requires restart
 
-**Reloadable at runtime** (WorkerPool re-reads agent.json, no worker restart):
+**Reloadable at runtime** (local WorkerPool re-reads `agent.json`, no worker
+restart):
 
 - `peers`, `acceptFrom` — checked at routing time, not cached in worker
 - `execPolicy` — checked at tool execution time
@@ -88,7 +106,8 @@ window per agent to avoid redundant reloads.
 
 - Zero-downtime config updates
 - Add/remove agents without gateway restart
-- Natural workflow: edit agent.json → changes apply automatically
+- Natural workflow: edit `agent.json` → local gateway changes apply
+  automatically
 - Compatible with `git pull` deploying new agent configs
 
 **Negative:**
@@ -97,3 +116,5 @@ window per agent to avoid redundant reloads.
 - Debounce logic adds complexity
 - Race condition risk: config change during active conversation
 - `Deno.watchFs()` behavior may vary by OS (polling on some platforms)
+- Deploy still needs an explicit publish/sync step; watchFs is not the deploy
+  propagation mechanism

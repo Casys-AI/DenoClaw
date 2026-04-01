@@ -55,14 +55,15 @@ Each agent has a `memories/` directory inside its workspace:
 | Environment              | Backend                                    | Source of truth |
 | ------------------------ | ------------------------------------------ | --------------- |
 | Local (dev/VPS)          | `.md` files (`data/agents/<id>/memories/`) | Filesystem      |
-| Deploy (deployed agents) | KV (`["memories", agentId, filename]`)     | KV              |
+| Deploy (deployed agents) | KV (`["workspace", agentId, "memories", filename]`) | KV |
 
 Locally, the `.md` files are git-friendly, editable, and reviewable in PRs. On
 Deploy there is no filesystem, so everything lives in KV. The content remains
 the same Markdown; only the storage layer changes.
 
-**Sync on deployment:** `deploy:agent` reads local `.md` files and copies them
-into the deployed agent's KV. `soul.md` and `skills/` follow the same pattern.
+**Sync on deployment:** publish copies local memory `.md` files into the
+deployed agent's workspace KV. `skills/` and `soul.md` now follow the same
+pattern.
 
 **No special tool.** The agent uses the existing file tools (`read_file`,
 `write_file`) to read and write its memories, just like Claude Code.
@@ -74,7 +75,7 @@ agent does not know which backend is active.
 ```
 Agent: write_file("memories/user_prefs.md", "Prefers French")
 → Local:  Deno.writeTextFile("data/agents/alice/memories/user_prefs.md", ...)
-→ Deploy: kv.set(["workspace", "alice", "memories/user_prefs.md"], ...)
+→ Deploy: kv.set(["workspace", "alice", "memories", "user_prefs.md"], ...)
 ```
 
 **At startup:** the system prompt receives the list of memory files so the agent
@@ -246,7 +247,7 @@ tool, not for long-term memory.**
 - The dual model (KV + `.md`) covers both use cases without over-engineering
 - The architecture can grow into vector search without a storage rewrite
 - Compatible with local mode (filesystem) and Deploy (KV behind the same tools)
-- `deploy:agent` syncs local workspace → remote KV (`soul.md`, `skills/`,
+- publish syncs local workspace content → remote KV (`soul.md`, `skills/`,
   `memories/`)
 - No special memory tool is required; `read_file` / `write_file` are enough
 - Follows the Claude Code pattern: the agent manages its memories as files

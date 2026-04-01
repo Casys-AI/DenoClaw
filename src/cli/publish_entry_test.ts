@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import {
+  createBrokerOwnedAgentConfig,
   generateAgentEntrypoint,
   materializePublishedEntry,
 } from "./publish_entry.ts";
@@ -79,18 +80,25 @@ Deno.test("materializePublishedEntry merges nested privilege elevation config", 
   });
 });
 
+Deno.test("createBrokerOwnedAgentConfig strips workspace system prompt", () => {
+  const entry = createBrokerOwnedAgentConfig({
+    model: "test/model",
+    systemPrompt: "workspace prompt",
+    peers: ["agent-beta"],
+  });
+
+  assertEquals(entry, {
+    model: "test/model",
+    peers: ["agent-beta"],
+  });
+});
+
 Deno.test("generateAgentEntrypoint embeds workspace snapshot when present", () => {
-  const entrypoint = generateAgentEntrypoint(
-    "alice",
-    {
-      model: "test/model",
-    },
-    {
-      syncId: "sync-1",
-      syncMode: "preserve",
-      files: [{ path: "skills/test.md", content: "hello" }],
-    },
-  );
+  const entrypoint = generateAgentEntrypoint("alice", {
+    syncId: "sync-1",
+    syncMode: "preserve",
+    files: [{ path: "skills/test.md", content: "hello" }],
+  });
 
   assertEquals(
     entrypoint.includes('"workspaceSnapshot"'),
@@ -100,4 +108,5 @@ Deno.test("generateAgentEntrypoint embeds workspace snapshot when present", () =
     entrypoint.includes('"agentId": "alice"'),
     true,
   );
+  assertEquals(entrypoint.includes('"entry"'), false);
 });

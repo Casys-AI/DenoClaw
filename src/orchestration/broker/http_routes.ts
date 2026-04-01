@@ -146,6 +146,24 @@ export async function handleBrokerHttp(
     return Response.json({ ok: true, agentId: body.agentId });
   }
 
+  const agentConfigMatch = url.pathname.match(/^\/agents\/([^/]+)\/config$/);
+  if (req.method === "GET" && agentConfigMatch) {
+    const agentId = decodeURIComponent(agentConfigMatch[1]);
+    const config = await ctx.agentRegistry.getAgentConfig(agentId);
+    if (!config) {
+      return Response.json(
+        {
+          error: {
+            code: "AGENT_NOT_FOUND",
+            recovery: "Register the agent with the broker before deploy boot",
+          },
+        },
+        { status: 404 },
+      );
+    }
+    return Response.json({ agentId, config });
+  }
+
   if (req.method === "POST" && url.pathname === "/ingress/messages") {
     const body = (await req.json().catch(() => null)) as {
       message?: ChannelMessage;

@@ -107,6 +107,27 @@ Deno.test({
   sanitizeOps: false,
 });
 
+Deno.test({
+  name: "AgentStore.set — writes canonical key and removes legacy key",
+  async fn() {
+    const kv = await Deno.openKv(await Deno.makeTempFile({ suffix: ".db" }));
+    const store = new AgentStore(kv);
+
+    await kv.set(createLegacyAgentConfigKey("agent-a"), AGENT_A);
+    await store.set("agent-a", AGENT_B);
+
+    const canonical = await kv.get<AgentEntry>(createAgentConfigKey("agent-a"));
+    const legacy = await kv.get<AgentEntry>(createLegacyAgentConfigKey("agent-a"));
+
+    assertEquals(canonical.value, AGENT_B);
+    assertStrictEquals(legacy.value, null);
+
+    kv.close();
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
 // ── list ───────────────────────────────────────────────────
 
 Deno.test({
@@ -145,8 +166,7 @@ Deno.test({
 });
 
 Deno.test({
-  name:
-    "AgentStore.list — includes legacy entries only when canonical key is absent",
+  name: "AgentStore.list — includes legacy entries only when canonical key is absent",
   async fn() {
     const kv = await Deno.openKv(await Deno.makeTempFile({ suffix: ".db" }));
     const store = new AgentStore(kv);
@@ -156,7 +176,6 @@ Deno.test({
     await kv.set(createAgentConfigKey("agent-b"), AGENT_B);
 
     const result = await store.list();
-
     assertEquals(result["agent-a"], AGENT_A);
     assertEquals(result["agent-b"], AGENT_B);
     assertEquals(Object.keys(result).length, 2);
@@ -213,7 +232,6 @@ Deno.test({
     await kv.set(createLegacyAgentConfigKey("agent-a"), AGENT_A);
 
     const deleted = await store.delete("agent-a");
-
     assertStrictEquals(deleted, true);
     assertStrictEquals(
       (await kv.get<AgentEntry>(createAgentConfigKey("agent-a"))).value,

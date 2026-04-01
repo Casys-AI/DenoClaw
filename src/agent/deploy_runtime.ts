@@ -15,11 +15,90 @@ import {
   type PublishedWorkspaceSnapshot,
   syncPublishedWorkspaceSnapshot,
 } from "./published_workspace.ts";
+import { readWorkspaceKv } from "./tools/file_workspace.ts";
 
 export interface DeployedAgentRuntimeOptions {
   agentId: string;
-  entry: AgentEntry;
   workspaceSnapshot?: PublishedWorkspaceSnapshot;
+}
+
+export async function fetchCanonicalBrokerAgentConfig(input: {
+  brokerUrl: string;
+  authToken: string;
+  agentId: string;
+  fetchFn?: typeof fetch;
+}): Promise<AgentEntry | null> {
+  const fetchFn = input.fetchFn ?? fetch;
+  const res = await fetchFn(
+    new URL(`/agents/${encodeURIComponent(input.agentId)}/config`, input.brokerUrl),
+    {
+      headers: {
+        authorization: `Bearer ${input.authToken}`,
+      },
+    },
+  );
+
+  if (res.status === 404) {
+    return null;
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new DenoClawError(
+      "BROKER_AGENT_CONFIG_FETCH_FAILED",
+      {
+        agentId: input.agentId,
+        status: res.status,
+        body,
+      },
+      "Check broker registration and deploy agent authentication",
+    );
+  }
+
+  const body = (await res.json().catch(() => null)) as {
+    agentId?: string;
+    config?: AgentEntry;
+  } | null;
+  if (!body || body.agentId !== input.agentId || !body.config) {
+    throw new DenoClawError(
+      "BROKER_AGENT_CONFIG_INVALID",
+      { agentId: input.agentId },
+      "Broker must return { agentId, config } for deploy agent boot",
+    );
+  }
+
+  return body.config;
+}
+
+export async function loadWorkspaceSystemPrompt(input: {
+  kv: Deno.Kv;
+  agentId: string;
+}): Promise<string | undefined> {
+  const content = await readWorkspaceKv(input.kv, input.agentId, "soul.md");
+  return content ?? undefined;
+}
+
+async function resolveDeployedAgentEntry(input: {
+  agentId: string;
+  brokerUrl: string;
+  brokerAuthToken: string;
+  fetchFn?: typeof fetch;
+}): Promise<AgentEntry> {
+  const brokerEntry = await fetchCanonicalBrokerAgentConfig({
+    brokerUrl: input.brokerUrl,
+    authToken: input.brokerAuthToken,
+    agentId: input.agentId,
+    fetchFn: input.fetchFn,
+  });
+  if (!brokerEntry) {
+    throw new DenoClawError(
+      "BROKER_AGENT_CONFIG_MISSING",
+      { agentId: input.agentId },
+      "Register the deployed agent with the broker before runtime boot",
+    );
+  }
+
+  return brokerEntry;
 }
 
 export async function startDeployedAgentRuntime(
@@ -30,11 +109,20 @@ export async function startDeployedAgentRuntime(
   const oidcAudience = Deno.env.get("DENOCLAW_BROKER_OIDC_AUDIENCE") ||
     brokerUrl;
   const agentEndpoint = Deno.env.get("DENOCLAW_AGENT_URL");
-  const runtimeConfig = resolveRuntimeConfig(agentId, options.entry);
-
-  if (options.workspaceSnapshot) {
+  let workspaceSystemPrompt: string | undefined;
+  const brokerAuthToken = await resolveBrokerAuthToken({
+    brokerUrl,
+    oidcAudience,
+  });
+  const resolvedEntry = await resolveDeployedAgentEntry({
+    agentId,
+    brokerUrl,
+    brokerAuthToken,
+  });
+  {
     const kv = await Deno.openKv();
     try {
+      if (options.workspaceSnapshot) {
       const workspaceSync = await syncPublishedWorkspaceSnapshot(
         kv,
         agentId,
@@ -49,10 +137,20 @@ export async function startDeployedAgentRuntime(
           skipped: workspaceSync.skipped,
         });
       }
+      }
+      workspaceSystemPrompt = await loadWorkspaceSystemPrompt({
+        kv,
+        agentId,
+      });
     } finally {
       kv.close();
     }
   }
+  const runtimeConfig = resolveRuntimeConfig(
+    agentId,
+    resolvedEntry,
+    workspaceSystemPrompt,
+  );
 
   let runtime: AgentRuntime | null = null;
 
@@ -80,7 +178,7 @@ export async function startDeployedAgentRuntime(
     broker,
     broker,
     10,
-    deriveAgentRuntimeCapabilitiesFromEntry(options.entry, undefined, {
+    deriveAgentRuntimeCapabilitiesFromEntry(resolvedEntry, undefined, {
       privilegeElevationSupported: true,
     }),
   );
@@ -90,7 +188,11 @@ export async function startDeployedAgentRuntime(
   log.info(`Deployed agent runtime started: ${agentId}`);
 }
 
-function resolveRuntimeConfig(agentId: string, entry: AgentEntry): AgentConfig {
+function resolveRuntimeConfig(
+  agentId: string,
+  entry: AgentEntry,
+  workspaceSystemPrompt?: string,
+): AgentConfig {
   if (!entry.model) {
     throw new DenoClawError(
       "AGENT_MODEL_MISSING",
@@ -105,7 +207,9 @@ function resolveRuntimeConfig(agentId: string, entry: AgentEntry): AgentConfig {
       ? { temperature: entry.temperature }
       : {}),
     ...(entry.maxTokens !== undefined ? { maxTokens: entry.maxTokens } : {}),
-    ...(entry.systemPrompt ? { systemPrompt: entry.systemPrompt } : {}),
+    ...((workspaceSystemPrompt ?? entry.systemPrompt)
+      ? { systemPrompt: workspaceSystemPrompt ?? entry.systemPrompt }
+      : {}),
   };
 }
 

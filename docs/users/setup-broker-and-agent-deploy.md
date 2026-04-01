@@ -172,6 +172,9 @@ deno task publish alice
 By default, publish syncs the local tracked workspace into the deployed agent KV
 in **preserve** mode:
 
+- missing `soul.md` is created remotely when present locally
+- if no local `soul.md` exists, publish materializes one from the resolved
+  publish-time system prompt when available
 - missing `skills/*.md` and `memories/*.md` files are created remotely
 - existing remote files with different content are kept as-is
 - remote-only files are not deleted
@@ -192,8 +195,10 @@ deno task publish
 The publish flow:
 
 - loads agents from `data/agents/*`
+- resolves local `agent.json` + defaults into the publish-time agent config
 - creates or reuses one Deploy app per agent
-- snapshots local `skills/` and `memories/` into the generated deploy entrypoint
+- snapshots `soul.md`, `skills/`, and `memories/` into the agent workspace sync
+  payload
 - bootstraps the agent KV workspace on first boot of the new revision
 - uploads a generated `main.ts` entrypoint plus source assets
 - creates a new revision through `POST /v2/apps/{app}/deploy`
@@ -201,7 +206,10 @@ The publish flow:
 
 Workspace sync behavior is intentionally narrow:
 
-- local `skills/*.md` and `memories/*.md` are the tracked publish set
+- local `soul.md`, `skills/*.md`, and `memories/*.md` are the tracked publish
+  set
+- `agent.json` is not written into the agent-private workspace KV; publish
+  registers it with the broker as control-plane config
 - `--force` overwrites only those tracked files
 - a publish does not delete extra remote files
 - a publish revision sync is applied once, then the remote KV can evolve again
@@ -225,6 +233,11 @@ Current behavior:
 
 - `generateAgentEntrypoint()` boots `startDeployedAgentRuntime()`
 - the broker stores agent config and public endpoint via `/agents/register`
+- deploy ownership is currently hybrid:
+  - broker stores agent config and endpoint
+  - agent-private KV stores synced `soul.md`, `skills/*`, and `memories/*`
+- the deployed runtime boots from broker config plus workspace KV content; the
+  generated entrypoint only carries bootstrap metadata and workspace sync data
 - cold agents are woken by broker `POST /tasks`
 - awake agents connect back to the broker over `/agent/socket`
 - the WebSocket transport first wakes the broker over HTTP, then retries the WS
@@ -235,12 +248,14 @@ Current behavior:
 
 Files involved:
 
-- `src/cli/setup.ts`
 - `src/cli/publish.ts`
+- `src/cli/publish_entry.ts`
+- `src/cli/deploy_api.ts`
 - `src/agent/deploy_runtime.ts`
 - `src/orchestration/client.ts`
 - `src/orchestration/transport.ts`
-- `src/orchestration/broker.ts`
+- `src/orchestration/broker/server.ts`
+- `src/orchestration/broker/http_routes.ts`
 
 What remains:
 

@@ -3342,6 +3342,59 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer GET /agents/:id/config returns stored agent config",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const broker = new BrokerServer(createConfig(), {
+      kv,
+      // deno-lint-ignore no-explicit-any
+      metrics: { recordAgentMessage: async () => {} } as any,
+    });
+    (broker as unknown as { auth: AuthManager }).auth = new AuthManager(kv);
+    const previousStaticToken = Deno.env.get("DENOCLAW_API_TOKEN");
+    Deno.env.set("DENOCLAW_API_TOKEN", "config-secret");
+
+    try {
+      await kv.set(["agents", "agent-beta", "config"], {
+        model: "test/model",
+        peers: ["agent-alpha"],
+      });
+
+      const res = await (
+        broker as unknown as {
+          handleHttpInner(req: Request): Promise<Response>;
+        }
+      ).handleHttpInner(
+        new Request("http://localhost/agents/agent-beta/config", {
+          headers: {
+            authorization: "Bearer config-secret",
+          },
+        }),
+      );
+
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), {
+        agentId: "agent-beta",
+        config: {
+          model: "test/model",
+          peers: ["agent-alpha"],
+        },
+      });
+    } finally {
+      if (previousStaticToken === undefined) {
+        Deno.env.delete("DENOCLAW_API_TOKEN");
+      } else {
+        Deno.env.set("DENOCLAW_API_TOKEN", previousStaticToken);
+      }
+      await broker.stop();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "BrokerServer.submitAgentTask posts to registered agent endpoint when no live route is available",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });

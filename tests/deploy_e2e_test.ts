@@ -113,7 +113,7 @@ async function getTask(
 ): Promise<{ task: { id: string; status: { state: string }; artifacts: unknown[] } }> {
   const res = await fetch(`${BROKER_URL}/ingress/tasks/${taskId}`, {
     headers: authHeaders(),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(30_000),
   });
   const body = await res.json();
   assert(

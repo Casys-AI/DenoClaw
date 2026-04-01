@@ -61,6 +61,7 @@ type AgentEvent =
   | LlmResponseEvent     // observation: LLM responded
   | ToolCallEvent         // kernel requests tool execution
   | ToolResultEvent       // observation: tool returned
+  | ConfirmationRequestEvent // tool/agent requests external confirmation
   | StateChangeEvent      // session state mutation
   | DelegationEvent       // A2A delegation to another agent
   | CompleteEvent         // final answer
@@ -73,17 +74,59 @@ type AgentEvent =
 type EventResolution =
   | LlmResolution        // LLM response (content + tool_calls?)
   | ToolResolution        // tool execution result
+  | ConfirmationResolution // external confirmation response
   | DelegationResolution  // delegated agent response
 ```
 
 ### Semantics
 
-- **Request events** (`llm_request`, `tool_call`, `delegation`): the kernel
-  captures the return value of `yield` as the resolution.
+- **Request events** (`llm_request`, `tool_call`, `confirmation_request`,
+  `delegation`): the kernel captures the return value of `yield` as the
+  resolution.
 - **Observation events** (`llm_response`, `tool_result`, `state_change`):
   fire-and-forget, the kernel ignores the return value.
 - All events are JSON-serializable for future EventStore persistence.
 - `eventId` is sequential per conversation — basis for replay.
+
+### Confirmation events (ADK-inspired)
+
+`ConfirmationRequestEvent` generalizes the current privilege elevation /
+INPUT_REQUIRED mechanism. Any tool or middleware can request external
+confirmation — not just exec policy.
+
+```typescript
+interface ConfirmationRequestEvent extends BaseEvent {
+  type: "confirmation_request"
+  callId: string            // tool call that triggered this
+  toolName: string          // which tool needs confirmation
+  confirmationType: "boolean" | "structured"
+  prompt: string            // human-readable explanation
+  schema?: object           // expected response shape (structured mode)
+  metadata?: Record<string, unknown>  // privilege scope, command, etc.
+}
+
+interface ConfirmationResolution {
+  confirmed: boolean
+  data?: Record<string, unknown>  // structured response (if applicable)
+}
+```
+
+**Flow:**
+
+1. Kernel yields `ToolCallEvent`
+2. `toolMiddleware` detects tool requires confirmation
+3. Middleware yields `ConfirmationRequestEvent` to runner
+4. Runner persists event, forwards to client (channel, UI, API)
+5. Runner **suspends** — generator stays paused
+6. External response arrives (broker message, API call, etc.)
+7. Runner injects `ConfirmationResolution` into generator
+8. If confirmed → tool executes, kernel gets `ToolResolution`
+9. If rejected → kernel gets error resolution, continues
+
+This replaces the hard-coded privilege elevation in
+`runtime_conversation.ts` with a generic, middleware-driven mechanism.
+Any tool can use `require_confirmation: true` or a dynamic threshold
+function (ADK pattern).
 
 ## Kernel (AsyncGenerator)
 

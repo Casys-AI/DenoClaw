@@ -11,6 +11,7 @@ import { BrokerCronManager } from "./broker/cron_manager.ts";
 import { AuthManager } from "./auth.ts";
 import { MetricsCollector } from "../telemetry/metrics.ts";
 import { TunnelRegistry } from "./broker/tunnel_registry.ts";
+import { createLegacyAgentConfigKey } from "./agent_store.ts";
 import {
   DENOCLAW_TUNNEL_PROTOCOL,
   getAcceptedTunnelProtocol,
@@ -961,6 +962,81 @@ Deno.test(
         "runtime-capabilities-v1",
       );
       assertEquals(sandboxCalls, 0);
+
+      await broker.stop();
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
+  "BrokerServer resolves legacy agent config namespace for tool permission checks",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+
+    try {
+      const config = createConfig();
+      config.agents.defaults.sandbox = {
+        allowedPermissions: ["read"],
+      };
+
+      let sandboxCalls = 0;
+      const broker = createTestBroker(config, {
+        kv,
+        toolExecution: {
+          executeTool: () => {
+            sandboxCalls++;
+            return Promise.resolve({ success: true, output: "legacy-ok" });
+          },
+          resolveToolPermissions: () => ["write"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+      const alphaMessages = attachConnectedAgentInbox(broker, "agent-alpha");
+
+      await kv.set(createLegacyAgentConfigKey("agent-alpha"), {
+        sandbox: {
+          allowedPermissions: ["write"],
+        },
+      });
+
+      const replyPromise = waitForCollectedMessage(
+        alphaMessages,
+        (message) =>
+          message.type === "tool_response" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-legacy-config",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "write_file",
+          args: { path: "note.txt", content: "hi" },
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(reply.payload.success, true);
+      assertEquals(reply.payload.output, "legacy-ok");
+      assertEquals(sandboxCalls, 1);
 
       await broker.stop();
     } finally {

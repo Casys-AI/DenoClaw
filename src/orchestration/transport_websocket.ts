@@ -1,4 +1,3 @@
-import type { AgentEntry } from "../shared/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import { log } from "../shared/log.ts";
 import { isAgentSocketRegisteredMessage } from "./agent_socket_protocol.ts";
@@ -30,7 +29,6 @@ export class WebSocketBrokerTransport implements BrokerTransport {
   private authToken?: string;
   private getAuthToken?: () => Promise<string>;
   private endpoint?: string;
-  private config?: AgentEntry;
   private onBrokerMessage?: (message: BrokerMessage) => void | Promise<void>;
   private ws: BrokerSocket | null = null;
   private connectPromise: Promise<void> | null = null;
@@ -45,7 +43,6 @@ export class WebSocketBrokerTransport implements BrokerTransport {
     this.authToken = deps.authToken;
     this.getAuthToken = deps.getAuthToken;
     this.endpoint = deps.endpoint;
-    this.config = deps.config;
     this.onBrokerMessage = deps.onBrokerMessage;
 
     if (!this.authToken && !this.getAuthToken) {
@@ -60,7 +57,6 @@ export class WebSocketBrokerTransport implements BrokerTransport {
       agentId: this.agentId,
       brokerUrl: this.brokerUrl,
       endpoint: this.endpoint,
-      config: this.config,
       resolveAuthToken: () => this.resolveAuthToken(),
       onSocketMessage: (event) => {
         void this.handleSocketMessage(event);

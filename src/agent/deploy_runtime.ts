@@ -59,7 +59,6 @@ export async function startDeployedAgentRuntime(
   const brokerTransport = new WebSocketBrokerTransport(agentId, {
     brokerUrl,
     endpoint: agentEndpoint,
-    config: options.entry,
     getAuthToken: async () =>
       await resolveBrokerAuthToken({ brokerUrl, oidcAudience }),
     onBrokerMessage: async (message) => {

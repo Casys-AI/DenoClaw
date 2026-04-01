@@ -2,7 +2,6 @@ import {
   createAgentSocketRegisterMessage,
   DENOCLAW_AGENT_PROTOCOL,
 } from "./agent_socket_protocol.ts";
-import type { AgentEntry } from "../shared/types.ts";
 import { log } from "../shared/log.ts";
 
 const BROKER_WAKE_RETRIES = 3;
@@ -29,7 +28,6 @@ export interface WebSocketBrokerConnectionRuntimeDeps {
   agentId: string;
   brokerUrl: string;
   endpoint?: string;
-  config?: AgentEntry;
   resolveAuthToken(): Promise<string>;
   onSocketMessage(event: MessageEvent): void;
   onSocketClose(): void;
@@ -102,7 +100,6 @@ export class WebSocketBrokerConnectionRuntime {
             createAgentSocketRegisterMessage({
               agentId: this.deps.agentId,
               endpoint: this.deps.endpoint,
-              config: this.deps.config,
             }),
           ),
         );

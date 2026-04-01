@@ -74,10 +74,6 @@ export async function handleBrokerAgentSocketUpgrade(
             socket,
             authResult.identity,
           );
-
-          if (raw.config) {
-            await ctx.agentRegistry.saveAgentConfig(raw.agentId, raw.config);
-          }
           if (raw.endpoint) {
             await ctx.agentRegistry.saveAgentEndpoint(
               raw.agentId,

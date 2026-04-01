@@ -25,11 +25,9 @@ import type { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import type { BrokerTaskPersistence } from "./persistence.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerCronManager } from "./cron_manager.ts";
-import {
-  getAgentDefDir,
-  isDeployEnvironment,
-} from "../../shared/helpers.ts";
+import { getAgentDefDir, isDeployEnvironment } from "../../shared/helpers.ts";
 import type { ToolExecutorConfig } from "../../shared/types.ts";
+import { AgentStore } from "../agent_store.ts";
 import {
   type CronToolName,
   executeCronToolRequest,
@@ -368,7 +366,7 @@ export class BrokerToolDispatcher {
     agentId: string,
   ): Promise<Deno.KvEntryMaybe<AgentEntry>> {
     const kv = await this.deps.getKv();
-    return await kv.get<AgentEntry>(["agents", agentId, "config"]);
+    return await new AgentStore(kv).getEntry(agentId);
   }
 
   private resolveToolExecutionConfig(agentId: string): ToolExecutorConfig {

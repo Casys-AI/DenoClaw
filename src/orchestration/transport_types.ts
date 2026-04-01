@@ -1,4 +1,3 @@
-import type { AgentEntry } from "../shared/types.ts";
 import type {
   BrokerMessage,
   BrokerRequestMessage,
@@ -33,6 +32,5 @@ export interface WebSocketBrokerTransportDeps {
   authToken?: string;
   getAuthToken?: () => Promise<string>;
   endpoint?: string;
-  config?: AgentEntry;
   onBrokerMessage?: (message: BrokerMessage) => void | Promise<void>;
 }

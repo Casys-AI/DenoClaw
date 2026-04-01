@@ -7,8 +7,8 @@ import {
   getPrivilegeElevationGrantSignature,
   type PrivilegeElevationGrant,
 } from "../../shared/privilege_elevation.ts";
-import type { AgentEntry } from "../../shared/types.ts";
 import type { ChannelDeliveryMode } from "../channel_routing/types.ts";
+import { AgentStore } from "../agent_store.ts";
 
 export interface BrokerTaskMetadata {
   submittedBy?: string;
@@ -206,19 +206,11 @@ export class BrokerTaskPersistence {
     targetAgentId: string,
   ): Promise<void> {
     const kv = await this.deps.getKv();
+    const agentStore = new AgentStore(kv);
+    const senderConfig = await agentStore.get(fromAgentId);
+    const targetConfig = await agentStore.get(targetAgentId);
 
-    const senderConfig = await kv.get<AgentEntry>([
-      "agents",
-      fromAgentId,
-      "config",
-    ]);
-    const targetConfig = await kv.get<AgentEntry>([
-      "agents",
-      targetAgentId,
-      "config",
-    ]);
-
-    const senderPeers = senderConfig.value?.peers || [];
+    const senderPeers = senderConfig?.peers || [];
     if (!senderPeers.includes(targetAgentId) && !senderPeers.includes("*")) {
       throw new DenoClawError(
         "PEER_NOT_ALLOWED",
@@ -227,7 +219,7 @@ export class BrokerTaskPersistence {
       );
     }
 
-    const targetAccept = targetConfig.value?.acceptFrom || [];
+    const targetAccept = targetConfig?.acceptFrom || [];
     if (!targetAccept.includes(fromAgentId) && !targetAccept.includes("*")) {
       throw new DenoClawError(
         "PEER_REJECTED",

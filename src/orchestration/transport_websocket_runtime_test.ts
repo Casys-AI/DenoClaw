@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals } from "@std/assert";
 import { WebSocketBrokerConnectionRuntime } from "./transport_websocket_runtime.ts";
 import { isAgentSocketRegisterMessage } from "./agent_socket_protocol.ts";
 
@@ -97,4 +97,5 @@ Deno.test("WebSocketBrokerConnectionRuntime retries after a failed socket open",
     throw new Error("expected register_agent message");
   }
   assertEquals(registerMessage.endpoint, "https://agent.example.test");
+  assertStrictEquals("config" in registerMessage, false);
 });

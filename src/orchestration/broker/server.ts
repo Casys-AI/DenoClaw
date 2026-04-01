@@ -190,10 +190,8 @@ export class BrokerServer {
       config: this.config,
       taskStore: this.taskStore,
       persistence: this.taskPersistence,
-      getAgentConfigEntry: async (agentId) => {
-        const kv = await this.getKv();
-        return await kv.get(["agents", agentId, "config"]);
-      },
+      getAgentConfigEntry: (agentId) =>
+        this.agentRegistry.getAgentConfigEntry(agentId),
       routeTaskMessage: (targetAgentId, message) =>
         this.agentMessageRouter.routeTaskMessage(targetAgentId, message),
     });
@@ -278,13 +276,20 @@ export class BrokerServer {
   private async markAgentAlive(agentId: string): Promise<void> {
     const kv = await this.getKv();
     const now = new Date().toISOString();
-    const current = await kv.get<AgentStatusValue>(["agents", agentId, "status"]);
-    await kv.set(["agents", agentId, "status"], {
-      ...(current.value ?? {}),
-      status: "alive",
-      startedAt: current.value?.startedAt ?? now,
-      lastHeartbeat: now,
-    } satisfies AgentStatusValue);
+    const current = await kv.get<AgentStatusValue>([
+      "agents",
+      agentId,
+      "status",
+    ]);
+    await kv.set(
+      ["agents", agentId, "status"],
+      {
+        ...(current.value ?? {}),
+        status: "alive",
+        startedAt: current.value?.startedAt ?? now,
+        lastHeartbeat: now,
+      } satisfies AgentStatusValue,
+    );
     await ensureAgentListed(kv, agentId);
   }
 

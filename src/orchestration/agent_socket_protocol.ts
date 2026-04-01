@@ -1,12 +1,9 @@
-import type { AgentEntry } from "../shared/types.ts";
-
 export const DENOCLAW_AGENT_PROTOCOL = "denoclaw.agent.v1";
 
 export interface AgentSocketRegisterMessage {
   type: "register_agent";
   agentId: string;
   endpoint?: string;
-  config?: AgentEntry;
 }
 
 export interface AgentSocketRegisteredMessage {
@@ -17,13 +14,11 @@ export interface AgentSocketRegisteredMessage {
 export function createAgentSocketRegisterMessage(input: {
   agentId: string;
   endpoint?: string;
-  config?: AgentEntry;
 }): AgentSocketRegisterMessage {
   return {
     type: "register_agent",
     agentId: input.agentId,
     ...(input.endpoint ? { endpoint: input.endpoint } : {}),
-    ...(input.config ? { config: input.config } : {}),
   };
 }
 

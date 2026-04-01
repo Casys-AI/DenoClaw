@@ -254,12 +254,13 @@ Deno.test(
     };
     internal.bot = {
       api: {
-        async sendMessage(
+        sendMessage(
           chatId: string,
           content: string,
           options?: Record<string, unknown>,
         ): Promise<void> {
           sent = { chatId, content, options };
+          return Promise.resolve();
         },
       },
     };

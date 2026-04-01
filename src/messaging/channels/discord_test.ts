@@ -135,7 +135,7 @@ Deno.test(
     internal.routingAccountId = "support-bot";
     internal.bot = {
       helpers: {
-        getChannel: async () => ({
+        getChannel: () => Promise.resolve({
           id: 300n,
           parentId: 200n,
           type: 11,
@@ -196,16 +196,18 @@ Deno.test(
     internal.routingAccountId = "support-bot";
     internal.bot = {
       helpers: {
-        getChannel: async () => {
+        getChannel: () => {
           getChannelCalls += 1;
           if (getChannelCalls === 1) {
-            throw new Error("temporary discord lookup failure");
+            return Promise.reject(
+              new Error("temporary discord lookup failure"),
+            );
           }
-          return {
+          return Promise.resolve({
             id: 300n,
             parentId: 200n,
             type: 11,
-          };
+          });
         },
       },
     };

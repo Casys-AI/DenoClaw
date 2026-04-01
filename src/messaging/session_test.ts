@@ -90,39 +90,38 @@ Deno.test({
 Deno.test({
   name: "SessionManager merges session metadata on re-access",
   async fn() {
-    const sm = new SessionManager();
-    await sm.getOrCreate("meta-1", "user-f", "discord", {
-      channel: {
-        channelType: "discord",
-        address: { channelType: "discord", roomId: "room-1" },
-      },
-    });
-
-    const updated = await sm.getOrCreate("meta-1", "user-f", "discord", {
-      channel: {
-        channelType: "discord",
-        address: {
+    await withTempSessionManager(async (sm) => {
+      await sm.getOrCreate("meta-1", "user-f", "discord", {
+        channel: {
           channelType: "discord",
-          roomId: "room-1",
-          threadId: "thread-2",
+          address: { channelType: "discord", roomId: "room-1" },
         },
-      },
-      note: "updated",
-    });
+      });
 
-    assertEquals(updated.metadata, {
-      channel: {
-        channelType: "discord",
-        address: {
+      const updated = await sm.getOrCreate("meta-1", "user-f", "discord", {
+        channel: {
           channelType: "discord",
-          roomId: "room-1",
-          threadId: "thread-2",
+          address: {
+            channelType: "discord",
+            roomId: "room-1",
+            threadId: "thread-2",
+          },
         },
-      },
-      note: "updated",
-    });
+        note: "updated",
+      });
 
-    sm.close();
+      assertEquals(updated.metadata, {
+        channel: {
+          channelType: "discord",
+          address: {
+            channelType: "discord",
+            roomId: "room-1",
+            threadId: "thread-2",
+          },
+        },
+        note: "updated",
+      });
+    });
   },
   sanitizeResources: false,
   sanitizeOps: false,

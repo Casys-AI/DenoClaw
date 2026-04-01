@@ -69,7 +69,7 @@
   "$defs": {
     "SandboxPermission": {
       "type": "string",
-      "enum": ["read", "write", "run", "net", "env", "ffi"],
+      "enum": ["read", "write", "run", "net", "env", "ffi", "schedule"],
       "description": "Deno permission flag for the sandbox subprocess"
     },
     "SandboxConfig": {

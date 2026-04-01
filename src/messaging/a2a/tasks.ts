@@ -73,7 +73,6 @@ export class TaskStore {
     }
 
     const nextTask = transitionTask(task, state, { statusMessage: message });
-    if (message) nextTask.history = [...nextTask.history, message];
 
     await kv.set(["a2a_tasks", taskId], nextTask);
     log.debug(`A2A Task ${taskId} → ${state}`);

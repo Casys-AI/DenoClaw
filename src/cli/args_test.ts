@@ -28,3 +28,10 @@ Deno.test("parseCliArgs supports --force for publish", () => {
   assertEquals(args._, ["publish", "alice"]);
   assertEquals(args.force, true);
 });
+
+Deno.test("parseCliArgs supports --no-prod for publish", () => {
+  const args = parseCliArgs(["publish", "alice", "--no-prod"]);
+
+  assertEquals(args._, ["publish", "alice"]);
+  assertEquals(args.prod, false);
+});

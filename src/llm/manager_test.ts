@@ -60,6 +60,30 @@ Deno.test("ProviderManager resolves nemotron prefix to Ollama", async () => {
   }
 });
 
+Deno.test("ProviderManager resolves Ollama without API key", async () => {
+  const pm = new ProviderManager(makeProviders());
+
+  const original = globalThis.fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response(JSON.stringify({
+        model: "nemotron-3-super",
+        message: { role: "assistant", content: "ollama response" },
+        done: true,
+      })),
+    )) as typeof fetch;
+
+  try {
+    const result = await pm.complete(
+      [{ role: "user", content: "test" }],
+      "ollama/nemotron-3-super",
+    );
+    assertEquals(result.content, "ollama response");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 Deno.test("ProviderManager throws NO_PROVIDER when no key", async () => {
   const pm = new ProviderManager(makeProviders());
 

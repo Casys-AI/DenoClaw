@@ -76,7 +76,7 @@ const PROVIDERS: ProviderEntry[] = [
       "codellama",
       "gemma",
     ],
-    requiresKey: true,
+    requiresKey: false,
     factory: (k, b) => new OllamaProvider(k, b),
   },
   // CLI providers — shell out to local CLIs
@@ -110,8 +110,10 @@ export class ProviderManager {
       const matches = entry.prefixes.some((p) => model.startsWith(p));
       if (!matches) continue;
 
+      const providerCfg = this.providers[entry.name];
+      if (providerCfg?.enabled === false) continue;
+
       if (entry.requiresKey) {
-        const providerCfg = this.providers[entry.name];
         if (!providerCfg?.apiKey) continue;
         const provider = entry.factory(providerCfg.apiKey, providerCfg.apiBase);
         this.cache.set(model, provider);
@@ -119,9 +121,11 @@ export class ProviderManager {
         return provider;
       }
 
-      // No key required (ollama, CLI)
-      const providerCfg = this.providers[entry.name];
-      const provider = entry.factory("", providerCfg?.apiBase);
+      // Optional or no-key providers (ollama, CLI)
+      const provider = entry.factory(
+        providerCfg?.apiKey ?? "",
+        providerCfg?.apiBase,
+      );
       this.cache.set(model, provider);
       log.debug(`Resolved provider (no-key): ${entry.name} for ${model}`);
       return provider;

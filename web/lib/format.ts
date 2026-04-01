@@ -19,12 +19,21 @@ export function formatLatency(ms: number): string {
 
 /** Format ISO date as relative time. */
 export function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
+  const timestamp = new Date(iso).getTime();
+  if (Number.isNaN(timestamp)) return "—";
+
+  const diffMs = timestamp - Date.now();
+  const future = diffMs > 0;
+  const secs = Math.floor(Math.abs(diffMs) / 1000);
+
+  if (secs < 60) return future ? `in ${secs}s` : `${secs}s ago`;
+
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`;
+
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return future ? `in ${hours}h` : `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return future ? `in ${days}d` : `${days}d ago`;
 }

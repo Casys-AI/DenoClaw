@@ -21,12 +21,12 @@ export type {
 export { A2A_ERRORS, TERMINAL_STATES } from "./types.ts";
 export { A2AClient } from "./client.ts";
 export { A2AServer } from "./server.ts";
-export {
+export type {
   A2ARuntimePort,
-  type CanonicalTaskLifecycleEvent,
-  type ContinueTaskRequest,
-  type RuntimeTaskEvent,
-  type SubmitTaskRequest,
+  CanonicalTaskLifecycleEvent,
+  ContinueTaskRequest,
+  RuntimeTaskEvent,
+  SubmitTaskRequest,
 } from "./runtime_port.ts";
 export { TaskStore } from "./tasks.ts";
 export { generateAgentCard, generateAllCards } from "./card.ts";

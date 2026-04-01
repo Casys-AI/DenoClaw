@@ -50,6 +50,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
       "region",
     ],
     boolean: ["force", "json", "yes", "prod"],
+    negatable: ["prod"],
     alias: { m: "message", s: "session", a: "agent", y: "yes" },
     default: { session: "default", prod: true },
   }) as CliArgs;

@@ -30,35 +30,11 @@ stated in AGENTS.md:
 
 ## 2. KV private scope — skills, soul, workspace files
 
-Today skills and soul are loaded from the **filesystem**
-(`WorkspaceLoader.load()` reads `soul.md`, `skills/`, `agent.json` from
-`data/agents/<id>/`).
+→ **Moved to ADR-018** (`adr-018-workspace-kv-backend-for-deploy.md`)
 
-This works locally but breaks in Deploy/sandbox where the agent has no access
-to the host filesystem.
-
-### Proposed change
-
-- Store soul, skills, agent config, and memory files in the agent's **private
-  KV** (the one already opened per-agent at `kvPaths.private`).
-- `WorkspaceLoader` gains a KV-backed adapter alongside the filesystem one.
-- On `publish` / `sync-agents`, workspace files are serialized into private KV.
-- Agent runtime reads from KV-backed workspace in Deploy, filesystem in local.
-
-### Keys layout (draft)
-
-```
-["workspace", agentId, "soul"]           → string (soul.md content)
-["workspace", agentId, "config"]         → AgentEntry JSON
-["workspace", agentId, "skills", name]   → string (SKILL.md content)
-["workspace", agentId, "memory", name]   → string (memory file content)
-```
-
-### Impact
-
-- `src/agent/workspace.ts` needs a `KvWorkspaceLoader` adapter.
-- `src/cli/publish.ts` needs to serialize workspace into KV during publish.
-- Private KV path already exists (`kvPaths.private` in worker init).
+Already planned in ADR-009 (dual model) and ADR-012 (workspace structure).
+ADR-018 covers the concrete implementation: KvWorkspaceLoader, KvSkillsLoader,
+file tool routing, publish sync step, and skills lifecycle direction.
 
 ## 3. Relation to ADK integration
 

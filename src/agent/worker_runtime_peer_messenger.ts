@@ -1,13 +1,17 @@
 import { AgentError } from "../shared/errors.ts";
 import { generateId } from "../shared/helpers.ts";
-import type { WorkerRequest, WorkerResponse } from "./worker_protocol.ts";
+import type {
+  PeerResult,
+  WorkerRequest,
+  WorkerResponse,
+} from "./worker_protocol.ts";
 import type { WorkerTaskEventEmitter } from "./worker_runtime_observability.ts";
 
 const DEFAULT_PEER_RESPONSE_TIMEOUT_MS = 120_000;
 
 export class WorkerPeerMessenger {
   private agentPending = new Map<string, {
-    resolve: (content: string) => void;
+    resolve: (result: PeerResult) => void;
     reject: (err: Error) => void;
     timer: number;
   }>();
@@ -23,13 +27,13 @@ export class WorkerPeerMessenger {
     taskId?: string,
     contextId?: string,
     traceId?: string,
-  ): (toAgent: string, message: string) => Promise<string> {
-    return (toAgent: string, message: string): Promise<string> => {
+  ): (toAgent: string, message: string) => Promise<PeerResult> {
+    return (toAgent: string, message: string): Promise<PeerResult> => {
       const requestId = generateId();
       const delegatedTaskId = taskId ?? requestId;
       const delegatedContextId = contextId ?? taskId ?? requestId;
 
-      return new Promise<string>((resolve, reject) => {
+      return new Promise<PeerResult>((resolve, reject) => {
         const timer = setTimeout(() => {
           this.agentPending.delete(requestId);
           reject(
@@ -42,10 +46,10 @@ export class WorkerPeerMessenger {
         }, this.timeoutMs);
 
         this.agentPending.set(requestId, {
-          resolve: (content: string) => {
+          resolve: (result: PeerResult) => {
             clearTimeout(timer);
             this.agentPending.delete(requestId);
-            resolve(content);
+            resolve(result);
           },
           reject: (err: Error) => {
             clearTimeout(timer);
@@ -93,7 +97,7 @@ export class WorkerPeerMessenger {
       );
       return;
     }
-    pending.resolve(msg.content);
+    pending.resolve({ content: msg.content, taskId: msg.taskId });
   }
 
   shutdown(): void {

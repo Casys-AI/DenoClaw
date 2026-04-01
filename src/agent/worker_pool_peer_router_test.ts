@@ -98,6 +98,7 @@ Deno.test("WorkerPoolPeerRouter routes peer messages and relays peer results", (
     type: "peer_response",
     requestId: "req-source",
     content: "peer ok",
+    taskId: undefined,
     error: undefined,
   }]);
   router.shutdown();

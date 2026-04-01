@@ -19,6 +19,12 @@ import type { AgentEntry, ToolResult } from "../shared/types.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
 import type { AgentRuntimeCapabilities } from "../shared/runtime_capabilities.ts";
 
+/** Structured result returned from a peer agent message. */
+export interface PeerResult {
+  content: string;
+  taskId?: string;
+}
+
 /** Minimal Config projection sent to the Worker (JSON-serializable). */
 export interface WorkerConfig {
   agents: {
@@ -104,6 +110,7 @@ export type WorkerRequest =
     type: "peer_response";
     requestId: string;
     content: string;
+    taskId?: string;
     error?: boolean;
   }
   // execution: main process resolves a broker-owned cron tool request

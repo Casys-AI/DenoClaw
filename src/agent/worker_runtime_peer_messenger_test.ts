@@ -3,6 +3,7 @@ import { WorkerPeerMessenger } from "./worker_runtime_peer_messenger.ts";
 import {
   createWorkerTaskEventEmitter,
 } from "./worker_runtime_observability.ts";
+import type { PeerResult } from "./worker_protocol.ts";
 
 Deno.test("WorkerPeerMessenger emits peer_send and resolves peer responses", async () => {
   const messages: unknown[] = [];
@@ -45,7 +46,34 @@ Deno.test("WorkerPeerMessenger emits peer_send and resolves peer responses", asy
     content: "pong",
   });
 
-  assertEquals(await pending, "pong");
+  const result = await pending;
+  assertEquals(result, { content: "pong", taskId: undefined });
+});
+
+Deno.test("sendToAgent resolves with structured PeerResult including taskId", async () => {
+  const messages: unknown[] = [];
+  const messenger = new WorkerPeerMessenger(
+    (msg) => messages.push(msg),
+    createWorkerTaskEventEmitter((msg) => messages.push(msg)),
+    () => "agent-alpha",
+    50,
+  );
+
+  const sendToAgent = messenger.createSendToAgent("task-42", "ctx-42", "trace-42");
+  const pending = sendToAgent("agent-beta", "ping");
+
+  const peerSend = messages[0] as { type: string; requestId: string };
+
+  messenger.handlePeerResponse({
+    type: "peer_response",
+    requestId: peerSend.requestId,
+    content: "structured-pong",
+    taskId: "task-42",
+  });
+
+  const result: PeerResult = await pending;
+  assertEquals(result.content, "structured-pong");
+  assertEquals(result.taskId, "task-42");
 });
 
 Deno.test("WorkerPeerMessenger rejects pending sends on shutdown", async () => {

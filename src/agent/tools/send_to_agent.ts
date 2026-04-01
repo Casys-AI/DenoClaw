@@ -5,12 +5,13 @@ import type {
 } from "../../shared/types.ts";
 import { BaseTool } from "./registry.ts";
 import { DenoClawError } from "../../shared/errors.ts";
+import type { PeerResult } from "../worker_protocol.ts";
 
 /** Callback for sending a message to another agent — transport-agnostic. */
 export type SendToAgentFn = (
   toAgent: string,
   message: string,
-) => Promise<string>;
+) => Promise<PeerResult>;
 
 /**
  * SendToAgentTool — allows the LLM to send a message to another agent.
@@ -84,8 +85,8 @@ export class SendToAgentTool extends BaseTool {
     }
 
     try {
-      const response = await this.sendFn(agentId, message);
-      return this.ok(response);
+      const result = await this.sendFn(agentId, message);
+      return this.ok(result.content);
     } catch (err) {
       if (err instanceof DenoClawError) {
         return this.fail(

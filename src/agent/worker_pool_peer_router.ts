@@ -134,6 +134,7 @@ export class WorkerPoolPeerRouter {
       type: "peer_response",
       requestId: pendingReq.sourceRequestId,
       content: msg.content,
+      taskId: pendingReq.taskId,
       error: msg.error,
     };
     source.worker.postMessage(response);

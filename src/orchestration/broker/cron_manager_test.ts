@@ -1,50 +1,53 @@
 import { assertEquals } from "@std/assert";
-import type { BrokerCronJob } from "./cron_types.ts";
+import { BrokerCronManager } from "./cron_manager.ts";
 
-Deno.test("BrokerCronJob round-trips through KV", async () => {
+Deno.test("BrokerCronManager.create persists job and returns it", async () => {
   const kv = await Deno.openKv(":memory:");
   try {
-    const job: BrokerCronJob = {
-      id: "job-1",
-      agentId: "alice",
-      name: "email-check",
-      schedule: "0 8 * * *",
-      prompt: "Check my emails and summarize them",
-      enabled: true,
-      createdAt: new Date().toISOString(),
-    };
-    await kv.set(["cron", job.agentId, job.id], job);
-    const entry = await kv.get<BrokerCronJob>(["cron", "alice", "job-1"]);
-    assertEquals(entry.value?.name, "email-check");
-    assertEquals(entry.value?.prompt, "Check my emails and summarize them");
-    assertEquals(entry.value?.agentId, "alice");
-  } finally {
-    kv.close();
-  }
+    const mgr = new BrokerCronManager(kv, { registerDenoCron: false });
+    const job = await mgr.create({
+      agentId: "alice", name: "email-check",
+      schedule: "0 8 * * *", prompt: "Check my emails",
+    });
+    assertEquals(job.agentId, "alice");
+    assertEquals(job.name, "email-check");
+    assertEquals(job.enabled, true);
+    assertEquals(typeof job.id, "string");
+    assertEquals(typeof job.createdAt, "string");
+  } finally { kv.close(); }
 });
 
-Deno.test("list cron jobs by agent prefix", async () => {
+Deno.test("BrokerCronManager.listByAgent returns only that agent's jobs", async () => {
   const kv = await Deno.openKv(":memory:");
   try {
-    const jobAlice: BrokerCronJob = {
-      id: "job-1", agentId: "alice", name: "task-a",
-      schedule: "*/5 * * * *", prompt: "do A", enabled: true,
-      createdAt: new Date().toISOString(),
-    };
-    const jobBob: BrokerCronJob = {
-      id: "job-2", agentId: "bob", name: "task-b",
-      schedule: "*/10 * * * *", prompt: "do B", enabled: true,
-      createdAt: new Date().toISOString(),
-    };
-    await kv.set(["cron", "alice", "job-1"], jobAlice);
-    await kv.set(["cron", "bob", "job-2"], jobBob);
-    const aliceJobs: BrokerCronJob[] = [];
-    for await (const entry of kv.list<BrokerCronJob>({ prefix: ["cron", "alice"] })) {
-      if (entry.value) aliceJobs.push(entry.value);
-    }
-    assertEquals(aliceJobs.length, 1);
-    assertEquals(aliceJobs[0].name, "task-a");
-  } finally {
-    kv.close();
-  }
+    const mgr = new BrokerCronManager(kv, { registerDenoCron: false });
+    await mgr.create({ agentId: "alice", name: "a1", schedule: "* * * * *", prompt: "do a1" });
+    await mgr.create({ agentId: "alice", name: "a2", schedule: "* * * * *", prompt: "do a2" });
+    await mgr.create({ agentId: "bob", name: "b1", schedule: "* * * * *", prompt: "do b1" });
+    const aliceJobs = await mgr.listByAgent("alice");
+    assertEquals(aliceJobs.length, 2);
+    const bobJobs = await mgr.listByAgent("bob");
+    assertEquals(bobJobs.length, 1);
+  } finally { kv.close(); }
+});
+
+Deno.test("BrokerCronManager.delete removes job from KV", async () => {
+  const kv = await Deno.openKv(":memory:");
+  try {
+    const mgr = new BrokerCronManager(kv, { registerDenoCron: false });
+    const job = await mgr.create({ agentId: "alice", name: "temp", schedule: "* * * * *", prompt: "tmp" });
+    const deleted = await mgr.delete(job.agentId, job.id);
+    assertEquals(deleted, true);
+    const remaining = await mgr.listByAgent("alice");
+    assertEquals(remaining.length, 0);
+  } finally { kv.close(); }
+});
+
+Deno.test("BrokerCronManager.delete returns false for unknown job", async () => {
+  const kv = await Deno.openKv(":memory:");
+  try {
+    const mgr = new BrokerCronManager(kv, { registerDenoCron: false });
+    const deleted = await mgr.delete("alice", "nonexistent");
+    assertEquals(deleted, false);
+  } finally { kv.close(); }
 });

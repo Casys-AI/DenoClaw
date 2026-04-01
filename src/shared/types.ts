@@ -11,6 +11,8 @@ export type {
   SandboxBackend,
   SandboxExecRequest,
   ShellConfig,
+  ToolExecutorConfig,
+  WorkspaceBackend,
 } from "../agent/sandbox_types.ts";
 export type {
   ActiveTaskEntry,

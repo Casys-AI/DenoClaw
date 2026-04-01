@@ -14,17 +14,12 @@
 import { ShellTool } from "./shell.ts";
 import { ReadFileTool, WriteFileTool } from "./file.ts";
 import { WebFetchTool } from "./web.ts";
-import type { ShellConfig, ToolResult } from "../../shared/types.ts";
+import type { ToolExecutorConfig, ToolResult } from "../../shared/types.ts";
 
 interface ExecutorInput {
   tool: string;
   args: Record<string, unknown>;
-  config?: {
-    restrictToWorkspace?: boolean;
-    workspaceDir?: string;
-    agentId?: string;
-    shell?: ShellConfig;
-  };
+  config?: ToolExecutorConfig;
 }
 
 function instantiateTool(name: string, config?: ExecutorInput["config"]) {

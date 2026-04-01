@@ -2,6 +2,7 @@ import type {
   ExecPolicy,
   SandboxPermission,
   ShellConfig,
+  ToolExecutorConfig,
   ToolResult,
 } from "../shared/types.ts";
 
@@ -29,7 +30,7 @@ export interface ExecuteToolRequest {
   timeoutSec?: number;
   execPolicy?: ExecPolicy;
   shell?: ShellConfig;
-  toolsConfig?: Record<string, unknown>;
+  toolsConfig?: ToolExecutorConfig;
   executionContext?: ToolExecutionContext;
 }
 

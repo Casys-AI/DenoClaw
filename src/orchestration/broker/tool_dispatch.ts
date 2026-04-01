@@ -24,6 +24,11 @@ import type { BrokerToolRequestMessage } from "../types.ts";
 import type { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import type { BrokerTaskPersistence } from "./persistence.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
+import {
+  getAgentDefDir,
+  isDeployEnvironment,
+} from "../../shared/helpers.ts";
+import type { ToolExecutorConfig } from "../../shared/types.ts";
 
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
@@ -149,7 +154,14 @@ export class BrokerToolDispatcher {
       );
     }
 
-    const tunnel = this.deps.tunnelRegistry.findToolSocket(req.tool);
+    const toolsConfig = this.resolveToolExecutionConfig(msg.from);
+    const shouldBypassTunnel = this.shouldBypassTunnelForWorkspaceTool(
+      req.tool,
+      toolsConfig,
+    );
+    const tunnel = shouldBypassTunnel
+      ? null
+      : this.deps.tunnelRegistry.findToolSocket(req.tool);
     if (tunnel) {
       this.deps.routeToTunnel(tunnel, {
         ...msg,
@@ -190,7 +202,7 @@ export class BrokerToolDispatcher {
         timeoutSec: maxDuration,
         execPolicy,
         shell,
-        toolsConfig: { agentId: msg.from },
+        toolsConfig,
         executionContext: {
           agentId: msg.from,
           taskId: req.taskId,
@@ -327,6 +339,31 @@ export class BrokerToolDispatcher {
   ): Promise<Deno.KvEntryMaybe<AgentEntry>> {
     const kv = await this.deps.getKv();
     return await kv.get<AgentEntry>(["agents", agentId, "config"]);
+  }
+
+  private resolveToolExecutionConfig(agentId: string): ToolExecutorConfig {
+    if (isDeployEnvironment()) {
+      return {
+        agentId,
+        workspaceBackend: "kv",
+      };
+    }
+
+    return {
+      agentId,
+      workspaceBackend: "filesystem",
+      workspaceDir: getAgentDefDir(agentId),
+    };
+  }
+
+  private shouldBypassTunnelForWorkspaceTool(
+    tool: string,
+    toolsConfig: ToolExecutorConfig,
+  ): boolean {
+    return (
+      (tool === "read_file" || tool === "write_file") &&
+      toolsConfig.workspaceBackend === "kv"
+    );
   }
 
   private resolveToolPermissions(tool: string): SandboxPermission[] {

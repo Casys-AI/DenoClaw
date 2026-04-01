@@ -233,6 +233,7 @@ export class BrokerServer {
     return new LocalToolExecutionAdapter({
       sandbox,
       requireSandboxForPermissionedTools: true,
+      getWorkspaceKv: () => this.getKv(),
     });
   }
 

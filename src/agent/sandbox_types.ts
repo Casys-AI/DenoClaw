@@ -34,6 +34,16 @@ interface ExecPolicyAllowlist {
 
 export type ExecPolicy = ExecPolicyDeny | ExecPolicyFull | ExecPolicyAllowlist;
 
+export type WorkspaceBackend = "filesystem" | "kv";
+
+export interface ToolExecutorConfig {
+  restrictToWorkspace?: boolean;
+  workspaceDir?: string;
+  agentId?: string;
+  workspaceBackend?: WorkspaceBackend;
+  shell?: ShellConfig;
+}
+
 export interface SandboxExecRequest {
   tool: string;
   args: Record<string, unknown>;
@@ -42,12 +52,7 @@ export interface SandboxExecRequest {
   timeoutSec?: number;
   execPolicy: ExecPolicy;
   shell?: ShellConfig;
-  toolsConfig?: {
-    restrictToWorkspace?: boolean;
-    workspaceDir?: string;
-    agentId?: string;
-    shell?: ShellConfig;
-  };
+  toolsConfig?: ToolExecutorConfig;
 }
 
 export interface SandboxBackend {

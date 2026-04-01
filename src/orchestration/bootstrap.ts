@@ -13,6 +13,7 @@ export function createBrokerToolExecutionPort(
   _config: Config,
 ): ToolExecutionPort {
   const sandboxToken = getSandboxAccessToken() ?? "";
+  let workspaceKvPromise: Promise<Deno.Kv> | null = null;
   const sandbox = sandboxToken
     ? new BrokerSandboxManager({
       maxSandboxes: getMaxSandboxesPerBroker(),
@@ -27,6 +28,12 @@ export function createBrokerToolExecutionPort(
   return new LocalToolExecutionAdapter({
     sandbox,
     requireSandboxForPermissionedTools: true,
+    getWorkspaceKv: () => {
+      if (!workspaceKvPromise) {
+        workspaceKvPromise = Deno.openKv();
+      }
+      return workspaceKvPromise;
+    },
   });
 }
 

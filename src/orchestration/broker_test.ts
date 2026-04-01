@@ -2940,6 +2940,104 @@ Deno.test(
 );
 
 Deno.test(
+  "BrokerServer keeps workspace KV file tools broker-owned in deploy mode",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const previousDeploymentId = Deno.env.get("DENO_DEPLOYMENT_ID");
+
+    try {
+      Deno.env.set("DENO_DEPLOYMENT_ID", "deploy-test");
+      await seedAgentEndpoint(kv, "agent-alpha");
+      await kv.set(["agents", "agent-alpha", "config"], {
+        sandbox: {
+          allowedPermissions: ["read"],
+        },
+      });
+
+      const tunnelRegistry = new TunnelRegistry();
+      const tunnelMessages: BrokerMessage[] = [];
+      const fakeTunnel = {
+        readyState: WebSocket.OPEN,
+        bufferedAmount: 0,
+        send(raw: string) {
+          tunnelMessages.push(JSON.parse(raw) as BrokerMessage);
+        },
+        close() {},
+      } as unknown as WebSocket;
+      tunnelRegistry.register("relay-read", fakeTunnel, {
+        tunnelId: "relay-read",
+        type: "local",
+        tools: ["read_file"],
+        allowedAgents: [],
+      });
+
+      let capturedRequest: Record<string, unknown> | undefined;
+      const broker = createTestBroker(createConfig(), {
+        kv,
+        tunnelRegistry,
+        toolExecution: {
+          executeTool: (request) => {
+            capturedRequest = request as unknown as Record<string, unknown>;
+            return Promise.resolve({ success: true, output: "from-kv" });
+          },
+          resolveToolPermissions: () => ["read"],
+          checkExecPolicy: () => ({ allowed: true }),
+          getToolPermissions: () => ({}),
+        },
+        // deno-lint-ignore no-explicit-any
+        metrics: { recordToolCall: async () => {} } as any,
+      });
+
+      const replyPromise = waitForQueuedMessage(
+        kv,
+        (message) =>
+          message.type === "tool_response" && message.to === "agent-alpha",
+      );
+
+      await (
+        broker as unknown as {
+          handleToolRequest(
+            msg: Extract<BrokerMessage, { type: "tool_request" }>,
+          ): Promise<void>;
+        }
+      ).handleToolRequest({
+        id: "tool-req-workspace-kv",
+        from: "agent-alpha",
+        to: "broker",
+        type: "tool_request",
+        timestamp: new Date().toISOString(),
+        payload: {
+          tool: "read_file",
+          args: { path: "memories/project.md" },
+        },
+      });
+
+      const reply = (await replyPromise) as Extract<
+        BrokerMessage,
+        { type: "tool_response" }
+      >;
+      assertEquals(reply.payload.success, true);
+      assertEquals(tunnelMessages.length, 0);
+      assertEquals(capturedRequest?.toolsConfig, {
+        agentId: "agent-alpha",
+        workspaceBackend: "kv",
+      });
+
+      await broker.stop();
+    } finally {
+      if (previousDeploymentId) {
+        Deno.env.set("DENO_DEPLOYMENT_ID", previousDeploymentId);
+      } else {
+        Deno.env.delete("DENO_DEPLOYMENT_ID");
+      }
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "Broker tunnel protocol negotiation prefers the canonical subprotocol",
   () => {
     assertEquals(

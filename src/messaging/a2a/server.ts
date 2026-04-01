@@ -199,8 +199,13 @@ export class A2AServer {
       start: async (controller) => {
         this.activeStreams.set(taskId, controller);
 
-        // Send initial task
-        this.sseEvent(controller, encoder, rpc.id, { kind: "task", ...task });
+        // Send initial task status (spec-compliant: taskStatusUpdate for SUBMITTED state)
+        this.sseEvent(controller, encoder, rpc.id, {
+          kind: "taskStatusUpdate",
+          taskId: task.id,
+          status: task.status,
+          final: false,
+        } as TaskStatusUpdateEvent);
 
         // Working
         const workingTask = await this.store.startWorking(task.id);

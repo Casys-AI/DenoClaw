@@ -34,10 +34,10 @@ export class BrokerCronManager {
       enabled: true,
       createdAt: new Date().toISOString(),
     };
-    await this.kv.set(["cron", job.agentId, job.id], job);
     if (this.registerDenoCron) {
       this.registerCronHandler(job);
     }
+    await this.kv.set(["cron", job.agentId, job.id], job);
     log.info(`Cron created: ${job.name} for agent ${job.agentId} (${job.schedule})`);
     return job;
   }
@@ -72,8 +72,13 @@ export class BrokerCronManager {
     let count = 0;
     for (const job of jobs) {
       if (!job.enabled) continue;
-      this.registerCronHandler(job, onFire);
-      count++;
+      try {
+        this.registerCronHandler(job, onFire);
+        count++;
+      } catch (e) {
+        log.error(`Failed to reload cron ${job.name} (${job.id}): invalid schedule?`, e);
+        await this.kv.delete(["cron", job.agentId, job.id]);
+      }
     }
     log.info(`Reloaded ${count} cron jobs from KV`);
     return count;

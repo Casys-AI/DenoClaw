@@ -20,6 +20,10 @@ export function getSkillsDir(): string {
   return join(getHomeDir(), "skills");
 }
 
+export function isDeployEnvironment(): boolean {
+  return !!Deno.env.get("DENO_DEPLOYMENT_ID");
+}
+
 export function getCronJobsPath(): string {
   return join(getHomeDir(), "cron.json");
 }

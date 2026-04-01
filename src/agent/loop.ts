@@ -18,7 +18,8 @@ interface AgentLoopConfig {
 import { Memory } from "./memory.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import { ContextBuilder } from "./context.ts";
-import { SkillsLoader } from "./skills.ts";
+import type { SkillLoader } from "./skills.ts";
+import { EmptySkillLoader, KvSkillsLoader, SkillsLoader } from "./skills.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
@@ -32,6 +33,8 @@ import { processAgentLoopMessage } from "./loop_process.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
+import { join } from "@std/path";
+import { isDeployEnvironment } from "../shared/helpers.ts";
 
 export interface AgentLoopLike {
   processMessage(userMessage: string): Promise<AgentResponse>;
@@ -69,7 +72,7 @@ export class AgentLoop implements AgentLoopLike {
   private providers: ProviderManager;
   private memory: MemoryPort;
   private context: ContextBuilder;
-  private skills: SkillsLoader;
+  private skills: SkillLoader;
   private tools: ToolRegistry;
   private maxIterations: number;
   private traceWriter: TraceWriter | null;
@@ -79,6 +82,7 @@ export class AgentLoop implements AgentLoopLike {
   private agentId: string;
   private sessionId: string;
   private workspaceDir: string | undefined;
+  private workspaceKv: Deno.Kv | undefined;
   private memoryFiles: string[] = [];
   private getRuntimeGrants?: () => AgentRuntimeGrant[];
 
@@ -100,16 +104,17 @@ export class AgentLoop implements AgentLoopLike {
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
     this.memory = deps?.memory ?? new Memory(sessionId);
     this.tools = deps?.tools ?? new ToolRegistry();
+    this.agentId = deps?.agentId ?? sessionId;
+    this.sessionId = sessionId;
+    this.workspaceDir = deps?.workspaceDir;
+    this.workspaceKv = deps?.workspaceKv;
     this.context = new ContextBuilder(this.config, deps?.runtimeCapabilities);
-    this.skills = new SkillsLoader();
+    this.skills = this.createSkillsLoader(deps);
     this.maxIterations = maxIterations;
     this.traceWriter = deps?.traceWriter ?? null;
     this.traceId = deps?.traceId;
     this.taskId = deps?.taskId;
     this.contextId = deps?.contextId ?? deps?.taskId;
-    this.agentId = deps?.agentId ?? sessionId;
-    this.sessionId = sessionId;
-    this.workspaceDir = deps?.workspaceDir;
     this.getRuntimeGrants = deps?.getRuntimeGrants;
 
     if (!deps?.tools) this.registerBuiltInTools(config, deps);
@@ -156,15 +161,39 @@ export class AgentLoop implements AgentLoopLike {
     this.tools.register(new WebFetchTool());
   }
 
+  private createSkillsLoader(deps?: AgentLoopDeps): SkillLoader {
+    if (isDeployEnvironment()) {
+      if (deps?.workspaceKv) {
+        return new KvSkillsLoader(deps.workspaceKv, this.agentId);
+      }
+      return new EmptySkillLoader(
+        `Workspace KV is required to load skills in deploy mode for ${this.agentId}`,
+      );
+    }
+
+    if (deps?.workspaceDir) {
+      return new SkillsLoader(join(deps.workspaceDir, "skills"));
+    }
+
+    return new SkillsLoader();
+  }
+
   private memoryTopics: string[] = [];
+
+  private async refreshMemoryFiles(): Promise<string[]> {
+    return await listAgentMemoryFiles({
+      agentId: this.agentId,
+      workspaceDir: this.workspaceDir,
+      kv: this.workspaceKv,
+      useWorkspaceKv: isDeployEnvironment(),
+    });
+  }
 
   async initialize(): Promise<void> {
     await this.memory.load();
     await this.skills.loadSkills();
     this.memoryTopics = await this.memory.listTopics();
-    if (this.workspaceDir) {
-      this.memoryFiles = await listAgentMemoryFiles(this.workspaceDir);
-    }
+    this.memoryFiles = await this.refreshMemoryFiles();
   }
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
@@ -179,6 +208,7 @@ export class AgentLoop implements AgentLoopLike {
       tools: this.tools,
       memoryTopics: this.memoryTopics,
       memoryFiles: this.memoryFiles,
+      refreshMemoryFiles: () => this.refreshMemoryFiles(),
       getRuntimeGrants: this.getRuntimeGrants,
       maxIterations: this.maxIterations,
       traceWriter: this.traceWriter,

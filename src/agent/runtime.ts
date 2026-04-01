@@ -18,7 +18,8 @@ import {
 import { mapTaskErrorToTerminalStatus } from "../messaging/a2a/task_mapping.ts";
 import { KvdexMemory } from "./memory_kvdex.ts";
 import { ContextBuilder } from "./context.ts";
-import { SkillsLoader } from "./skills.ts";
+import type { SkillLoader } from "./skills.ts";
+import { KvSkillsLoader, SkillsLoader } from "./skills.ts";
 import { CronManager } from "./cron.ts";
 import { log } from "../shared/log.ts";
 import {
@@ -44,6 +45,12 @@ import {
 import {
   extractRuntimePrivilegeElevationPause,
 } from "./runtime_message_mapping.ts";
+import {
+  getAgentDefDir,
+  getAgentSkillsDir,
+  isDeployEnvironment,
+} from "../shared/helpers.ts";
+import { listAgentMemoryFiles } from "./loop_workspace.ts";
 
 /**
  * AgentRuntime — runs inside a deployed agent app or local worker.
@@ -65,11 +72,12 @@ export class AgentRuntime {
   private canonicalTaskPort: AgentCanonicalTaskPort<Task>;
   private kv: Deno.Kv | null = null;
   private context: ContextBuilder;
-  private skills: SkillsLoader;
+  private skills: SkillLoader;
   private cron!: CronManager;
   private maxIterations: number;
   private memories: Map<string, MemoryPort> = new Map();
   private toolDefinitions: ToolDefinition[];
+  private memoryFiles: string[] = [];
 
   constructor(
     agentId: string,
@@ -84,7 +92,7 @@ export class AgentRuntime {
     this.llmToolPort = llmToolPort;
     this.canonicalTaskPort = canonicalTaskPort;
     this.context = new ContextBuilder(config, runtimeCapabilities);
-    this.skills = new SkillsLoader();
+    this.skills = new SkillsLoader(getAgentSkillsDir(agentId));
     this.maxIterations = maxIterations;
     this.toolDefinitions = createBrokerBackedRuntimeToolDefinitions();
   }
@@ -107,6 +115,7 @@ export class AgentRuntime {
   async start(): Promise<void> {
     log.info(`AgentRuntime started: ${this.agentId}`);
 
+    this.skills = await this.createSkillsLoader();
     await this.skills.loadSkills();
     await this.llmToolPort.startListening();
 
@@ -126,6 +135,30 @@ export class AgentRuntime {
       status: "running",
       startedAt: new Date().toISOString(),
       model: this.config.model,
+    });
+  }
+
+  private async createSkillsLoader(): Promise<SkillLoader> {
+    if (isDeployEnvironment()) {
+      return new KvSkillsLoader(await this.getKv(), this.agentId);
+    }
+
+    return new SkillsLoader(getAgentSkillsDir(this.agentId));
+  }
+
+  private async loadMemoryFiles(): Promise<string[]> {
+    if (isDeployEnvironment()) {
+      return await listAgentMemoryFiles({
+        agentId: this.agentId,
+        kv: await this.getKv(),
+        useWorkspaceKv: true,
+      });
+    }
+
+    return await listAgentMemoryFiles({
+      agentId: this.agentId,
+      workspaceDir: getAgentDefDir(this.agentId),
+      useWorkspaceKv: false,
     });
   }
 
@@ -172,6 +205,8 @@ export class AgentRuntime {
     const payload = msg.payload;
     const taskMessage = extractSubmitTaskMessage(payload);
     const inputText = extractRuntimeTaskText(taskMessage);
+    const memory = await this.getMemory(`agent:${msg.from}:${this.agentId}`);
+    this.memoryFiles = await this.loadMemoryFiles();
     log.info(
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
@@ -182,7 +217,7 @@ export class AgentRuntime {
       tools: this.toolDefinitions,
       context: this.context,
       skills: this.skills,
-      memory: await this.getMemory(`agent:${msg.from}:${this.agentId}`),
+      memory,
       fromAgentId: msg.from,
       inputText,
       canonicalTask: createCanonicalTask({
@@ -190,6 +225,9 @@ export class AgentRuntime {
         contextId: payload.contextId,
         initialMessage: taskMessage,
       }),
+      memoryTopics: await memory.listTopics(),
+      memoryFiles: this.memoryFiles,
+      refreshMemoryFiles: () => this.loadMemoryFiles(),
       getRuntimeGrants: undefined,
       reportWorkingTransition: true,
       maxIterations: this.maxIterations,
@@ -233,6 +271,9 @@ export class AgentRuntime {
       ? getAwaitedPrivilegeElevationPendingTool(existing.status)
       : undefined;
     const memory = await this.getMemory(`agent:${msg.from}:${this.agentId}`);
+    if (this.memoryFiles.length === 0) {
+      this.memoryFiles = await this.loadMemoryFiles();
+    }
 
     if (approvedPrivilegeGrant && pendingTool) {
       log.info(
@@ -288,6 +329,9 @@ export class AgentRuntime {
         fromAgentId: msg.from,
         inputText: "",
         canonicalTask: resumed,
+        memoryTopics: await memory.listTopics(),
+        memoryFiles: this.memoryFiles,
+        refreshMemoryFiles: () => this.loadMemoryFiles(),
         getRuntimeGrants: () => runtimeGrantStore.list(),
         reportWorkingTransition: false,
         maxIterations: this.maxIterations,
@@ -313,6 +357,9 @@ export class AgentRuntime {
       fromAgentId: msg.from,
       inputText,
       canonicalTask: resumed,
+      memoryTopics: await memory.listTopics(),
+      memoryFiles: this.memoryFiles,
+      refreshMemoryFiles: () => this.loadMemoryFiles(),
       getRuntimeGrants: () => runtimeGrantStore.list(),
       reportWorkingTransition: false,
       maxIterations: this.maxIterations,

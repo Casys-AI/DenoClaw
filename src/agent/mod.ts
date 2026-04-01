@@ -14,7 +14,7 @@ export {
   deriveAgentRuntimeCapabilities,
   formatAgentRuntimeCapabilities,
 } from "./runtime_capabilities.ts";
-export { SkillsLoader } from "./skills.ts";
+export { KvSkillsLoader, SkillsLoader } from "./skills.ts";
 export { CronManager } from "./cron.ts";
 export type {
   AgentConfig,
@@ -25,6 +25,7 @@ export type {
   Skill,
   ToolsConfig,
 } from "./types.ts";
+export type { SkillLoader } from "./skills.ts";
 export type {
   AgentPrivilegeElevationScope,
   AgentRuntimeCapabilities,

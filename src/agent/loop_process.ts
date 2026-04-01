@@ -5,9 +5,13 @@ import { log } from "../shared/log.ts";
 import type { AgentConfig, AgentResponse } from "./types.ts";
 import type { ContextBuilder } from "./context.ts";
 import type { MemoryPort } from "./memory_port.ts";
-import type { SkillsLoader } from "./skills.ts";
+import type { SkillLoader } from "./skills.ts";
 import type { ToolRegistry } from "./tools/registry.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
+import {
+  applyConversationContextRefresh,
+  createConversationContextRefreshState,
+} from "./conversation_context_refresh.ts";
 
 export interface ProcessAgentLoopMessageInput {
   userMessage: string;
@@ -15,10 +19,11 @@ export interface ProcessAgentLoopMessageInput {
   providers: ProviderManager;
   memory: MemoryPort;
   context: ContextBuilder;
-  skills: SkillsLoader;
+  skills: SkillLoader;
   tools: ToolRegistry;
   memoryTopics: string[];
   memoryFiles: string[];
+  refreshMemoryFiles?: () => Promise<string[]>;
   getRuntimeGrants?: () => AgentRuntimeGrant[];
   maxIterations: number;
   traceWriter: TraceWriter | null;
@@ -33,6 +38,8 @@ export async function processAgentLoopMessage(
   input: ProcessAgentLoopMessageInput,
 ): Promise<AgentResponse> {
   await input.memory.addMessage({ role: "user", content: input.userMessage });
+  let memoryTopics = input.memoryTopics;
+  let memoryFiles = input.memoryFiles;
 
   const correlationIds: TraceCorrelationIds = {
     ...(input.taskId ? { taskId: input.taskId } : {}),
@@ -77,8 +84,8 @@ export async function processAgentLoopMessage(
             input.memory.getMessages(),
             input.skills.getSkills(),
             input.tools.getDefinitions(),
-            input.memoryTopics,
-            input.memoryFiles,
+            memoryTopics,
+            memoryFiles,
             input.getRuntimeGrants?.() ?? [],
           );
 
@@ -129,6 +136,7 @@ export async function processAgentLoopMessage(
               content: response.content || "",
               tool_calls: response.toolCalls,
             });
+            const refreshState = createConversationContextRefreshState();
 
             for (const tc of response.toolCalls) {
               let args: Record<string, unknown>;
@@ -177,6 +185,22 @@ export async function processAgentLoopMessage(
                 name: tc.function.name,
                 tool_call_id: tc.id,
               });
+              applyConversationContextRefresh(
+                refreshState,
+                tc.function.name,
+                args,
+                result,
+              );
+            }
+
+            if (refreshState.reloadSkills) {
+              await input.skills.reload();
+            }
+            if (refreshState.reloadMemoryFiles && input.refreshMemoryFiles) {
+              memoryFiles = await input.refreshMemoryFiles();
+            }
+            if (refreshState.reloadMemoryTopics) {
+              memoryTopics = await input.memory.listTopics();
             }
 
             return null;

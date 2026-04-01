@@ -1,4 +1,5 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
+import { join } from "@std/path";
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopLike } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
@@ -234,6 +235,59 @@ Deno.test({
     const loop = new AgentLoop("test-session-close", minimalConfig);
     // close() should not throw even if KV was never opened
     loop.close();
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "AgentLoop reloads skills written during the same conversation",
+  async fn() {
+    const workspaceDir = await Deno.makeTempDir();
+    await Deno.mkdir(join(workspaceDir, "skills"), { recursive: true });
+    let completeCalls = 0;
+    const provider = new ProviderManager({});
+    provider.complete = (messages) => {
+      completeCalls++;
+      const systemPrompt = messages[0]?.content ?? "";
+
+      if (completeCalls === 1) {
+        return Promise.resolve({
+          content: "",
+          toolCalls: [
+            {
+              id: "tool-write-skill",
+              type: "function",
+              function: {
+                name: "write_file",
+                arguments: JSON.stringify({
+                  path: "skills/generated.md",
+                  content: "# Generated Skill\nLoaded after write.\n",
+                  dry_run: false,
+                }),
+              },
+            },
+          ],
+        });
+      }
+
+      assertStringIncludes(systemPrompt, "Generated Skill");
+      return Promise.resolve({ content: "done" });
+    };
+
+    const loop = new AgentLoop("test-session-skill-reload", minimalConfig, {}, 3, {
+      providers: provider,
+      workspaceDir,
+      agentId: "agent-skill-reload",
+    });
+
+    const response = await loop.processMessage("Create a skill then use it");
+
+    assertEquals(response.content, "done");
+    assertEquals(completeCalls, 2);
+
+    await loop.close();
+    await Deno.remove(workspaceDir, { recursive: true });
   },
   sanitizeResources: false,
   sanitizeOps: false,

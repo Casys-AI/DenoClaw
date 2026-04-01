@@ -1,6 +1,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { ReadFileTool, WriteFileTool } from "./file.ts";
+import { readWorkspaceKv } from "./file_workspace.ts";
 
 const reader = new ReadFileTool();
 const writer = new WriteFileTool();
@@ -159,4 +160,63 @@ Deno.test("unscoped ReadFileTool still reads absolute paths", async () => {
   assertEquals(result.output, "absolute content");
 
   await Deno.remove(tmp);
+});
+
+Deno.test("scoped WriteFileTool writes to workspace KV on deploy", async () => {
+  const workspaceDir = await Deno.makeTempDir();
+  const kv = await Deno.openKv(join(workspaceDir, "workspace.db"));
+  const scopedWriter = new WriteFileTool({
+    workspaceDir,
+    agentId: "test-agent",
+    kv,
+    onDeploy: true,
+  });
+
+  const result = await scopedWriter.execute({
+    path: "memories/cloud.md",
+    content: "# Cloud",
+    dry_run: false,
+  });
+
+  assertEquals(result.success, true);
+  assertEquals(
+    await readWorkspaceKv(kv, "test-agent", "memories/cloud.md"),
+    "# Cloud",
+  );
+
+  kv.close();
+  await Deno.remove(workspaceDir, { recursive: true });
+});
+
+Deno.test("scoped ReadFileTool reads from workspace KV on deploy", async () => {
+  const workspaceDir = await Deno.makeTempDir();
+  const kv = await Deno.openKv(join(workspaceDir, "workspace.db"));
+  const scopedWriter = new WriteFileTool({
+    workspaceDir,
+    agentId: "test-agent",
+    kv,
+    onDeploy: true,
+  });
+  const scopedReader = new ReadFileTool({
+    workspaceDir,
+    agentId: "test-agent",
+    kv,
+    onDeploy: true,
+  });
+
+  await scopedWriter.execute({
+    path: "memories/cloud-read.md",
+    content: "# Cloud Read",
+    dry_run: false,
+  });
+
+  const result = await scopedReader.execute({
+    path: "memories/cloud-read.md",
+  });
+
+  assertEquals(result.success, true);
+  assertEquals(result.output, "# Cloud Read");
+
+  kv.close();
+  await Deno.remove(workspaceDir, { recursive: true });
 });

@@ -12,20 +12,27 @@ import type { MemoryPort } from "./memory_port.ts";
 import {
   extractRuntimePrivilegeElevationPause,
 } from "./runtime_message_mapping.ts";
-import type { SkillsLoader } from "./skills.ts";
+import type { SkillLoader } from "./skills.ts";
 import type { AgentConfig } from "./types.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
+import {
+  applyConversationContextRefresh,
+  createConversationContextRefreshState,
+} from "./conversation_context_refresh.ts";
 
 export interface ExecuteAgentConversationInput {
   config: AgentConfig;
   llmToolPort: AgentLlmToolPort;
   tools: ToolDefinition[];
   context: ContextBuilder;
-  skills: SkillsLoader;
+  skills: SkillLoader;
   memory: MemoryPort;
   fromAgentId: string;
   inputText: string;
   canonicalTask: Task;
+  memoryTopics?: string[];
+  memoryFiles?: string[];
+  refreshMemoryFiles?: () => Promise<string[]>;
   getRuntimeGrants?: () => AgentRuntimeGrant[];
   reportWorkingTransition: boolean;
   maxIterations: number;
@@ -36,6 +43,8 @@ export async function executeAgentConversation(
   input: ExecuteAgentConversationInput,
 ): Promise<void> {
   let canonicalTask = input.canonicalTask;
+  let memoryTopics = input.memoryTopics;
+  let memoryFiles = input.memoryFiles;
 
   if (input.reportWorkingTransition) {
     canonicalTask = transitionTask(canonicalTask, "WORKING");
@@ -55,8 +64,8 @@ export async function executeAgentConversation(
         input.memory.getMessages(),
         input.skills.getSkills(),
         input.tools,
-        undefined,
-        undefined,
+        memoryTopics,
+        memoryFiles,
         input.getRuntimeGrants?.() ?? [],
       );
 
@@ -74,6 +83,7 @@ export async function executeAgentConversation(
           content: response.content || "",
           tool_calls: response.toolCalls,
         });
+        const refreshState = createConversationContextRefreshState();
 
         for (const tc of response.toolCalls) {
           let args: Record<string, unknown>;
@@ -132,6 +142,22 @@ export async function executeAgentConversation(
             name: tc.function.name,
             tool_call_id: tc.id,
           });
+          applyConversationContextRefresh(
+            refreshState,
+            tc.function.name,
+            args,
+            result,
+          );
+        }
+
+        if (refreshState.reloadSkills) {
+          await input.skills.reload();
+        }
+        if (refreshState.reloadMemoryFiles && input.refreshMemoryFiles) {
+          memoryFiles = await input.refreshMemoryFiles();
+        }
+        if (refreshState.reloadMemoryTopics) {
+          memoryTopics = await input.memory.listTopics();
         }
 
         continue;

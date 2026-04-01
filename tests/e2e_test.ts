@@ -690,7 +690,7 @@ Deno.test({
           registerDenoCron: false,
         });
         const handledTools: Array<
-          "create_cron" | "list_crons" | "delete_cron"
+          "create_cron" | "list_crons" | "delete_cron" | "enable_cron" | "disable_cron"
         > = [];
         const pool = new WorkerPool(config);
         pool.setCronHandler(async (currentAgentId, request) => {

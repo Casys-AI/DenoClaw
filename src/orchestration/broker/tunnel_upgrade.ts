@@ -137,14 +137,21 @@ export async function handleBrokerTunnelUpgrade(
         ctx.tunnelRegistry.register(tunnelId, socket, caps);
         if (caps.type === "instance") {
           const service = await ctx.getFederationService();
-          await service.syncCatalog(
-            tunnelId,
-            mapInstanceTunnelToCatalog(tunnelId, caps),
-            {
-              remoteBrokerId: tunnelId,
-              traceId: crypto.randomUUID(),
-            },
-          );
+          const identity = await service.getIdentity(tunnelId);
+          if (!identity || identity.status !== "trusted") {
+            log.warn(
+              `Tunnel ${tunnelId}: catalog sync rejected — broker identity not trusted (status: ${identity?.status ?? "unknown"})`,
+            );
+          } else {
+            await service.syncCatalog(
+              tunnelId,
+              mapInstanceTunnelToCatalog(tunnelId, caps),
+              {
+                remoteBrokerId: tunnelId,
+                traceId: crypto.randomUUID(),
+              },
+            );
+          }
         }
         log.info(
           `Tunnel registered: ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${

@@ -138,6 +138,12 @@ deno task lint      # Lint
 deno task fmt       # Format
 ```
 
+## Project Docs
+
+- [LICENSE](LICENSE)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+
 ## Repository layout
 
 ```

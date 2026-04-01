@@ -1,4 +1,5 @@
 import type { FederationControlHandlerMap } from "../federation/mod.ts";
+import type { AgentCard } from "../../messaging/a2a/types.ts";
 import type { BrokerMessage } from "../types.ts";
 import type { BrokerFederationMessagingDeps } from "./federation_routing_port.ts";
 
@@ -108,23 +109,35 @@ export function createBrokerFederationControlHandlers(
         "traceId",
         envelope.type,
       );
-      const agents = Array.isArray(payload.agents)
-        ? payload.agents.filter((agent): agent is string =>
-          typeof agent === "string"
-        )
-        : null;
-      if (!agents) {
+      if (!Array.isArray(payload.agents)) {
         throw new Error(
-          `Invalid ${envelope.type} payload: agents must be a string[]`,
+          `Invalid ${envelope.type} payload: agents must be an array`,
         );
       }
+      const entries = payload.agents.map(
+        (agent: unknown): { agentId: string; card: AgentCard | null } => {
+          if (typeof agent === "string") {
+            return { agentId: agent, card: null };
+          }
+          if (
+            agent !== null && typeof agent === "object" &&
+            "agentId" in agent && typeof (agent as Record<string, unknown>).agentId === "string"
+          ) {
+            const entry = agent as { agentId: string; card?: AgentCard };
+            return { agentId: entry.agentId, card: entry.card ?? null };
+          }
+          throw new Error(
+            `Invalid ${envelope.type} payload: each agent entry must be a string or { agentId, card? }`,
+          );
+        },
+      );
       const service = await deps.getFederationService();
       await service.syncCatalog(
         remoteBrokerId,
-        agents.map((agentId) => ({
+        entries.map(({ agentId, card }) => ({
           remoteBrokerId,
           agentId,
-          card: null,
+          card,
           capabilities: [],
           visibility: "public",
         })),

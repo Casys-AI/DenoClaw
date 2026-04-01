@@ -76,8 +76,60 @@ Deno.test("createBrokerFederationControlHandlers validates catalog payloads", as
         }),
       ),
     Error,
-    "agents must be a string[]",
+    "agents must be an array",
   );
+});
+
+Deno.test("federation_catalog_sync propagates agent cards", async () => {
+  const synced: unknown[] = [];
+  const service = {
+    syncCatalog: (
+      _remoteBrokerId: string,
+      entries: unknown[],
+      _meta: unknown,
+    ) => {
+      synced.push(...entries);
+      return Promise.resolve();
+    },
+  } as unknown as import("../federation/mod.ts").FederationService;
+  const handlers = createBrokerFederationControlHandlers({
+    findRemoteBrokerConnection: () => null,
+    routeToTunnel: () => {},
+    getFederationService: () => Promise.resolve(service),
+    sendReply: () => Promise.resolve(),
+  });
+
+  const card: import("../../messaging/a2a/types.ts").AgentCard = {
+    name: "alice",
+    description: "test agent",
+    version: "0.1.0",
+    protocolVersion: "1.0",
+    url: "http://localhost:3000",
+    capabilities: { streaming: false, pushNotifications: false },
+    defaultInputModes: ["text"],
+    defaultOutputModes: ["text"],
+    skills: [],
+  };
+
+  await handlers.federation_catalog_sync(
+    createEnvelope("federation_catalog_sync", {
+      remoteBrokerId: "broker-remote",
+      traceId: "trace-1",
+      agents: [
+        { agentId: "alice", card },
+        { agentId: "bob" },
+        "charlie",
+      ],
+    }),
+  );
+
+  assertEquals(synced.length, 3);
+  assertEquals((synced[0] as { agentId: string; card: unknown }).agentId, "alice");
+  assertEquals((synced[0] as { card: unknown }).card, card);
+  assertEquals((synced[1] as { agentId: string; card: unknown }).agentId, "bob");
+  assertEquals((synced[1] as { card: unknown }).card, null);
+  assertEquals((synced[2] as { agentId: string; card: unknown }).agentId, "charlie");
+  assertEquals((synced[2] as { card: unknown }).card, null);
 });
 
 Deno.test("handleBrokerFederationControlMessage rejects non-control methods", async () => {

@@ -3,7 +3,7 @@
  * These envelopes describe broker-level routing metadata; transport remains environment-dependent.
  */
 
-import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import type { A2AMessage, AgentCard, Task } from "../messaging/a2a/types.ts";
 import type {
   BrokerEnvelope,
   LLMResponse,
@@ -112,9 +112,15 @@ export interface FederationLinkAckPayload {
   reason?: string;
 }
 
+export interface FederationCatalogSyncAgentEntry {
+  agentId: string;
+  card?: AgentCard;
+}
+
 export interface FederationCatalogSyncPayload {
   remoteBrokerId: string;
-  agents: string[];
+  /** Accepts both legacy string[] and new structured entries. */
+  agents: (string | FederationCatalogSyncAgentEntry)[];
   traceId: string;
 }
 

@@ -5,6 +5,7 @@ import {
   getDashboardRequestConfig,
   requireDashboardSession,
 } from "../../lib/dashboard-auth.ts";
+import { buildA2AFilterHref } from "../../lib/dashboard_ui.ts";
 import type { TaskObservationEntry } from "../../lib/types.ts";
 
 interface A2AData {
@@ -104,13 +105,11 @@ export default function A2AHub({ data }: { data: A2AData }) {
             placeholder="Search tasks..."
             class="input input-sm bg-base-200 font-data w-64"
           />
-          {statusFilter !== "all" && (
-            <input type="hidden" name="status" value={statusFilter} />
-          )}
+          <input type="hidden" name="status" value={statusFilter} />
         </form>
         <div class="join">
           <a
-            href="?status=all"
+            href={buildA2AFilterHref("all", searchQuery)}
             class={`join-item btn btn-sm ${
               statusFilter === "all" ? "btn-primary" : "btn-ghost"
             }`}
@@ -118,7 +117,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
             All
           </a>
           <a
-            href="?status=running"
+            href={buildA2AFilterHref("running", searchQuery)}
             class={`join-item btn btn-sm ${
               statusFilter === "running" ? "btn-info" : "btn-ghost text-info"
             }`}
@@ -126,7 +125,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
             Running
           </a>
           <a
-            href="?status=completed"
+            href={buildA2AFilterHref("completed", searchQuery)}
             class={`join-item btn btn-sm ${
               statusFilter === "completed"
                 ? "btn-success"
@@ -136,7 +135,7 @@ export default function A2AHub({ data }: { data: A2AData }) {
             Completed
           </a>
           <a
-            href="?status=failed"
+            href={buildA2AFilterHref("failed", searchQuery)}
             class={`join-item btn btn-sm ${
               statusFilter === "failed" ? "btn-error" : "btn-ghost text-error"
             }`}

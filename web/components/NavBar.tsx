@@ -1,11 +1,15 @@
+import { isNavItemActive } from "../lib/dashboard_ui.ts";
+
 const NAV_ITEMS = [
   { href: "overview", label: "Overview" },
   { href: "network", label: "Network" },
   { href: "agents", label: "Agents" },
   { href: "a2a", label: "A2A" },
+  { href: "cron", label: "Cron" },
+  { href: "tunnels", label: "Tunnels" },
   { href: "cost", label: "Cost" },
   { href: "activity", label: "Activity" },
-];
+] as const;
 
 export function NavBar({ currentPath }: { currentPath: string }) {
   return (
@@ -20,12 +24,11 @@ export function NavBar({ currentPath }: { currentPath: string }) {
         </a>
       </div>
       <div class="navbar-center hidden md:flex">
-        <ul class="menu menu-horizontal gap-1 px-1">
-          {NAV_ITEMS.map((item) => {
-            const isActive = currentPath === item.href ||
-              currentPath.startsWith(item.href + "/");
-            return (
-              <li key={item.href}>
+          <ul class="menu menu-horizontal gap-1 px-1">
+            {NAV_ITEMS.map((item) => {
+              const isActive = isNavItemActive(currentPath, item.href);
+              return (
+                <li key={item.href}>
                 <a
                   href={item.href}
                   class={isActive
@@ -62,8 +65,7 @@ export function NavBar({ currentPath }: { currentPath: string }) {
             class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow bg-base-200 w-52"
           >
             {NAV_ITEMS.map((item) => {
-              const isActive = currentPath === item.href ||
-                currentPath.startsWith(item.href + "/");
+              const isActive = isNavItemActive(currentPath, item.href);
               return (
                 <li key={item.href}>
                   <a

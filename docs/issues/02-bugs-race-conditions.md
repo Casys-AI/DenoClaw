@@ -135,6 +135,7 @@ Review date: 2026-04-01
 - **Fix:** Remove cache or add TTL
 
 ### BUG-25 — NavBar active state never fires (leading `/` mismatch)
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `web/components/NavBar.tsx:25-26`
 - **Impact:** No nav item ever highlighted as active
 - **Fix:** `currentPath === \`/\${item.href}\``

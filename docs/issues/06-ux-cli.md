@@ -23,6 +23,7 @@ Review date: 2026-04-01
 - **Fix:** Call `requireInteractive("denoclaw deploy")` at top
 
 ### UX-05 — `CreateAgentModal` shows raw API error JSON to users
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `web/islands/CreateAgentModal.tsx:67-69`
 - **Fix:** Parse JSON, extract `error.message`
 
@@ -31,9 +32,11 @@ Review date: 2026-04-01
 - **Fix:** Add timeout to all route-level fetches (3-5s)
 
 ### UX-07 — Dashboard NavBar omits Cron and Tunnels pages
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `web/components/NavBar.tsx`
 
 ### UX-08 — A2A search filter loses status on submit and vice versa
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `web/routes/a2a/index.tsx:98-110`
 - **Fix:** Make status tabs preserve `q` parameter
 

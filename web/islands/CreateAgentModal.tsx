@@ -1,4 +1,5 @@
 import { useRef, useState } from "preact/hooks";
+import { parseApiErrorText } from "../lib/dashboard_ui.ts";
 
 const DEFAULT_MODEL = "ollama/nemotron";
 const PERMISSIONS = ["read", "write", "run", "net"] as const;
@@ -64,7 +65,7 @@ export default function CreateAgentModal() {
       });
 
       if (!response.ok) {
-        setError(await response.text());
+        setError(parseApiErrorText(await response.text()));
         return;
       }
 

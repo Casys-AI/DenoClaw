@@ -2,11 +2,11 @@ import { getConfigOrDefault, saveConfig } from "../../config/mod.ts";
 import { requireInteractive } from "../output.ts";
 import { ask, confirm, print, success } from "../prompt.ts";
 
-export async function setupAgent(): Promise<void> {
+export async function setupAgentDefaults(): Promise<void> {
   requireInteractive("denoclaw setup agent");
   const config = await getConfigOrDefault();
 
-  print("\n=== Agent Configuration ===");
+  print("\n=== Agent Defaults ===");
 
   const model = await ask("LLM model", config.agents.defaults.model);
   config.agents.defaults.model = model;
@@ -29,7 +29,7 @@ export async function setupAgent(): Promise<void> {
   }
 
   await saveConfig(config);
-  success("Agent configured.");
+  success("Agent defaults configured.");
   print("  denoclaw agent       — interactive chat");
   print("  denoclaw agent -m .. — one-off message");
 }

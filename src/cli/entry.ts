@@ -4,18 +4,20 @@ import { type CliArgs, parseCliArgs } from "./args.ts";
 import { printHelp } from "./help.ts";
 import { humanLog, humanWarn, initCliFlags, outputError } from "./output.ts";
 import { runInitWizard } from "./init.ts";
+import { publishAgents, publishDeprecatedAgent } from "./publish.ts";
+import {
+  deployBroker,
+} from "./setup/broker_deploy.ts";
 import {
   deleteChannelRoute,
-  deployBroker,
   discoverChannelRoutes,
   listChannelRoutes,
-  publishAgent,
-  setupAgent,
-  setupChannel,
   setupChannelRoute,
-  setupProvider,
-  showStatus,
-} from "./setup/mod.ts";
+} from "./setup/channel_routes.ts";
+import { setupAgentDefaults } from "./setup/agent_defaults.ts";
+import { setupChannel } from "./setup/channels.ts";
+import { setupProvider } from "./setup/providers.ts";
+import { showStatus } from "./setup/status.ts";
 import type { Config } from "../config/types.ts";
 
 export interface CliCommandDeps {
@@ -33,9 +35,10 @@ export interface CliCommandDeps {
   listChannelRoutes: typeof listChannelRoutes;
   deleteChannelRoute: typeof deleteChannelRoute;
   discoverChannelRoutes: typeof discoverChannelRoutes;
-  setupAgent: typeof setupAgent;
+  setupAgentDefaults: typeof setupAgentDefaults;
+  publishAgents: typeof publishAgents;
+  publishDeprecatedAgent: typeof publishDeprecatedAgent;
   deployBroker: typeof deployBroker;
-  publishAgent: typeof publishAgent;
   showStatus: typeof showStatus;
   startAgentRuntime(config: Config, args: CliArgs): Promise<void>;
   startLocalGateway(config: Config): Promise<void>;
@@ -63,9 +66,10 @@ function createCliCommandDeps(): CliCommandDeps {
     listChannelRoutes,
     deleteChannelRoute,
     discoverChannelRoutes,
-    setupAgent,
+    setupAgentDefaults,
+    publishAgents,
+    publishDeprecatedAgent,
     deployBroker,
-    publishAgent,
     showStatus,
     startAgentRuntime: async (config, args) => {
       const { startAgentRuntime } = await import("../runtime/start_agent.ts");
@@ -133,7 +137,7 @@ export async function runCli(
           await deps.setupChannelRoute();
           break;
         case "agent":
-          await deps.setupAgent();
+          await deps.setupAgentDefaults();
           break;
         default:
           deps.humanLog(
@@ -149,7 +153,9 @@ export async function runCli(
         deps.humanWarn(
           "⚠ 'denoclaw deploy agent' is deprecated. Use 'denoclaw publish <agent>' instead.\n",
         );
-        await deps.publishAgent();
+        await deps.publishDeprecatedAgent(args._[2] as string | undefined, {
+          force: !!args.force,
+        });
       } else {
         await deps.deployBroker({
           org: args.org,
@@ -162,9 +168,8 @@ export async function runCli(
     }
 
     case "publish": {
-      const { publishAgents } = await import("./publish.ts");
       const target = args._[1] as string | undefined;
-      await publishAgents(target, { force: !!args.force });
+      await deps.publishAgents(target, { force: !!args.force });
       return;
     }
 

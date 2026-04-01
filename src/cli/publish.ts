@@ -4,8 +4,10 @@ import { WorkspaceLoader } from "../agent/workspace.ts";
 import { getDeployOrgToken } from "../shared/deploy_credentials.ts";
 import { ask, confirm, error, print, success } from "./prompt.ts";
 import { cliFlags, output, outputError } from "./output.ts";
-import { generateAgentEntrypoint } from "./setup/mod.ts";
-import { materializePublishedEntry } from "./publish_entry.ts";
+import {
+  generateAgentEntrypoint,
+  materializePublishedEntry,
+} from "./publish_entry.ts";
 import { ensureAgentKvDatabase as ensureAgentKvDatabaseAssignment } from "./publish_kv.ts";
 import { buildPublishedWorkspaceSnapshot } from "./publish_workspace.ts";
 import {
@@ -21,6 +23,24 @@ import {
 
 export interface PublishAgentsOptions {
   force?: boolean;
+}
+
+export async function publishDeprecatedAgent(
+  agentName?: string,
+  options: PublishAgentsOptions = {},
+): Promise<void> {
+  const resolvedAgentName = agentName ||
+    (cliFlags().interactive ? await ask("Agent name") : undefined);
+
+  if (!resolvedAgentName) {
+    outputError(
+      "AGENT_NAME_REQUIRED",
+      "Agent name is required. Use 'denoclaw publish <agent>'.",
+    );
+    return;
+  }
+
+  await publishAgents(resolvedAgentName, options);
 }
 
 /**

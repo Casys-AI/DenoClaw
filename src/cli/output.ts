@@ -41,8 +41,20 @@ export function humanLog(message: string): void {
   if (!_flags.json) console.log(message);
 }
 
+export function humanPrint(message: string): void {
+  if (!_flags.json) console.log(message);
+}
+
 export function humanWarn(message: string): void {
   if (!_flags.json) console.log(message);
+}
+
+export function humanSuccess(message: string): void {
+  if (!_flags.json) console.log(`✓ ${message}`);
+}
+
+export function humanError(message: string): void {
+  if (!_flags.json) console.error(`✗ ${message}`);
 }
 
 export function requireInteractive(action: string): void {

@@ -1,4 +1,5 @@
 import type { AgentDefaults } from "../agent/types.ts";
+import type { PublishedWorkspaceSnapshot } from "../agent/published_workspace.ts";
 import type { AgentEntry } from "../shared/types.ts";
 
 export function materializePublishedEntry(
@@ -30,4 +31,21 @@ export function materializePublishedEntry(
     systemPrompt: entry.systemPrompt ?? defaults.systemPrompt,
     ...(sandbox ? { sandbox } : {}),
   };
+}
+
+export function generateAgentEntrypoint(
+  agentId: string,
+  entry: AgentEntry,
+  workspaceSnapshot?: PublishedWorkspaceSnapshot,
+): string {
+  const runtimeOptions = workspaceSnapshot
+    ? { agentId, entry, workspaceSnapshot }
+    : { agentId, entry };
+  return `// Auto-generated DenoClaw Agent Runtime
+// Agent: ${agentId} | Model: ${entry.model ?? "unknown"}
+
+import { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
+
+await startDeployedAgentRuntime(${JSON.stringify(runtimeOptions, null, 2)});
+`;
 }

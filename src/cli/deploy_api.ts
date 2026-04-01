@@ -2,6 +2,7 @@ import { fromFileUrl, join } from "@std/path";
 import type { Config } from "../config/types.ts";
 import type { AgentEntry } from "../shared/types.ts";
 import { deriveAgentAppName, deriveDeployHostname } from "../shared/naming.ts";
+import { humanLog } from "./output.ts";
 
 export const DEPLOY_API_V2 = "https://api.deno.com/v2";
 const AGENT_ID_LABEL = "custom.denoclaw.agent_id";
@@ -263,5 +264,5 @@ export async function deployAppRevision(input: {
 }
 
 function printDeployAppReuse(slug: string): void {
-  console.log(`  Deploy app already exists, reusing slug "${slug}".`);
+  humanLog(`  Deploy app already exists, reusing slug "${slug}".`);
 }

@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
-import { materializePublishedEntry } from "./publish_entry.ts";
+import {
+  generateAgentEntrypoint,
+  materializePublishedEntry,
+} from "./publish_entry.ts";
 
 Deno.test("materializePublishedEntry fills missing model defaults", () => {
   const entry = materializePublishedEntry(
@@ -74,4 +77,27 @@ Deno.test("materializePublishedEntry merges nested privilege elevation config", 
     enabled: false,
     scopes: ["task", "session"],
   });
+});
+
+Deno.test("generateAgentEntrypoint embeds workspace snapshot when present", () => {
+  const entrypoint = generateAgentEntrypoint(
+    "alice",
+    {
+      model: "test/model",
+    },
+    {
+      syncId: "sync-1",
+      syncMode: "preserve",
+      files: [{ path: "skills/test.md", content: "hello" }],
+    },
+  );
+
+  assertEquals(
+    entrypoint.includes('"workspaceSnapshot"'),
+    true,
+  );
+  assertEquals(
+    entrypoint.includes('"agentId": "alice"'),
+    true,
+  );
 });

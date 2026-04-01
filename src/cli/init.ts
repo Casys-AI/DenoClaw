@@ -1,4 +1,6 @@
-import { setupAgent, setupChannel, setupProvider } from "./setup/mod.ts";
+import { setupAgentDefaults } from "./setup/agent_defaults.ts";
+import { setupChannel } from "./setup/channels.ts";
+import { setupProvider } from "./setup/providers.ts";
 import { requireInteractive } from "./output.ts";
 import { confirm } from "./prompt.ts";
 
@@ -23,11 +25,11 @@ export async function runInitWizard(): Promise<void> {
   }
 
   const wantCustom = await confirm(
-    "Step 3/3 — Customize the agent (model, temperature)?",
+    "Step 3/3 — Customize default agent settings (model, temperature)?",
     false,
   );
   if (wantCustom) {
-    await setupAgent();
+    await setupAgentDefaults();
   }
 
   console.log(`

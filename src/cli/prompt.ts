@@ -3,8 +3,14 @@
  * Reads from stdin, writes to stdout.
  */
 
-import { cliFlags } from "./output.ts";
-import { CliError } from "./output.ts";
+import {
+  cliFlags,
+  CliError,
+  humanError,
+  humanPrint,
+  humanSuccess,
+  humanWarn,
+} from "./output.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -66,17 +72,17 @@ export async function choose(
 }
 
 export function print(msg: string): void {
-  console.log(msg);
+  humanPrint(msg);
 }
 
 export function success(msg: string): void {
-  console.log(`✓ ${msg}`);
+  humanSuccess(msg);
 }
 
 export function warn(msg: string): void {
-  console.log(`⚠ ${msg}`);
+  humanWarn(`⚠ ${msg}`);
 }
 
 export function error(msg: string): void {
-  console.error(`✗ ${msg}`);
+  humanError(msg);
 }

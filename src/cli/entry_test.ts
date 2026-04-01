@@ -39,9 +39,10 @@ function createCliDeps(
     listChannelRoutes: () => Promise.resolve(),
     deleteChannelRoute: () => Promise.resolve(),
     discoverChannelRoutes: () => Promise.resolve(),
-    setupAgent: () => Promise.resolve(),
+    setupAgentDefaults: () => Promise.resolve(),
+    publishAgents: () => Promise.resolve(),
+    publishDeprecatedAgent: () => Promise.resolve(),
     deployBroker: () => Promise.resolve(),
-    publishAgent: () => Promise.resolve(),
     showStatus: () => Promise.resolve(),
     startAgentRuntime: () => Promise.resolve(),
     startLocalGateway: () => Promise.resolve(),
@@ -156,4 +157,38 @@ Deno.test("runCli dispatches channel route discover", async () => {
   await runCli(["channel", "route", "discover"], deps);
 
   assertEquals(called, true);
+});
+
+Deno.test("runCli dispatches publish to canonical publishAgents", async () => {
+  let receivedTarget: string | undefined;
+  let receivedForce = false;
+  const deps = createCliDeps({
+    publishAgents: (target, options) => {
+      receivedTarget = target;
+      receivedForce = !!options?.force;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["publish", "alice", "--force"], deps);
+
+  assertEquals(receivedTarget, "alice");
+  assertEquals(receivedForce, true);
+});
+
+Deno.test("runCli dispatches deprecated deploy agent through publish wrapper", async () => {
+  let receivedTarget: string | undefined;
+  let receivedForce = false;
+  const deps = createCliDeps({
+    publishDeprecatedAgent: (target, options) => {
+      receivedTarget = target;
+      receivedForce = !!options?.force;
+      return Promise.resolve();
+    },
+  });
+
+  await runCli(["deploy", "agent", "alice", "--force"], deps);
+
+  assertEquals(receivedTarget, "alice");
+  assertEquals(receivedForce, true);
 });

@@ -5,7 +5,7 @@
  * Run: deno test tests/e2e_test.ts --unstable-kv --unstable-cron --allow-all
  */
 import "@std/dotenv/load";
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { getConfigOrDefault } from "../src/config/loader.ts";
 import { WorkerPool } from "../src/agent/worker_pool.ts";
 import { WorkspaceLoader } from "../src/agent/workspace.ts";
@@ -14,10 +14,13 @@ import {
   getAgentRuntimeDir,
 } from "../src/shared/helpers.ts";
 import type { WorkerConfig } from "../src/agent/worker_protocol.ts";
+import { BrokerCronManager } from "../src/orchestration/broker/cron_manager.ts";
+import { executeCronToolRequest } from "../src/orchestration/broker/cron_tool_actions.ts";
 
 // ── Timeout: 30s per test — LLM calls are slow ──────────
 
 const TEST_TIMEOUT_MS = 30_000;
+const E2E_MODEL = "ollama/nemotron-3-super";
 const testOpts = { sanitizeResources: false, sanitizeOps: false };
 const OLLAMA_E2E_ENABLED = await canReachOllamaProvider();
 const providerBackedTestOpts = {
@@ -53,6 +56,13 @@ async function canReachOllamaProvider(): Promise<boolean> {
 
 async function buildWorkerConfig(): Promise<WorkerConfig> {
   const config = await getConfigOrDefault();
+  config.agents = {
+    ...config.agents,
+    defaults: {
+      ...config.agents.defaults,
+      model: E2E_MODEL,
+    },
+  };
   return {
     agents: config.agents,
     providers: config.providers,
@@ -89,6 +99,155 @@ async function withTempAgentsDir(
   }
 }
 
+function startFakeOllamaCronServer(): {
+  apiBase: string;
+  close: () => Promise<void>;
+} {
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0 },
+    async (req) => {
+      const url = new URL(req.url);
+      if (req.method !== "POST" || url.pathname !== "/api/chat") {
+        return new Response("not found", { status: 404 });
+      }
+
+      const body = await req.json() as {
+        model: string;
+        messages: Array<{
+          role: string;
+          content: string;
+        }>;
+      };
+      const messages = body.messages ?? [];
+      const lastMessage = messages.at(-1);
+      const lastUserMessage =
+        [...messages].reverse().find((message) => message.role === "user")
+          ?.content ?? "";
+
+      const json = (payload: Record<string, unknown>) =>
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+        });
+
+      if (lastMessage?.role === "tool") {
+        if (lastUserMessage === "RUN_TEST_CREATE") {
+          return json({
+            model: body.model,
+            message: { role: "assistant", content: "CREATED" },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: 1,
+            eval_count: 1,
+          });
+        }
+        if (lastUserMessage === "RUN_TEST_LIST") {
+          return json({
+            model: body.model,
+            message: { role: "assistant", content: lastMessage.content },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: 1,
+            eval_count: 1,
+          });
+        }
+        if (lastUserMessage.startsWith("RUN_TEST_DELETE ")) {
+          return json({
+            model: body.model,
+            message: { role: "assistant", content: "DELETED" },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: 1,
+            eval_count: 1,
+          });
+        }
+      }
+
+      if (lastUserMessage === "RUN_TEST_CREATE") {
+        return json({
+          model: body.model,
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              function: {
+                name: "create_cron",
+                arguments: {
+                  name: "smoke-test",
+                  schedule: "0 8 * * *",
+                  prompt: "Reply with exactly: CRON_OK",
+                },
+              },
+            }],
+          },
+          done: true,
+          done_reason: "tool_calls",
+          prompt_eval_count: 1,
+          eval_count: 1,
+        });
+      }
+
+      if (lastUserMessage === "RUN_TEST_LIST") {
+        return json({
+          model: body.model,
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              function: {
+                name: "list_crons",
+                arguments: {},
+              },
+            }],
+          },
+          done: true,
+          done_reason: "tool_calls",
+          prompt_eval_count: 1,
+          eval_count: 1,
+        });
+      }
+
+      if (lastUserMessage.startsWith("RUN_TEST_DELETE ")) {
+        return json({
+          model: body.model,
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              function: {
+                name: "delete_cron",
+                arguments: {
+                  cronJobId: lastUserMessage.slice("RUN_TEST_DELETE ".length),
+                },
+              },
+            }],
+          },
+          done: true,
+          done_reason: "tool_calls",
+          prompt_eval_count: 1,
+          eval_count: 1,
+        });
+      }
+
+      return json({
+        model: body.model,
+        message: { role: "assistant", content: "UNEXPECTED_TEST_INPUT" },
+        done: true,
+        done_reason: "stop",
+        prompt_eval_count: 1,
+        eval_count: 1,
+      });
+    },
+  );
+  const addr = server.addr as Deno.NetAddr;
+  return {
+    apiBase: `http://${addr.hostname}:${addr.port}`,
+    close: async () => {
+      server.shutdown();
+      await server.finished;
+    },
+  };
+}
+
 // ── Test 1: single agent responds to message ────────────
 
 Deno.test({
@@ -99,7 +258,7 @@ Deno.test({
       const agentId = "test-solo";
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: { allowedPermissions: ["read"] },
       });
 
@@ -148,13 +307,13 @@ Deno.test({
       const betaId = "test-beta";
 
       await WorkspaceLoader.create(alphaId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: { allowedPermissions: ["read"] },
         peers: [betaId],
         acceptFrom: [betaId],
       });
       await WorkspaceLoader.create(betaId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: { allowedPermissions: ["read"] },
         peers: [alphaId],
         acceptFrom: [alphaId],
@@ -203,7 +362,7 @@ Deno.test({
       const agentId = "test-exec";
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: {
           allowedPermissions: ["read", "run"],
           execPolicy: {
@@ -252,7 +411,7 @@ Deno.test({
       const sentinelPath = `${tmpDir}/readonly_should_not_exist`;
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: {
           allowedPermissions: ["read"], // intentionally no "run"
         },
@@ -269,8 +428,8 @@ Deno.test({
         const response = await pool.send(
           agentId,
           "session-readonly",
-          `Use the shell tool to execute 'touch ${sentinelPath}' with dry_run=false. Report what happens.`,
-          { timeoutMs: TEST_TIMEOUT_MS },
+          `Call the shell tool exactly once with command 'touch ${sentinelPath}' and dry_run=false. Do not retry. After the tool result, reply in one short sentence describing whether it was denied.`,
+          { timeoutMs: TEST_TIMEOUT_MS * 2 },
         );
 
         assert(response.content.length > 0, "Response must not be empty");
@@ -298,7 +457,7 @@ Deno.test({
       const sentinelPath = `${tmpDir}/policy_should_not_exist`;
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: {
           allowedPermissions: ["read", "run"],
           execPolicy: {
@@ -355,7 +514,7 @@ Deno.test({
       const agentId = "test-obs";
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: { allowedPermissions: ["read"] },
       });
 
@@ -437,7 +596,7 @@ Deno.test({
       const agentId = "test-dryrun";
 
       await WorkspaceLoader.create(agentId, {
-        model: "ollama/nemotron-3-super",
+        model: E2E_MODEL,
         sandbox: {
           allowedPermissions: ["read", "write"],
         },
@@ -485,7 +644,133 @@ Deno.test({
   },
 });
 
-// ── Test 8: agent writes a memory file ─────────────────
+// ── Test 8: local cron tools round-trip through WorkerPool ──
+
+Deno.test({
+  name: "E2E: local cron tools create, list, and delete jobs",
+  ...testOpts,
+  async fn() {
+    const cronKvPath = await Deno.makeTempFile({
+      prefix: "denoclaw_e2e_cron_",
+      suffix: ".db",
+    });
+    const fakeOllama = startFakeOllamaCronServer();
+
+    try {
+      await withTempAgentsDir(async () => {
+        const agentId = `test-cron-${crypto.randomUUID().slice(0, 6)}`;
+        const config = await buildWorkerConfig();
+        config.providers = {
+          ollama: {
+            apiKey: "test-ollama-key",
+            apiBase: fakeOllama.apiBase,
+          },
+        };
+        config.agents = {
+          ...config.agents,
+          defaults: {
+            ...config.agents.defaults,
+            model: "ollama/test-cron-model",
+          },
+        };
+        config.agents.registry = {
+          [agentId]: {
+            sandbox: { allowedPermissions: ["schedule"] },
+          },
+        };
+
+        await WorkspaceLoader.create(
+          agentId,
+          config.agents.registry[agentId],
+          "You are a deterministic E2E cron test agent.",
+        );
+
+        const cronKv = await Deno.openKv(cronKvPath);
+        const cronManager = new BrokerCronManager(cronKv, {
+          registerDenoCron: false,
+        });
+        const handledTools: Array<
+          "create_cron" | "list_crons" | "delete_cron"
+        > = [];
+        const pool = new WorkerPool(config);
+        pool.setCronHandler(async (currentAgentId, request) => {
+          handledTools.push(request.tool);
+          return await executeCronToolRequest(
+            cronManager,
+            currentAgentId,
+            request.tool,
+            request.args,
+          );
+        });
+
+        try {
+          await pool.start([agentId]);
+
+          const createResult = await pool.send(
+            agentId,
+            "session-cron",
+            "RUN_TEST_CREATE",
+            { timeoutMs: TEST_TIMEOUT_MS * 2 },
+          );
+          assert(
+            createResult.content.length > 0,
+            "Agent should respond after create_cron",
+          );
+
+          const createdJobs = await cronManager.listByAgent(agentId);
+          assertEquals(handledTools, ["create_cron"]);
+          assertEquals(createdJobs.length, 1);
+          assertEquals(createdJobs[0].name, "smoke-test");
+          assertEquals(createdJobs[0].schedule, "0 8 * * *");
+
+          const listResult = await pool.send(
+            agentId,
+            "session-cron",
+            "RUN_TEST_LIST",
+            { timeoutMs: TEST_TIMEOUT_MS * 2 },
+          );
+          assert(
+            listResult.content.length > 0,
+            "Agent should respond after list_crons",
+          );
+          assertEquals(handledTools, ["create_cron", "list_crons"]);
+          assertStringIncludes(listResult.content, createdJobs[0].id);
+          assertStringIncludes(listResult.content, "smoke-test");
+
+          const deleteResult = await pool.send(
+            agentId,
+            "session-cron",
+            `RUN_TEST_DELETE ${createdJobs[0].id}`,
+            { timeoutMs: TEST_TIMEOUT_MS * 2 },
+          );
+          assert(
+            deleteResult.content.length > 0,
+            "Agent should respond after delete_cron",
+          );
+          assertEquals(handledTools, [
+            "create_cron",
+            "list_crons",
+            "delete_cron",
+          ]);
+
+          const remainingJobs = await cronManager.listByAgent(agentId);
+          assertEquals(remainingJobs.length, 0);
+        } finally {
+          pool.shutdown();
+          cronKv.close();
+          await Deno.remove(getAgentRuntimeDir(agentId), {
+            recursive: true,
+          }).catch(() => {});
+        }
+      });
+    } finally {
+      await fakeOllama.close();
+      await Deno.remove(cronKvPath).catch(() => {});
+    }
+  },
+});
+
+// ── Test 9: agent writes a memory file ─────────────────
 
 Deno.test({
   name: "E2E: agent writes a memory file via scoped write_file",
@@ -551,7 +836,7 @@ Deno.test({
   },
 });
 
-// ── Test 9: memory files listed in agent context ───────
+// ── Test 10: memory files listed in agent context ───────
 
 Deno.test({
   name: "E2E: agent sees its memory files in context",

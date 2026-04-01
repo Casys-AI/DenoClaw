@@ -24,9 +24,11 @@ import { ToolRegistry } from "./tools/registry.ts";
 import { ShellTool } from "./tools/shell.ts";
 import {
   CreateCronTool,
-  DeleteCronTool,
-  ListCronsTool,
   type CronToolPort,
+  DeleteCronTool,
+  DisableCronTool,
+  EnableCronTool,
+  ListCronsTool,
 } from "./tools/cron.ts";
 import { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 import type { WorkspaceContext } from "./tools/file.ts";
@@ -169,6 +171,8 @@ export class AgentLoop implements AgentLoopLike {
     this.tools.register(new CreateCronTool(deps?.cronTools));
     this.tools.register(new ListCronsTool(deps?.cronTools));
     this.tools.register(new DeleteCronTool(deps?.cronTools));
+    this.tools.register(new EnableCronTool(deps?.cronTools));
+    this.tools.register(new DisableCronTool(deps?.cronTools));
   }
 
   private createSkillsLoader(deps?: AgentLoopDeps): SkillLoader {

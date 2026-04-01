@@ -81,8 +81,8 @@ plane. It is responsible for:
   to nodes (machines, VPS, GPU hosts) and other Brokers (federation). Each
   tunnel declares its **capabilities** (tools, auth). The broker routes based on
   those declarations.
-- **Cron Dispatcher** — one static `Deno.cron()` that reads agent schedules from
-  KV and dispatches them over HTTP POST.
+- **Cron Dispatcher** — broker-owned `Deno.cron()` handlers persisted in KV and
+  dispatched as canonical broker tasks to target agents.
 - **Agent Lifecycle** — creates, destroys, and monitors agents via the Deno
   Deploy **v2** API (Apps/Revisions) and Sandbox executions (ephemeral
   instances).
@@ -126,12 +126,12 @@ class AgentRuntime {
   async handleRequest(req: Request): Promise<Response> {
     const msg = await req.json() as BrokerMessage;
 
-    if (msg.type === "user_message") return this.handleMessage(msg);
-    if (msg.type === "cron_trigger") return this.handleCron(msg);
+    if (msg.type === "task_submit") return this.handleTaskSubmit(msg);
+    if (msg.type === "task_continue") return this.handleTaskContinue(msg);
     // ... other Broker message types
   }
 
-  async handleMessage(msg: Message): Promise<Response> {
+  async handleTaskSubmit(msg: BrokerMessage): Promise<Response> {
     // LLM call through the broker
     const llmResponse = await this.broker.llmComplete({
       messages: await this.buildContext(msg),
@@ -277,7 +277,7 @@ declared capabilities.
 **Cron / Heartbeat (Deploy mode):**
 
 ```
-Broker (Deno.cron) → HTTP POST https://<agent>.deno.dev/cron/heartbeat → Agent wakes, runs, responds
+BrokerCronManager (Deno.cron) → broker-owned task_submit → Agent runtime processes a normal task
 ```
 
 ## Tunnel capabilities
@@ -399,7 +399,7 @@ DenoClaw runs in both modes. The code is the same; only the environment changes.
 | Broker → Agent transport  | `postMessage` / `onmessage`                           | HTTP POST                                      |
 | Agent → Sandbox transport | `Deno.Command` (spawn + stdin/stdout)                 | Sandbox API (HTTP)                             |
 | KV                        | SQLite per agent (`Deno.openKv("./data/<agent>.db")`) | FoundationDB (KV bound through API v2)         |
-| Cron / Heartbeat          | Main process `Deno.cron()` → `postMessage` to Worker  | Broker `Deno.cron()` → HTTP POST to agent apps |
+| Cron / Heartbeat          | Embedded broker `Deno.cron()` → local ingress/runtime | Broker `Deno.cron()` → canonical `task_submit` |
 | LLM                       | Direct `fetch()` (local keys)                         | Through broker (LLM proxy)                     |
 | Tunnels                   | Not required (everything local)                       | WebSocket to remote machines                   |
 | Auth                      | Not required                                          | OIDC + credentials materialization             |
@@ -416,66 +416,36 @@ DenoClaw runs in both modes. The code is the same; only the environment changes.
 The agent code stays identical across both modes. Only transport changes
 (`postMessage` vs HTTP, `Deno.Command` vs Sandbox API).
 
-Locally, the main process owns cron (`Deno.cron()`) and dispatches to workers.
-On Deploy, the Broker does the same over HTTP to agent apps.
+Locally, the embedded broker owns cron (`Deno.cron()`) and dispatches through
+the local channel-ingress/runtime path. On Deploy, the broker does the same by
+submitting canonical tasks to agent runtimes.
 
 ## Heartbeat
 
-Heartbeat is just another cron job, but execution depends on the mode.
+Heartbeat is currently broker-derived, not a dedicated cron task.
 
-**Local mode** — the main process owns the cron and dispatches to the worker:
-
-```typescript
-// Main process (local broker)
-const cron = new CronManager();
-await cron.heartbeat(async () => {
-  // Send to the agent worker
-  agentWorker.postMessage({ type: "cron_trigger", job: "heartbeat" });
-}, 5);
-```
-
-**Deploy mode** — one static `Deno.cron()` dispatches for all agents:
-
-```typescript
-// Broker side (Deno Deploy) — one cron, dynamic dispatch
-Deno.cron("agent-cron-dispatcher", "* * * * *", async () => {
-  const kv = await Deno.openKv();
-  for await (const entry of kv.list<CronSchedule>({ prefix: ["cron_schedules"] })) {
-    if (isDue(entry.value)) {
-      await fetch(`https://${entry.value.agentUrl}/cron/${entry.value.job}`, {
-        method: "POST",
-      });
-    }
-  }
-});
-
-// Agent side (Deploy app) — receives HTTP, no local cron
-async handleCron(req: Request): Promise<Response> {
-  // Check whether there is pending scheduled work
-  return Response.json({ status: "ok" });
-}
-```
-
-The agent **declares** its cron jobs in config. The Broker **persists them in
-KV**, and the dispatcher **evaluates them every minute**. `Deno.cron()` is
-statically extracted by Deploy, so it cannot be built dynamically in a loop.
-That is why the single-dispatcher pattern exists.
+- The broker writes agent liveness from active socket state and recent broker
+  activity.
+- Agent runtimes do not register their own heartbeat jobs and do not write
+  heartbeat status directly.
+- A dedicated broker-managed heartbeat cron can still be added later if passive
+  liveness signals prove insufficient.
 
 ## Modules to create
 
-| Module                         | Role                                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `src/orchestration/broker.ts`  | Main Broker — Deploy, LLM proxy, message router, cron dispatcher              |
-| `src/orchestration/gateway.ts` | HTTP + WebSocket gateway — channels, sessions                                 |
-| `src/orchestration/auth.ts`    | Auth — `@deno/oidc` (agents + tunnels), credentials materialization (sandbox) |
-| `src/orchestration/client.ts`  | HTTP client for broker communication (OIDC auth)                              |
-| `src/orchestration/relay.ts`   | Tunnel mesh — WS client, capabilities, reconnect                              |
-| `src/orchestration/sandbox.ts` | Sandbox code executor — API v2                                                |
-| `src/agent/runtime.ts`         | Agent runtime — reactive HTTP handler, KV state, Broker calls through fetch   |
-| `src/agent/cron.ts`            | CronManager — `Deno.cron()` (Broker/local), config declarations (agents)      |
-| `src/llm/manager.ts`           | LLM provider manager — API key + OAuth, fallback, routing                     |
-| `src/messaging/a2a/`           | A2A protocol — types, server, client, cards, tasks                            |
-| `src/messaging/bus.ts`         | MessageBus — KV Queues (Broker/local only)                                    |
+| Module                                     | Role                                                                          |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `src/orchestration/broker/server.ts`       | Main Broker — Deploy, LLM proxy, message router, cron dispatch                |
+| `src/orchestration/broker/cron_manager.ts` | BrokerCronManager — KV-backed schedules + `Deno.cron()` lifecycle             |
+| `src/orchestration/gateway.ts`             | HTTP + WebSocket gateway — channels, sessions                                 |
+| `src/orchestration/auth.ts`                | Auth — `@deno/oidc` (agents + tunnels), credentials materialization (sandbox) |
+| `src/orchestration/client.ts`              | HTTP client for broker communication (OIDC auth)                              |
+| `src/orchestration/relay.ts`               | Tunnel mesh — WS client, capabilities, reconnect                              |
+| `src/orchestration/sandbox.ts`             | Sandbox code executor — API v2                                                |
+| `src/agent/runtime.ts`                     | Agent runtime — reactive HTTP handler, KV state, Broker calls through fetch   |
+| `src/llm/manager.ts`                       | LLM provider manager — API key + OAuth, fallback, routing                     |
+| `src/messaging/a2a/`                       | A2A protocol — types, server, client, cards, tasks                            |
+| `src/messaging/bus.ts`                     | MessageBus — KV Queues (Broker/local only)                                    |
 
 ## Implementation order
 
@@ -485,7 +455,7 @@ That is why the single-dispatcher pattern exists.
 3. **Local workers** — local multi-agent mode (Process / Worker / Subprocess)
 4. **Sandbox executor** — hardened code execution
 5. **Tunnel mesh** — nodes, broker federation, local machines
-6. **Cron dispatcher** — KV-backed scheduler + HTTP dispatch
+6. **Cron dispatcher** — KV-backed scheduler + canonical task dispatch
 7. **Inter-agent A2A** — HTTP routing + SSE streaming (long tasks)
 8. **Agent lifecycle** — Deno Deploy API v2 (Apps/Revisions)
 9. **Dashboard** — state observation through KV Watch (Broker KV)

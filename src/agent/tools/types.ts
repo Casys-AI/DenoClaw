@@ -11,7 +11,9 @@ export type BuiltinToolName =
   | "web_fetch"
   | "create_cron"
   | "list_crons"
-  | "delete_cron";
+  | "delete_cron"
+  | "enable_cron"
+  | "disable_cron";
 
 export const BUILTIN_TOOL_PERMISSIONS: Readonly<
   Record<BuiltinToolName, readonly SandboxPermission[]>
@@ -23,4 +25,6 @@ export const BUILTIN_TOOL_PERMISSIONS: Readonly<
   create_cron: ["schedule"],
   list_crons: ["schedule"],
   delete_cron: ["schedule"],
+  enable_cron: ["schedule"],
+  disable_cron: ["schedule"],
 } as const;

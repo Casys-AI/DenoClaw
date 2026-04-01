@@ -170,7 +170,12 @@ export type WorkerResponse =
   | {
     type: "cron_request";
     requestId: string;
-    tool: "create_cron" | "list_crons" | "delete_cron";
+    tool:
+      | "create_cron"
+      | "list_crons"
+      | "delete_cron"
+      | "enable_cron"
+      | "disable_cron";
     args: Record<string, unknown>;
   };
 

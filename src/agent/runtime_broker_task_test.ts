@@ -200,7 +200,17 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
   ]);
   assertEquals(
     broker.lastTools?.map((tool) => tool.function.name).sort(),
-    ["create_cron", "delete_cron", "list_crons", "read_file", "shell", "web_fetch", "write_file"],
+    [
+      "create_cron",
+      "delete_cron",
+      "disable_cron",
+      "enable_cron",
+      "list_crons",
+      "read_file",
+      "shell",
+      "web_fetch",
+      "write_file",
+    ],
   );
 });
 

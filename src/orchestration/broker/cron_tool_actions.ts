@@ -1,7 +1,12 @@
 import type { ToolResult } from "../../shared/types.ts";
 import type { BrokerCronManager } from "./cron_manager.ts";
 
-export type CronToolName = "create_cron" | "list_crons" | "delete_cron";
+export type CronToolName =
+  | "create_cron"
+  | "list_crons"
+  | "delete_cron"
+  | "enable_cron"
+  | "disable_cron";
 
 export async function executeCronToolRequest(
   cronManager: BrokerCronManager | null | undefined,
@@ -86,6 +91,35 @@ export async function executeCronToolRequest(
 
       const deleted = await cronManager.delete(agentId, cronJobId);
       return { success: true, output: JSON.stringify({ deleted }) };
+    }
+    case "enable_cron":
+    case "disable_cron": {
+      const cronJobId = typeof args.cronJobId === "string"
+        ? args.cronJobId.trim()
+        : "";
+      if (!cronJobId) {
+        return {
+          success: false,
+          output: "",
+          error: {
+            code: "INVALID_CRON_ARGS",
+            context: { cronJobId },
+            recovery: "Provide a non-empty cronJobId",
+          },
+        };
+      }
+
+      const job = tool === "enable_cron"
+        ? await cronManager.enable(agentId, cronJobId)
+        : await cronManager.disable(agentId, cronJobId);
+      return {
+        success: true,
+        output: JSON.stringify({
+          updated: job !== null,
+          cronJobId,
+          enabled: job?.enabled ?? null,
+        }),
+      };
     }
   }
 }

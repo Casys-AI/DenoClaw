@@ -52,7 +52,7 @@ export class LocalChannelIngressRuntime {
     route?: ChannelRoutePlan,
   ): Promise<ChannelIngressSubmission> {
     const routePlan = resolveLocalChannelRoutePlan(message, route);
-    const taskId = generateId();
+    const taskId = resolveRequestedTaskId(message) ?? generateId();
     const contextId = routePlan.contextId ?? message.sessionId;
 
     let task = await this.taskStore.create(
@@ -420,4 +420,11 @@ function createAgentTextMessage(text: string): A2AMessage {
     role: "agent",
     parts: [{ kind: "text", text }],
   };
+}
+
+function resolveRequestedTaskId(message: ChannelMessage): string | undefined {
+  const value = message.metadata?.taskId;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
 }

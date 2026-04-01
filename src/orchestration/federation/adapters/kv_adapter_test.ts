@@ -241,6 +241,72 @@ Deno.test(
 );
 
 Deno.test(
+  "KvFederationAdapter deleteDeadLetter purges entries idempotently",
+  async () => {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    try {
+      const adapter = new KvFederationAdapter(kv);
+      const correlation = {
+        remoteBrokerId: "broker-b",
+        taskId: "task-delete-1",
+        contextId: "ctx-delete-1",
+        linkId: "broker-a:broker-b",
+        traceId: "trace-delete-1",
+      };
+
+      await adapter.moveToDeadLetter({
+        deadLetterId: "dead-delete-1",
+        idempotencyKey: "broker-b:task-delete-1:hash-1",
+        remoteBrokerId: "broker-b",
+        taskId: "task-delete-1",
+        contextId: "ctx-delete-1",
+        linkId: "broker-a:broker-b",
+        traceId: "trace-delete-1",
+        task: {
+          targetAgent: "agent-delete-1",
+          taskId: "task-delete-1",
+          contextId: "ctx-delete-1",
+          taskMessage: {
+            messageId: "msg-delete-1",
+            role: "user",
+            parts: [{ kind: "text", text: "delete me" }],
+          },
+        },
+        payloadHash: "hash-1",
+        attempts: 1,
+        reason: "manual_purge",
+        movedAt: new Date().toISOString(),
+      }, correlation);
+
+      assertEquals((await adapter.listDeadLetters("broker-b")).length, 1);
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        1,
+      );
+
+      await adapter.deleteDeadLetter("broker-b", "dead-delete-1");
+
+      assertEquals(await adapter.getDeadLetter("broker-b", "dead-delete-1"), null);
+      assertEquals((await adapter.listDeadLetters("broker-b")).length, 0);
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        0,
+      );
+
+      await adapter.deleteDeadLetter("broker-b", "dead-delete-1");
+      assertEquals(
+        (await adapter.getFederationStats("broker-b")).deadLetterBacklog,
+        0,
+      );
+    } finally {
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+);
+
+Deno.test(
   "KvFederationAdapter streams federation events to subscribers",
   async () => {
     const kvPath = await Deno.makeTempFile({ suffix: ".db" });

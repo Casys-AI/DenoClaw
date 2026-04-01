@@ -195,3 +195,64 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "handleGatewayHttp returns ingress task snapshots",
+  async fn() {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const session = new SessionManager(kv);
+
+    const task = createCanonicalTask({
+      id: "task-ingress-1",
+      contextId: "session-ingress-1",
+      initialMessage: {
+        messageId: "msg-ingress-1",
+        role: "user",
+        parts: [{ kind: "text", text: "hello ingress" }],
+      },
+    });
+
+    const ctx: GatewayHttpContext = {
+      config: baseConfig as GatewayHttpContext["config"],
+      session,
+      channels: {} as GatewayHttpContext["channels"],
+      channelIngress: new InProcessBrokerChannelIngressClient({
+        submit: () =>
+          Promise.resolve({
+            task,
+            taskId: task.id,
+            contextId: task.contextId,
+          }),
+        getTask: (taskId: string) =>
+          Promise.resolve(taskId === task.id ? task : null),
+        continueTask: (_taskId: string) => Promise.resolve(null as Task | null),
+      }),
+      workerPool: {} as GatewayHttpContext["workerPool"],
+      metrics: null,
+      kv,
+      freshHandler: null,
+      dashboardBasePath: "/dashboard",
+      rateLimiter: null,
+      githubOAuth: null,
+      agentStore: null,
+      checkAuth: () => Promise.resolve(null),
+      handleWebSocketUpgrade: () => new Response("upgrade"),
+    };
+
+    try {
+      const response = await handleGatewayHttp(
+        ctx,
+        new Request("http://localhost/ingress/tasks/task-ingress-1"),
+      );
+
+      assertEquals(response.status, 200);
+      const body = await response.json();
+      assertEquals(body.task?.id, "task-ingress-1");
+      assertEquals(body.task?.contextId, "session-ingress-1");
+    } finally {
+      session.close();
+      await Deno.remove(kvPath);
+    }
+  },
+});

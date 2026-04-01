@@ -360,7 +360,7 @@ export class KvFederationAdapter
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<void> {
-    await this.statsStore.claimDeadLetter(remoteBrokerId, deadLetterId);
+    await this.statsStore.deleteDeadLetter(remoteBrokerId, deadLetterId);
   }
 
   async listDeadLetters(

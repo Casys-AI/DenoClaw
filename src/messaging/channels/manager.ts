@@ -28,10 +28,13 @@ export class ChannelManager {
       .filter(([_, ch]) => ch.enabled)
       .map(async ([adapterId, ch]) => {
         try {
-          await ch.start((msg) => {
-            this.bus.publish(msg).catch((e: unknown) =>
-              log.error(`Bus publish error (${adapterId})`, e)
-            );
+          await ch.start(async (msg) => {
+            try {
+              await this.bus.publish(msg);
+            } catch (e) {
+              log.error(`Bus publish error (${adapterId})`, e);
+              throw e;
+            }
           });
         } catch (e) {
           log.error(`Failed to start ${adapterId}`, e);

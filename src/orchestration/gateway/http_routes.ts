@@ -91,6 +91,15 @@ export async function handleGatewayHttp(
   const agentRoute = await handleGatewayAgentRoute(ctx, req, url);
   if (agentRoute) return agentRoute;
 
+  const ingressTaskMatch = url.pathname.match(/^\/ingress\/tasks\/([^/]+)$/);
+  if (req.method === "GET" && ingressTaskMatch) {
+    return Response.json({
+      task: await ctx.channelIngress.getTask(
+        decodeURIComponent(ingressTaskMatch[1]),
+      ),
+    });
+  }
+
   if (req.method === "POST" && url.pathname === "/chat") {
     return await handleGatewayChatRoute(ctx, req);
   }

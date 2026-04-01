@@ -14,6 +14,9 @@ import { TaskStore } from "./tasks.ts";
 import { log } from "../../shared/log.ts";
 
 type TaskHandler = (task: Task, message: A2AMessage) => Promise<void>;
+type A2AServerDeps = {
+  store?: TaskStore;
+};
 
 /**
  * A2A Server — expose a DenoClaw agent as an A2A-compatible endpoint.
@@ -30,9 +33,9 @@ export class A2AServer {
     ReadableStreamDefaultController<Uint8Array>
   >();
 
-  constructor(card: AgentCard, handler: TaskHandler) {
+  constructor(card: AgentCard, handler: TaskHandler, deps: A2AServerDeps = {}) {
     this.card = card;
-    this.store = new TaskStore();
+    this.store = deps.store ?? new TaskStore();
     this.handler = handler;
   }
 

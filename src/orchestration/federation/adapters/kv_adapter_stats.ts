@@ -214,6 +214,20 @@ export class KvFederationStatsStore {
     remoteBrokerId: string,
     deadLetterId: string,
   ): Promise<FederationDeadLetter | null> {
+    return await this.removeDeadLetter(remoteBrokerId, deadLetterId);
+  }
+
+  async deleteDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<void> {
+    await this.removeDeadLetter(remoteBrokerId, deadLetterId);
+  }
+
+  private async removeDeadLetter(
+    remoteBrokerId: string,
+    deadLetterId: string,
+  ): Promise<FederationDeadLetter | null> {
     const key = federationDeadLetterKey(remoteBrokerId, deadLetterId);
     const globalSummaryKey = federationStatsSummaryKey();
     const remoteSummaryKey = federationStatsSummaryKey(remoteBrokerId);
@@ -251,7 +265,7 @@ export class KvFederationStatsStore {
       if (committed.ok) return deadLetterEntry.value;
     }
 
-    throw new Error("Failed to claim federation dead-letter aggregate");
+    throw new Error("Failed to remove federation dead-letter aggregate");
   }
 
   async listDeadLetters(

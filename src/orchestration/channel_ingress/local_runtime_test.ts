@@ -118,6 +118,44 @@ Deno.test({
 });
 
 Deno.test({
+  name: "LocalChannelIngressRuntime honors requested taskId from channel metadata",
+  async fn() {
+    const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+    const kv = await Deno.openKv(kvPath);
+    const taskStore = new TaskStore(kv);
+    const runtime = new LocalChannelIngressRuntime({
+      taskStore,
+      workerPool: {
+        send: (_agentId, _sessionId, _message, options) =>
+          Promise.resolve({ content: `task:${options?.taskId}` }),
+      },
+    });
+
+    try {
+      const submission = await runtime.submit(
+        {
+          ...createMessage(),
+          metadata: { taskId: "webhook-task-1" },
+        },
+        createDirectChannelRoutePlan("agent-alpha"),
+      );
+
+      assertEquals(submission.taskId, "webhook-task-1");
+      assertEquals(submission.task.id, "webhook-task-1");
+      assertEquals(submission.task.artifacts[0]?.parts[0], {
+        kind: "text",
+        text: "task:webhook-task-1",
+      });
+    } finally {
+      runtime.close();
+      kv.close();
+      await Deno.remove(kvPath);
+    }
+  },
+  ...testOpts,
+});
+
+Deno.test({
   name:
     "LocalChannelIngressRuntime maps runtime failures to terminal task state",
   async fn() {

@@ -7,6 +7,7 @@ Review date: 2026-04-01 — Pass 2 (specialized type-design-analyzer agents)
 ## Priority 1 — Trust Boundary Validation
 
 ### TYPE-01 — `as BrokerMessage` casts at 4 WebSocket trust boundaries with no structural validation
+- **Status:** Resolved in code on 2026-04-01.
 - **Files:** `broker/server.ts:426`, `transport_websocket.ts:176`, `relay.ts:179`, `agent_socket_upgrade.ts:95`
 - **Impact:** Malformed/adversarial messages enter system typed as BrokerMessage; downstream `.payload` access throws uncontrolled TypeError
 - **Fix:** Create `parseBrokerMessage(raw: unknown): BrokerMessage` (~30 lines) validating `id`, `type` (member of BrokerMessageType), `from`, `to`, `payload` (object), `timestamp` (string)
@@ -20,6 +21,7 @@ Review date: 2026-04-01 — Pass 2 (specialized type-design-analyzer agents)
 ## Priority 2 — Invariant Expression Gaps
 
 ### TYPE-03 — `JsonRpcResponse` allows `result` AND `error` simultaneously (JSON-RPC 2.0 violation)
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/messaging/a2a/types.ts`
 - **Fix:** Discriminated union: `{ result: unknown; error?: never } | { result?: never; error: JsonRpcError }`
 
@@ -34,6 +36,7 @@ Review date: 2026-04-01 — Pass 2 (specialized type-design-analyzer agents)
 - **Fix:** Sort `grant.grants` by `permission` before `JSON.stringify`
 
 ### TYPE-06 — `TERMINAL_STATES` is mutable `TaskState[]` instead of `as const`
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/messaging/a2a/types.ts`
 - **Fix:** `as const satisfies readonly TaskState[]`
 
@@ -84,6 +87,7 @@ Review date: 2026-04-01 — Pass 2 (specialized type-design-analyzer agents)
 ## Priority 4 — Minor / Cosmetic
 
 ### TYPE-15 — `cloud.ts:56` `private sandbox: any` — only production `any` in source
+- **Status:** Resolved in code on 2026-04-01.
 - **Fix:** Define local `DenoSandboxInstance` interface for used methods
 
 ### TYPE-16 — `timestamp: string` fields everywhere with no opaque type

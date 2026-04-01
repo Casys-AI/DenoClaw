@@ -22,8 +22,6 @@ export interface A2ARuntimePort {
 export interface SubmitTaskRequest {
   taskId: string;
   canonicalMessage?: A2AMessage;
-  /** @deprecated Use `canonicalMessage`. */
-  message?: A2AMessage;
   contextId?: string;
   metadata?: Record<string, unknown>;
 }
@@ -31,8 +29,6 @@ export interface SubmitTaskRequest {
 export interface ContinueTaskRequest {
   taskId: string;
   canonicalMessage?: A2AMessage;
-  /** @deprecated Use `canonicalMessage`. */
-  message?: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 

@@ -19,16 +19,12 @@ class InMemoryRuntimePort implements A2ARuntimePort {
   #events = new Map<string, CanonicalTaskLifecycleEvent[]>();
 
   #resolveCanonicalMessage(
-    request: Pick<
-      SubmitTaskRequest | ContinueTaskRequest,
-      "canonicalMessage" | "message"
-    >,
+    request: Pick<SubmitTaskRequest | ContinueTaskRequest, "canonicalMessage">,
   ): A2AMessage {
-    const canonicalMessage = request.canonicalMessage ?? request.message;
-    if (!canonicalMessage) {
+    if (!request.canonicalMessage) {
       throw new Error("Missing canonical message");
     }
-    return canonicalMessage;
+    return request.canonicalMessage;
   }
 
   submitTask(request: SubmitTaskRequest): Promise<Task> {

@@ -41,6 +41,81 @@ Deno.test("KvFederationAdapter link lifecycle", async () => {
   }
 });
 
+Deno.test("KvFederationAdapter getRemoteAgentCard returns stored card", async () => {
+  const kvPath = await Deno.makeTempFile({ suffix: ".db" });
+  const kv = await Deno.openKv(kvPath);
+  try {
+    const adapter = new KvFederationAdapter(kv);
+    const card = {
+      name: "Test Agent",
+      description: "A test agent",
+      version: "1.0.0",
+      protocolVersion: "1.0" as const,
+      url: "https://broker-b.example.com/agents/agent-card-1",
+      capabilities: { streaming: true, pushNotifications: false },
+      defaultInputModes: ["text"],
+      defaultOutputModes: ["text"],
+      skills: [
+        {
+          id: "skill-1",
+          name: "Test Skill",
+          description: "A test skill",
+          tags: ["test"],
+        },
+      ],
+    };
+
+    await adapter.setRemoteCatalog(
+      "broker-b",
+      [
+        {
+          remoteBrokerId: "broker-b",
+          agentId: "agent-card-1",
+          card,
+          capabilities: ["chat"],
+          visibility: "public",
+        },
+        {
+          remoteBrokerId: "broker-b",
+          agentId: "agent-no-card",
+          card: null,
+          capabilities: ["chat"],
+          visibility: "public",
+        },
+      ],
+      {
+        remoteBrokerId: "broker-b",
+        traceId: "trace-card-1",
+      },
+    );
+
+    const fetched = await adapter.getRemoteAgentCard("broker-b", "agent-card-1", {
+      remoteBrokerId: "broker-b",
+      traceId: "trace-card-2",
+    });
+    assertExists(fetched);
+    assertEquals(fetched?.name, "Test Agent");
+    assertEquals(fetched?.protocolVersion, "1.0");
+    assertEquals(fetched?.skills.length, 1);
+    assertEquals(fetched?.skills[0].id, "skill-1");
+
+    const missing = await adapter.getRemoteAgentCard("broker-b", "agent-no-card", {
+      remoteBrokerId: "broker-b",
+      traceId: "trace-card-3",
+    });
+    assertEquals(missing, null);
+
+    const unknown = await adapter.getRemoteAgentCard("broker-b", "agent-unknown", {
+      remoteBrokerId: "broker-b",
+      traceId: "trace-card-4",
+    });
+    assertEquals(unknown, null);
+  } finally {
+    kv.close();
+    await Deno.remove(kvPath);
+  }
+});
+
 Deno.test("KvFederationAdapter catalog lookup", async () => {
   const kvPath = await Deno.makeTempFile({ suffix: ".db" });
   const kv = await Deno.openKv(kvPath);

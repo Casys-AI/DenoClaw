@@ -44,6 +44,28 @@ interface SandboxCommandResult {
   stderrText: string | null;
 }
 
+interface SandboxProcess {
+  output(): Promise<SandboxCommandResult>;
+}
+
+interface SandboxFileSystem {
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  upload(localPath: string, sandboxPath: string): Promise<void>;
+}
+
+interface SandboxInstance {
+  spawn(
+    command: string,
+    options: {
+      args: string[];
+      stdout: "piped";
+      stderr: "piped";
+    },
+  ): Promise<SandboxProcess>;
+  kill(): Promise<void>;
+  fs: SandboxFileSystem;
+}
+
 export class DenoSandboxBackend implements SandboxBackend {
   readonly kind = "cloud" as const;
 
@@ -52,8 +74,7 @@ export class DenoSandboxBackend implements SandboxBackend {
   private trustGrantedPermissions: boolean;
   private labels?: Record<string, string>;
   private execPolicyGuard: ExecPolicyGuard;
-  // deno-lint-ignore no-explicit-any
-  private sandbox: any = null;
+  private sandbox: SandboxInstance | null = null;
   private initPromise: Promise<void> | null = null;
 
   constructor(
@@ -124,7 +145,12 @@ export class DenoSandboxBackend implements SandboxBackend {
         )
       );
 
-      const child = await this.sandbox.spawn("deno", {
+      const sandbox = this.sandbox;
+      if (!sandbox) {
+        throw new Error("sandbox_not_initialized");
+      }
+
+      const child = await sandbox.spawn("deno", {
         args: ["run", ...flags, EXECUTOR_SANDBOX_PATH, input],
         stdout: "piped",
         stderr: "piped",
@@ -221,7 +247,7 @@ export class DenoSandboxBackend implements SandboxBackend {
         LOG_LEVEL: Deno.env.get("LOG_LEVEL") ?? "info",
         DENOCLAW_EXEC: "1",
       },
-    });
+    }) as SandboxInstance;
 
     // Upload tools — kill VM on failure to avoid orphaned VMs
     try {

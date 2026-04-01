@@ -1,5 +1,5 @@
 import type { AuthManager } from "../auth.ts";
-import type { BrokerMessage } from "../types.ts";
+import { parseBrokerMessage, type BrokerMessage } from "../types.ts";
 import { log } from "../../shared/log.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
 import type { BrokerAgentSocketRegistry } from "./agent_socket_registry.ts";
@@ -92,7 +92,7 @@ export async function handleBrokerAgentSocketUpgrade(
           return;
         }
 
-        const msg = raw as BrokerMessage;
+        const msg = parseBrokerMessage(raw);
         msg.from = registeredAgentId;
         await ctx.handleIncomingMessage(msg);
       } catch (error) {

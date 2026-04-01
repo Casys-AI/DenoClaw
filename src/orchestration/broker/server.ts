@@ -5,6 +5,7 @@ import type {
   BrokerTaskResultPayload,
   BrokerTaskSubmitPayload,
 } from "../types.ts";
+import { parseBrokerMessage } from "../types.ts";
 import type { StructuredError, ToolResult } from "../../shared/types.ts";
 import type { AgentStatusValue } from "../monitoring_types.ts";
 import type { ExecPolicy } from "../../agent/sandbox_types.ts";
@@ -421,19 +422,17 @@ export class BrokerServer {
     tunnelId: string,
     data: string,
   ): Promise<void> {
-    let msg: BrokerMessage;
     try {
-      msg = JSON.parse(data) as BrokerMessage;
+      const msg = parseBrokerMessage(JSON.parse(data));
+      try {
+        await this.messageRuntime.handleMessage(msg);
+      } catch (e) {
+        log.error(`Failed to handle tunnel message from ${tunnelId}`, e);
+      }
     } catch {
       log.error(`Malformed JSON from tunnel ${tunnelId}, message dropped`, {
         preview: data.slice(0, 200),
       });
-      return;
-    }
-    try {
-      await this.messageRuntime.handleMessage(msg);
-    } catch (e) {
-      log.error(`Failed to handle tunnel message from ${tunnelId}`, e);
     }
   }
 

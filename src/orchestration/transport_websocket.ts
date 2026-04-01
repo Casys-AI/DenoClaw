@@ -16,7 +16,7 @@ import type {
   BrokerRequestMessage,
   BrokerResponseMessage,
 } from "./types.ts";
-import { isBrokerResponseMessage } from "./types.ts";
+import { isBrokerResponseMessage, parseBrokerMessage } from "./types.ts";
 
 export {
   resolveAgentSocketUrl,
@@ -173,7 +173,14 @@ export class WebSocketBrokerTransport implements BrokerTransport {
       return;
     }
 
-    const message = raw as BrokerMessage;
+    let message: BrokerMessage;
+    try {
+      message = parseBrokerMessage(raw);
+    } catch {
+      log.warn("WebSocketBrokerTransport: invalid broker frame ignored");
+      return;
+    }
+
     if (
       isBrokerResponseMessage(message) && this.requestTracker.resolve(message)
     ) {

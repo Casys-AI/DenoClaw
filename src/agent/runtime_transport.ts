@@ -4,25 +4,15 @@ import type { BrokerEnvelope } from "../shared/types.ts";
 
 export interface RuntimeTaskSubmitPayload {
   taskId: string;
-  /**
-   * Canonical A2A task input message.
-   * Prefer `taskMessage`; `message` remains a temporary alias for compatibility.
-   */
+  /** Canonical A2A task input message. */
   taskMessage?: A2AMessage;
-  /** @deprecated Use `taskMessage`. */
-  message?: A2AMessage;
   contextId?: string;
 }
 
 export interface RuntimeTaskContinuePayload {
   taskId: string;
-  /**
-   * Canonical A2A continuation message.
-   * Prefer `continuationMessage`; `message` remains a temporary alias.
-   */
+  /** Canonical A2A continuation message. */
   continuationMessage?: A2AMessage;
-  /** @deprecated Use `continuationMessage`. */
-  message?: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 
@@ -64,25 +54,23 @@ export function assertRuntimeTaskMessage(
 export function extractSubmitTaskMessage(
   payload: RuntimeTaskSubmitPayload,
 ): A2AMessage {
-  const taskMessage = payload.taskMessage ?? payload.message;
-  if (taskMessage) return taskMessage;
+  if (payload.taskMessage) return payload.taskMessage;
 
   throw new DenoClawError(
     "INVALID_BROKER_MESSAGE",
     { payloadKeys: Object.keys(payload) },
-    "task_submit requires taskMessage (or legacy message alias)",
+    "task_submit requires taskMessage",
   );
 }
 
 export function extractContinuationTaskMessage(
   payload: RuntimeTaskContinuePayload,
 ): A2AMessage {
-  const continuationMessage = payload.continuationMessage ?? payload.message;
-  if (continuationMessage) return continuationMessage;
+  if (payload.continuationMessage) return payload.continuationMessage;
 
   throw new DenoClawError(
     "INVALID_BROKER_MESSAGE",
     { payloadKeys: Object.keys(payload) },
-    "task_continue requires continuationMessage (or legacy message alias)",
+    "task_continue requires continuationMessage",
   );
 }

@@ -35,7 +35,7 @@ Deno.test("runtime transport assertion rejects non-canonical broker envelopes", 
   );
 });
 
-Deno.test("runtime transport extractors support canonical fields with legacy aliases", () => {
+Deno.test("runtime transport extractors use canonical fields", () => {
   const canonicalInput = {
     messageId: "m1",
     role: "user" as const,
@@ -51,15 +51,6 @@ Deno.test("runtime transport extractors support canonical fields with legacy ali
       taskId: "t1",
       continuationMessage: canonicalInput,
     }),
-    canonicalInput,
-  );
-
-  assertEquals(
-    extractSubmitTaskMessage({ taskId: "t1", message: canonicalInput }),
-    canonicalInput,
-  );
-  assertEquals(
-    extractContinuationTaskMessage({ taskId: "t1", message: canonicalInput }),
     canonicalInput,
   );
 });

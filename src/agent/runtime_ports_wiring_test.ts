@@ -137,7 +137,7 @@ Deno.test(
       timestamp: new Date().toISOString(),
       payload: {
         taskId: "task-wire",
-        message: {
+        continuationMessage: {
           messageId: crypto.randomUUID(),
           role: "user",
           parts: [{ kind: "text", text: "continue" }],
@@ -181,7 +181,7 @@ Deno.test(
           timestamp: new Date().toISOString(),
           payload: {
             taskId: "task-missing",
-            message: {
+            taskMessage: {
               messageId: crypto.randomUUID(),
               role: "user",
               parts: [{ kind: "text", text: "hello" }],

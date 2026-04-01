@@ -4,6 +4,7 @@
  */
 
 import type { A2AMessage, AgentCard, Task } from "../messaging/a2a/types.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import type {
   BrokerEnvelope,
   LLMResponse,
@@ -246,6 +247,115 @@ export type BrokerMessage =
   | BrokerErrorMessage;
 
 export type BrokerMessageType = BrokerMessage["type"];
+
+export const BROKER_MESSAGE_TYPES = [
+  "llm_request",
+  "llm_response",
+  "tool_request",
+  "tool_response",
+  "task_submit",
+  "task_continue",
+  "task_get",
+  "task_cancel",
+  "task_result",
+  "federation_link_open",
+  "federation_link_ack",
+  "federation_catalog_sync",
+  "federation_route_probe",
+  "federation_link_close",
+  "error",
+] as const satisfies readonly BrokerMessageType[];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isBrokerMessageType(value: unknown): value is BrokerMessageType {
+  return typeof value === "string" &&
+    (BROKER_MESSAGE_TYPES as readonly string[]).includes(value);
+}
+
+export function parseBrokerMessage(raw: unknown): BrokerMessage {
+  if (!isRecord(raw)) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { reason: "not-an-object" },
+      "Send a JSON object matching the broker envelope",
+    );
+  }
+
+  const id = raw.id;
+  const from = raw.from;
+  const to = raw.to;
+  const type = raw.type;
+  const payload = raw.payload;
+  const timestamp = raw.timestamp;
+
+  if (typeof id !== "string" || !id) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "id" },
+      "Provide a non-empty string broker message id",
+    );
+  }
+
+  if (typeof from !== "string" || !from) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "from" },
+      "Provide a non-empty string broker sender id",
+    );
+  }
+
+  if (typeof to !== "string" || !to) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "to" },
+      "Provide a non-empty string broker recipient id",
+    );
+  }
+
+  if (!isBrokerMessageType(type)) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "type", value: type },
+      "Use a known broker message type",
+    );
+  }
+
+  if (!isRecord(payload)) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "payload" },
+      "Provide an object payload for broker messages",
+    );
+  }
+
+  if (type === "error" && typeof payload.code !== "string") {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "payload.code" },
+      "Error broker messages require a string error code",
+    );
+  }
+
+  if (typeof timestamp !== "string" || !timestamp) {
+    throw new DenoClawError(
+      "BROKER_MESSAGE_INVALID",
+      { field: "timestamp" },
+      "Provide a broker message timestamp string",
+    );
+  }
+
+  return {
+    id,
+    from,
+    to,
+    type,
+    payload,
+    timestamp,
+  } as unknown as BrokerMessage;
+}
 
 export function isBrokerRuntimeMessage(
   message: BrokerMessage,

@@ -1,13 +1,16 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import type { A2AMessage, Task } from "../messaging/a2a/types.ts";
+import { DenoClawError } from "../shared/errors.ts";
 import type { BrokerMessage } from "./types.ts";
 import {
+  BROKER_MESSAGE_TYPES,
   isBrokerErrorMessage,
   isBrokerFederationMessage,
   isBrokerRequestMessage,
   isBrokerResponseMessage,
   isBrokerRuntimeMessage,
   isBrokerTaskMessage,
+  parseBrokerMessage,
 } from "./types.ts";
 
 function sampleA2AMessage(text: string): A2AMessage {
@@ -162,4 +165,51 @@ Deno.test("Broker federation classifier isolates control-plane methods", () => {
     assertEquals(isBrokerRequestMessage(message), true);
     assertEquals(isBrokerResponseMessage(message), false);
   }
+});
+
+Deno.test("parseBrokerMessage accepts a valid broker envelope", () => {
+  const parsed = parseBrokerMessage(baseMessage("tool_request", {
+    tool: "shell",
+    args: { command: "pwd" },
+  }));
+
+  assertEquals(parsed.type, "tool_request");
+  assertEquals(parsed.from, "agent-a");
+  assertEquals(parsed.to, "broker");
+});
+
+Deno.test("parseBrokerMessage rejects malformed broker envelopes", () => {
+  assertThrows(
+    () =>
+      parseBrokerMessage({
+        id: "msg-1",
+        from: "agent-a",
+        to: "broker",
+        type: "not-a-real-type",
+        payload: {},
+        timestamp: new Date().toISOString(),
+      }),
+    DenoClawError,
+    "BROKER_MESSAGE_INVALID",
+  );
+
+  assertThrows(
+    () =>
+      parseBrokerMessage({
+        id: "msg-1",
+        from: "agent-a",
+        to: "broker",
+        type: "tool_request",
+        payload: [],
+        timestamp: new Date().toISOString(),
+      }),
+    DenoClawError,
+    "BROKER_MESSAGE_INVALID",
+  );
+});
+
+Deno.test("BROKER_MESSAGE_TYPES stays aligned with the broker union", () => {
+  assertEquals(BROKER_MESSAGE_TYPES.includes("tool_request"), true);
+  assertEquals(BROKER_MESSAGE_TYPES.includes("federation_link_close"), true);
+  assertEquals(BROKER_MESSAGE_TYPES.includes("error"), true);
 });

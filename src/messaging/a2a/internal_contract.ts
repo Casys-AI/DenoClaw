@@ -75,7 +75,7 @@ export function createCanonicalTask(init: CanonicalTaskInit): Task {
 }
 
 export function isTerminalTaskState(state: TaskState): boolean {
-  return TERMINAL_STATES.includes(state);
+  return (TERMINAL_STATES as readonly TaskState[]).includes(state);
 }
 
 export function canTransitionTaskState(

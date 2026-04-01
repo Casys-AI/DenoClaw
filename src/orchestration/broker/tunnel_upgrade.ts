@@ -13,6 +13,34 @@ import {
 } from "../tunnel_protocol.ts";
 import { log } from "../../shared/log.ts";
 
+/**
+ * SEC-19: Checks broker identity before syncing catalog.
+ * Returns true if sync was performed, false if rejected.
+ * Exported for unit testing.
+ */
+export async function syncCatalogIfTrusted(
+  service: Pick<FederationService, "getIdentity" | "syncCatalog">,
+  tunnelId: string,
+  caps: TunnelCapabilities,
+): Promise<boolean> {
+  const identity = await service.getIdentity(tunnelId);
+  if (!identity || identity.status !== "trusted") {
+    log.warn(
+      `Tunnel ${tunnelId}: catalog sync rejected — broker identity not trusted (status: ${identity?.status ?? "unknown"})`,
+    );
+    return false;
+  }
+  await service.syncCatalog(
+    tunnelId,
+    mapInstanceTunnelToCatalog(tunnelId, caps),
+    {
+      remoteBrokerId: tunnelId,
+      traceId: crypto.randomUUID(),
+    },
+  );
+  return true;
+}
+
 function extractBearerToken(req: Request): string | null {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return null;
@@ -137,21 +165,7 @@ export async function handleBrokerTunnelUpgrade(
         ctx.tunnelRegistry.register(tunnelId, socket, caps);
         if (caps.type === "instance") {
           const service = await ctx.getFederationService();
-          const identity = await service.getIdentity(tunnelId);
-          if (!identity || identity.status !== "trusted") {
-            log.warn(
-              `Tunnel ${tunnelId}: catalog sync rejected — broker identity not trusted (status: ${identity?.status ?? "unknown"})`,
-            );
-          } else {
-            await service.syncCatalog(
-              tunnelId,
-              mapInstanceTunnelToCatalog(tunnelId, caps),
-              {
-                remoteBrokerId: tunnelId,
-                traceId: crypto.randomUUID(),
-              },
-            );
-          }
+          await syncCatalogIfTrusted(service, tunnelId, caps);
         }
         log.info(
           `Tunnel registered: ${tunnelId} (type: ${caps.type}, tools: ${caps.tools}, agents: ${

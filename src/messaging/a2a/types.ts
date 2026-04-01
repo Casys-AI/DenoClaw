@@ -44,12 +44,12 @@ export type TaskState =
   | "CANCELED"
   | "REJECTED";
 
-export const TERMINAL_STATES: TaskState[] = [
+export const TERMINAL_STATES: readonly TaskState[] = [
   "COMPLETED",
   "FAILED",
   "CANCELED",
   "REJECTED",
-];
+] as const;
 
 export interface Task {
   id: string;
@@ -114,12 +114,20 @@ export interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
-export interface JsonRpcResponse {
+interface JsonRpcResponseBase {
   jsonrpc: "2.0";
   id: string;
-  result?: unknown;
-  error?: JsonRpcError;
 }
+
+export type JsonRpcResponse =
+  | (JsonRpcResponseBase & {
+    result: unknown;
+    error?: never;
+  })
+  | (JsonRpcResponseBase & {
+    result?: never;
+    error: JsonRpcError;
+  });
 
 export interface JsonRpcError {
   code: number;

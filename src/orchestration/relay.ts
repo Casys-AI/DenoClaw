@@ -1,4 +1,4 @@
-import type { BrokerMessage } from "./types.ts";
+import { parseBrokerMessage, type BrokerMessage } from "./types.ts";
 import type {
   SandboxPermission,
   ShellConfig,
@@ -176,7 +176,7 @@ export class LocalRelay {
           return;
         }
 
-        await this.handleBrokerMessage(raw as BrokerMessage);
+        await this.handleBrokerMessage(parseBrokerMessage(raw));
       } catch (err) {
         log.error("Relay: message handling error", err);
       }

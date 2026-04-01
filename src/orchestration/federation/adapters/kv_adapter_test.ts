@@ -52,7 +52,7 @@ Deno.test("KvFederationAdapter catalog lookup", async () => {
         {
           remoteBrokerId: "broker-b",
           agentId: "agent-1",
-          card: { name: "Agent 1" },
+          card: null,
           capabilities: ["chat"],
           visibility: "public",
         },
@@ -63,12 +63,14 @@ Deno.test("KvFederationAdapter catalog lookup", async () => {
       },
     );
 
-    const card = await adapter.getRemoteAgentCard("broker-b", "agent-1", {
+    const entries = await adapter.listRemoteAgents("broker-b", {
       remoteBrokerId: "broker-b",
       traceId: "trace-catalog-2",
     });
-    assertExists(card);
-    assertEquals(card?.name, "Agent 1");
+    assertExists(entries);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].agentId, "agent-1");
+    assertEquals(entries[0].card, null);
   } finally {
     kv.close();
     await Deno.remove(kvPath);

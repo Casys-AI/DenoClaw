@@ -16,3 +16,15 @@ Deno.test("mapInstanceTunnelToCatalog maps instance capabilities to catalog entr
   assertEquals(entries[1].visibility, "restricted");
   assertEquals(entries[0].capabilities, ["shell", "fetch"]);
 });
+
+Deno.test("mapInstanceTunnelToCatalog sets card to null when no card available", () => {
+  const entries = mapInstanceTunnelToCatalog("broker-b", {
+    tunnelId: "broker-b",
+    type: "instance",
+    tools: ["shell"],
+    agents: ["alice"],
+    allowedAgents: ["alice"],
+  });
+  assertEquals(entries.length, 1);
+  assertEquals(entries[0].card, null);
+});

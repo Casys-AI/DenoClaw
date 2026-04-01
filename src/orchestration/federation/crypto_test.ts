@@ -16,7 +16,7 @@ Deno.test("catalog envelope signatures verify with matching key", async () => {
         {
           remoteBrokerId: "broker-b",
           agentId: "agent-1",
-          card: { name: "Agent One" },
+          card: null,
           capabilities: ["shell", "chat"],
           visibility: "public",
         },
@@ -45,7 +45,7 @@ Deno.test(
           {
             remoteBrokerId: "broker-b",
             agentId: "agent-1",
-            card: { name: "Agent One" },
+            card: null,
             capabilities: ["chat"],
             visibility: "public",
           },
@@ -74,7 +74,7 @@ Deno.test(
           {
             remoteBrokerId: "broker-b",
             agentId: "agent-1",
-            card: { nested: { model: "gpt-5" }, name: "Agent One" },
+            card: null,
             capabilities: ["chat"],
             visibility: "public",
           },
@@ -89,7 +89,7 @@ Deno.test(
         entries: [
           {
             ...envelope.entries[0],
-            card: { nested: { model: "gpt-5" }, name: "Tampered Agent" },
+            agentId: "tampered-agent",
           },
         ],
       },

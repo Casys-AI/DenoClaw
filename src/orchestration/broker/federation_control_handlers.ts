@@ -124,7 +124,7 @@ export function createBrokerFederationControlHandlers(
         agents.map((agentId) => ({
           remoteBrokerId,
           agentId,
-          card: {},
+          card: null,
           capabilities: [],
           visibility: "public",
         })),

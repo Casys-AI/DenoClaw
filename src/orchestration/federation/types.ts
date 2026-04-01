@@ -1,4 +1,5 @@
 import type { BrokerTaskSubmitPayload } from "../types.ts";
+import type { AgentCard } from "../../messaging/a2a/types.ts";
 
 export type FederationLinkState =
   | "opening"
@@ -29,7 +30,7 @@ export interface BrokerIdentity {
 export interface RemoteAgentCatalogEntry {
   remoteBrokerId: string;
   agentId: string;
-  card: Record<string, unknown>;
+  card: AgentCard | null;
   capabilities: string[];
   visibility: "public" | "restricted";
 }

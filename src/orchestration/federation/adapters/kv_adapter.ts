@@ -1,3 +1,4 @@
+import type { AgentCard } from "../../../messaging/a2a/types.ts";
 import type {
   BrokerIdentity,
   FederatedRoutePolicy,
@@ -163,7 +164,7 @@ export class KvFederationAdapter
     remoteBrokerId: string,
     agentId: string,
     correlation: FederationBrokerCorrelationContext,
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<AgentCard | null> {
     const entries = await this.listRemoteAgents(remoteBrokerId, correlation);
     return entries.find((entry) => entry.agentId === agentId)?.card ?? null;
   }

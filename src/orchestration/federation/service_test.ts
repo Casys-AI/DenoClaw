@@ -109,7 +109,7 @@ Deno.test(
           {
             remoteBrokerId: "broker-b",
             agentId: "agent-1",
-            card: {},
+            card: null,
             capabilities: [],
             visibility: "public",
           },
@@ -235,7 +235,7 @@ Deno.test("FederationService.probeRoute rejects revoked broker identities", asyn
       [{
         remoteBrokerId: "broker-b",
         agentId: "agent-1",
-        card: {},
+        card: null,
         capabilities: [],
         visibility: "public",
       }],
@@ -307,7 +307,7 @@ Deno.test(
             {
               remoteBrokerId: "broker-b",
               agentId: "agent-signed",
-              card: { name: "Signed Agent" },
+              card: null,
               capabilities: ["chat"],
               visibility: "public",
             },
@@ -325,7 +325,7 @@ Deno.test(
           traceId: "trace-card-1",
         },
       );
-      assertEquals(card?.name, "Signed Agent");
+      assertEquals(card, null);
     } finally {
       kv.close();
       await Deno.remove(kvPath);
@@ -360,7 +360,7 @@ Deno.test(
             {
               remoteBrokerId: "broker-b",
               agentId: "agent-signed",
-              card: {},
+              card: null,
               capabilities: [],
               visibility: "public",
             },
@@ -407,7 +407,7 @@ Deno.test(
           {
             remoteBrokerId: "broker-b",
             agentId: "agent-1",
-            card: {},
+            card: null,
             capabilities: [],
             visibility: "public",
           },

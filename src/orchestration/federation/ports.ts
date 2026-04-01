@@ -1,4 +1,5 @@
 import type { BrokerTaskSubmitPayload } from "../types.ts";
+import type { AgentCard } from "../../messaging/a2a/types.ts";
 import type {
   BrokerIdentity,
   FederatedRoutePolicy,
@@ -67,7 +68,7 @@ export interface FederationDiscoveryPort {
     remoteBrokerId: string,
     agentId: string,
     correlation: FederationBrokerCorrelationContext,
-  ): Promise<Record<string, unknown> | null>;
+  ): Promise<AgentCard | null>;
 }
 
 export interface FederationIdentityPort {

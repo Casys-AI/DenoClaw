@@ -10,7 +10,7 @@ export function mapInstanceTunnelToCatalog(
   return (capabilities.agents ?? []).map((agentId) => ({
     remoteBrokerId: tunnelId,
     agentId,
-    card: {},
+    card: null,
     capabilities: capabilities.tools,
     visibility: capabilities.allowedAgents.includes(agentId)
       ? "public"

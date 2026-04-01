@@ -425,6 +425,51 @@ function createBrokerRunner(deps: BrokerDeps): AgentRunner {
 extensible architecture ready for session state, Mastra memory, and workflow
 agents in subsequent iterations.
 
+## PML integration — plan description + execution + UI
+
+Kaku connects naturally with PML (`@casys/pml`), Casys's plan description
+format. The three layers form a complete pipeline:
+
+### PML → Kaku → MCP Apps
+
+1. **PML describes** — the agent generates a structured execution plan in PML
+   format (typed workflow tree: sequential, parallel, conditional, loop)
+2. **Kaku executes** — the kernel runs the plan as workflow agents, emitting
+   events at each step (start, tool call, result, confirmation, completion)
+3. **MCP Apps display** — a workflow viewer (MCP App resource `ui://`) renders
+   the execution tree in real-time: completed steps in green, active step
+   pulsing, pending steps grayed, confirmation buttons on HIL nodes
+
+### Plan storage as memory
+
+Executed plans are persisted as event sequences in the EventStore. This gives
+agents memory of past executions:
+
+- "Last time I ran this workflow, step 3 failed because of X"
+- "The user rejected the confirmation at step 2, so I took the alternative path"
+- Replay any past plan execution for debugging or auditing
+
+Plans can be stored alongside conversation memory (Mastra) with metadata
+linking the plan to the session, user, and outcome. The MemoryService adapter
+can index executed plans for semantic recall — "find plans similar to this
+request that succeeded."
+
+### Interactive workflow validation UI
+
+MCP Apps viewer for workflow execution enables:
+
+- **Real-time progress** — event stream renders as the plan executes
+- **Human-in-the-loop** — confirmation nodes pause execution and show a button
+  in the UI; user approves or rejects inline
+- **Plan review before execution** — display the full workflow tree for approval
+  before the kernel starts running it
+- **Branch visualization** — conditional and parallel branches shown as a tree,
+  with the active path highlighted
+- **Audit trail** — completed workflows stay viewable with full event history
+
+This reuses the MCP Apps infrastructure from `@casys/mcp-server` (same
+`ui://` resource pattern, same iframe sandbox, same `postMessage` protocol).
+
 ## Future extensions (not in this iteration)
 
 - **Session state with scoped prefixes** (`session:`, `user:`, `app:`,

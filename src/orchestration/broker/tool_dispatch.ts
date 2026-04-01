@@ -363,12 +363,13 @@ export class BrokerToolDispatcher {
 
     switch (tool) {
       case "create_cron": {
-        const job = await cronManager.create({
-          agentId,
-          name: args.name as string,
-          schedule: args.schedule as string,
-          prompt: args.prompt as string,
-        });
+        const name = typeof args.name === "string" ? args.name.trim() : "";
+        const schedule = typeof args.schedule === "string" ? args.schedule.trim() : "";
+        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        if (!name || !schedule || !prompt) {
+          return { success: false, output: "", error: { code: "INVALID_CRON_ARGS", context: { name, schedule, prompt }, recovery: "Provide non-empty name, schedule (cron expression), and prompt" } };
+        }
+        const job = await cronManager.create({ agentId, name, schedule, prompt });
         return { success: true, output: JSON.stringify({ created: true, id: job.id, name: job.name, schedule: job.schedule }) };
       }
       case "list_crons": {

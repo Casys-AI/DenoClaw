@@ -89,6 +89,7 @@ export class BrokerServer {
   private replyDispatcher: BrokerReplyDispatcher;
   private taskDispatcher: BrokerTaskDispatcher;
   private toolDispatcher: BrokerToolDispatcher;
+  private cronManager: BrokerCronManager | null;
   private federationRuntime: BrokerFederationRuntime;
   private httpRuntime: BrokerHttpRuntime;
   private lifecycleRuntime: BrokerLifecycleRuntime;
@@ -104,6 +105,7 @@ export class BrokerServer {
     this.ownsKv = !deps?.kv;
     this.taskStore = deps?.taskStore ?? new TaskStore(deps?.kv);
     this.tunnelRegistry = deps?.tunnelRegistry ?? new TunnelRegistry();
+    this.cronManager = deps?.cronManager ?? null;
     this.connectedAgents = new BrokerAgentSocketRegistry();
     this.agentRegistry = new BrokerAgentRegistry({
       getKv: () => this.getKv(),
@@ -277,6 +279,24 @@ export class BrokerServer {
   }
 
   async start(port = 3000): Promise<void> {
+    if (this.cronManager) {
+      this.cronManager.setOnFire(async (job) => {
+        await this.taskDispatcher.submitInternalTask(
+          job.agentId,
+          {
+            messageId: crypto.randomUUID(),
+            role: "user",
+            parts: [{ kind: "text", text: job.prompt }],
+          },
+          {
+            cronJobId: job.id,
+            cronName: job.name,
+            cronSchedule: job.schedule,
+          },
+        );
+      });
+      await this.cronManager.reloadAll();
+    }
     await this.lifecycleRuntime.start(port);
   }
 

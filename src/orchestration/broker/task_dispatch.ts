@@ -78,6 +78,30 @@ export interface BrokerTaskDispatcherDeps {
 export class BrokerTaskDispatcher {
   constructor(private readonly deps: BrokerTaskDispatcherDeps) {}
 
+  /**
+   * Submit a task from the broker itself (cron, system). Bypasses peer access
+   * checks since the broker is a trusted internal submitter.
+   */
+  async submitInternalTask(
+    targetAgent: string,
+    taskMessage: A2AMessage,
+    metadata?: Record<string, unknown>,
+  ): Promise<Task> {
+    const taskId = crypto.randomUUID();
+    return await this.submitRoutedTask({
+      from: "broker",
+      targetAgent,
+      taskId,
+      taskMessage,
+      forwardedMetadata: metadata,
+      brokerMetadata: {
+        submittedBy: "broker",
+        targetAgent,
+        ...(metadata ? { request: metadata } : {}),
+      },
+    });
+  }
+
   async submitAgentTask(
     fromAgentId: string,
     payload: BrokerTaskSubmitPayload,

@@ -45,6 +45,7 @@ import {
 } from "../../shared/deploy_credentials.ts";
 import { BrokerMessageRuntime } from "./message_runtime.ts";
 import { BrokerSandboxManager } from "./sandbox_manager.ts";
+import { BrokerCronManager } from "./cron_manager.ts";
 import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 
 /**
@@ -66,6 +67,7 @@ export interface BrokerServerDeps {
   kv?: Deno.Kv;
   taskStore?: TaskStore;
   tunnelRegistry?: TunnelRegistry;
+  cronManager?: BrokerCronManager;
   fetchFn?: typeof fetch;
 }
 
@@ -197,6 +199,7 @@ export class BrokerServer {
       tunnelRegistry: this.tunnelRegistry,
       replyDispatcher: this.replyDispatcher,
       persistence: this.taskPersistence,
+      cronManager: deps?.cronManager,
       routeToTunnel: (ws, msg) => this.routeToTunnel(ws, msg),
       metrics: this.metrics,
     });
@@ -215,6 +218,13 @@ export class BrokerServer {
       federationRuntime: this.federationRuntime,
       sendStructuredError: (to, requestId, error) =>
         this.sendStructuredError(to, requestId, error),
+      writeAgentLiveness: async (agentId: string) => {
+        const kv = await this.getKv();
+        await kv.set(["agents", agentId, "status"], {
+          status: "alive",
+          lastHeartbeat: new Date().toISOString(),
+        });
+      },
     });
   }
 

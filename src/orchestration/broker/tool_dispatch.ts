@@ -24,11 +24,14 @@ import type { BrokerToolRequestMessage } from "../types.ts";
 import type { BrokerReplyDispatcher } from "./reply_dispatch.ts";
 import type { BrokerTaskPersistence } from "./persistence.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
+import type { BrokerCronManager } from "./cron_manager.ts";
 import {
   getAgentDefDir,
   isDeployEnvironment,
 } from "../../shared/helpers.ts";
 import type { ToolExecutorConfig } from "../../shared/types.ts";
+
+const CRON_TOOLS = new Set(["create_cron", "list_crons", "delete_cron"]);
 
 const DEFAULT_EXEC_POLICY: ExecPolicy = {
   security: "allowlist",
@@ -43,6 +46,7 @@ export interface BrokerToolDispatcherDeps {
   replyDispatcher: BrokerReplyDispatcher;
   persistence: BrokerTaskPersistence;
   routeToTunnel(ws: WebSocket, msg: BrokerToolRequestMessage): void;
+  cronManager?: BrokerCronManager;
   metrics: {
     recordToolCall(
       agentId: string,
@@ -59,6 +63,19 @@ export class BrokerToolDispatcher {
   async handleToolRequest(msg: BrokerToolRequestMessage): Promise<void> {
     const req = msg.payload;
     const toolStart = performance.now();
+
+    if (CRON_TOOLS.has(req.tool)) {
+      const result = await this.handleCronTool(msg.from, req.tool, req.args);
+      await this.replyToolResult(msg.from, msg.id, result);
+      await this.deps.metrics.recordToolCall(
+        msg.from,
+        req.tool,
+        result.success,
+        performance.now() - toolStart,
+      );
+      return;
+    }
+
     const agentConfig = await this.resolveAgentConfigEntry(msg.from);
     const shell = agentConfig.value?.sandbox?.shell ??
       this.deps.config.agents?.defaults?.sandbox?.shell;
@@ -332,6 +349,47 @@ export class BrokerToolDispatcher {
       ),
       usedElevatedGrantSignatures,
     };
+  }
+
+  private async handleCronTool(
+    agentId: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult> {
+    const cronManager = this.deps.cronManager;
+    if (!cronManager) {
+      return { success: false, output: "", error: { code: "CRON_UNAVAILABLE", context: {}, recovery: "Cron manager not configured on broker" } };
+    }
+
+    switch (tool) {
+      case "create_cron": {
+        const job = await cronManager.create({
+          agentId,
+          name: args.name as string,
+          schedule: args.schedule as string,
+          prompt: args.prompt as string,
+        });
+        return { success: true, output: JSON.stringify({ created: true, id: job.id, name: job.name, schedule: job.schedule }) };
+      }
+      case "list_crons": {
+        const jobs = await cronManager.listByAgent(agentId);
+        return {
+          success: true,
+          output: JSON.stringify({
+            jobs: jobs.map((j) => ({
+              id: j.id, name: j.name, schedule: j.schedule,
+              prompt: j.prompt, enabled: j.enabled, lastRun: j.lastRun,
+            })),
+          }),
+        };
+      }
+      case "delete_cron": {
+        const deleted = await cronManager.delete(agentId, args.cronJobId as string);
+        return { success: true, output: JSON.stringify({ deleted }) };
+      }
+      default:
+        return { success: false, output: "", error: { code: "UNKNOWN_CRON_TOOL", context: { tool }, recovery: "Use create_cron, list_crons, or delete_cron" } };
+    }
   }
 
   private async resolveAgentConfigEntry(

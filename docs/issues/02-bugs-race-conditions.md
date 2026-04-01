@@ -62,6 +62,7 @@ Review date: 2026-04-01
 - **Fix:** Add `AbortSignal.timeout(30_000)` and `if (!res.ok)` guard
 
 ### BUG-11 — `deleteDeadLetter` calls `claimDeadLetter` instead of deleting
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/orchestration/federation/adapters/kv_adapter.ts:358-363`
 - **Impact:** Dead letters accumulate permanently
 - **Fix:** Implement proper delete path
@@ -299,9 +300,10 @@ Review date: 2026-04-01
 - **Fix:** Check write result; throw on failure
 
 ### BUG-65 — HIGH: Webhook `send()` fetch has no try/catch — delivery silently dropped
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/messaging/channels/webhook.ts:88-101`
 - **Impact:** Callback URL down → message lost, no log, caller sees success
-- **Fix:** Wrap in try/catch, log errors, check `res.ok`
+- **Fix:** Remove outbound callback fetch path; ingress now returns `202 + taskId` and task state is queried via broker/gateway
 
 ### BUG-66 — MEDIUM: Discord/Telegram `send()` logs but never propagates errors
 - **Files:** `src/messaging/channels/discord.ts:135-142`, `telegram.ts:140-158`

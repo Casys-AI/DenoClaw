@@ -17,10 +17,11 @@ Review date: 2026-04-01
 - **Fix:** Accept `verifyToken` callback in constructor; extract and verify Bearer token before dispatching
 
 ### SEC-02 — Webhook channel: SSRF via caller-controlled `callbackUrl`
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/messaging/channels/webhook.ts:89-99`
 - **Impact:** Attacker can redirect broker's outbound `fetch` to cloud metadata (169.254.169.254), internal services
 - **Detail:** `callbackUrl` comes from POST body, used blindly in outbound fetch
-- **Fix:** Validate against allowlist of permitted schemes/hosts; reject non-https
+- **Fix:** Remove caller-controlled callback delivery path; accept inbound message, return `202 + taskId`, and query task state via `/ingress/tasks/:id`
 
 ### ~~SEC-03~~ — ALREADY TRACKED: `notes/2026-03-30-denoclaw-api-token-followup.md`
 - Token lifecycle deferred on purpose. Not a new finding.

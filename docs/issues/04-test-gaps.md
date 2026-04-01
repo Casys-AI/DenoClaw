@@ -11,8 +11,9 @@ Review date: 2026-04-01
 - **Missing:** handleSend, handleStream, handleGetTask, handleCancel, SSE events, auth bypass, error responses
 
 ### TEST-02 — WebhookChannel: no test file
+- **Status:** Resolved in code on 2026-04-01.
 - **File:** `src/messaging/channels/webhook.ts`
-- **Missing:** Secret validation, SSRF callbackUrl, empty content
+- **Missing:** Remaining edge cases still worth expanding separately: secret validation and malformed/empty content cases
 
 ### TEST-03 — `deploy_runtime.ts:startDeployedAgentRuntime` no integration test
 - **Missing:** Race condition (BUG-07), auth path (SEC-13), runtime init flow

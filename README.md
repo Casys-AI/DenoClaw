@@ -5,14 +5,14 @@
 # DenoClaw
 
 <p align="center">
-  <a href="https://jsr.io/@denoclaw/denoclaw">
-    <img alt="JSR" src="https://jsr.io/badges/@denoclaw/denoclaw">
+  <a href="https://jsr.io/@casys/denoclaw">
+    <img alt="JSR" src="https://jsr.io/badges/@casys/denoclaw">
   </a>
-  <a href="https://jsr.io/@denoclaw/denoclaw">
-    <img alt="JSR Score" src="https://jsr.io/badges/@denoclaw/denoclaw/score">
+  <a href="https://jsr.io/@casys/denoclaw">
+    <img alt="JSR Total Downloads" src="https://jsr.io/badges/@casys/denoclaw/total-downloads">
   </a>
-  <a href="https://jsr.io/@denoclaw/denoclaw">
-    <img alt="JSR Downloads" src="https://jsr.io/badges/@denoclaw/denoclaw/total-downloads">
+  <a href="https://jsr.io/@casys/denoclaw">
+    <img alt="JSR Weekly Downloads" src="https://jsr.io/badges/@casys/denoclaw/weekly-downloads">
   </a>
   <a href="./LICENSE">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg">

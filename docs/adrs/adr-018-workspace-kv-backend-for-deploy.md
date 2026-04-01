@@ -28,8 +28,8 @@ Validated current behavior as of 2026-04-01:
   explicit sync modes: default `preserve`, optional `--force`
 - `agent.json` is already registered back to the broker and persisted there for
   operational use
-- deploy runtime still keeps a published config fallback during boot, but
-  workspace content now has its own KV path
+- deploy runtime now boots from broker config while workspace content lives on
+  its own KV path
 
 So the remaining issue is not "put the whole workspace in KV." The real split
 is:
@@ -126,7 +126,7 @@ Validated current behavior:
 - soul loads from workspace KV when present
 - skills already load through `KvSkillsLoader`
 - memory file discovery already reads from workspace KV
-- deploy config still also exists as a published entrypoint copy
+- deploy boot reads canonical agent config from the broker
 
 Accepted direction:
 

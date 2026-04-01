@@ -1,6 +1,30 @@
 # Agent Config / Workspace Source-of-Truth Cleanup Plan
 
-**Date:** 2026-04-01 **Status:** Proposed
+**Date:** 2026-04-01 **Status:** Archived after review on 2026-04-01
+
+## Review outcome
+
+Review against `main` confirms that the core plan was implemented:
+
+- docs and ADRs now distinguish broker-owned config from agent-owned workspace
+  content
+- broker/gateway config persistence now converges on the canonical
+  `["agents", agentId, "config"]` namespace
+- deploy boot now fetches canonical config from the broker
+- agent WebSocket registration no longer carries full config payloads
+- `soul.md` now syncs with `skills/*` and `memories/*` into workspace KV
+- generated deploy entrypoints no longer carry durable agent config payloads
+- verification passed at implementation time with `deno task test`,
+  `deno task lint`, and `deno task check`
+
+Residual follow-ups remain deliberately outside this archived plan:
+
+- legacy fallback reads still exist in `AgentStore` for migration safety
+- `AgentEntry.systemPrompt` still exists as a compatibility field even though
+  publish strips it from broker-owned config
+
+So this plan is archived as implemented, with only small cleanup follow-ups
+left if and when the migration window is formally closed.
 
 ## Why this plan exists
 

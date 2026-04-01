@@ -14,7 +14,7 @@ Validated update as of 2026-04-01:
 See:
 
 - `docs/adrs/adr-018-workspace-kv-backend-for-deploy.md`
-- `docs/plans/2026-04-01-agent-config-workspace-source-of-truth-plan.md`
+- `docs/plans/archive/2026-04-01-agent-config-workspace-source-of-truth-plan.md`
 
 ## Historical context
 

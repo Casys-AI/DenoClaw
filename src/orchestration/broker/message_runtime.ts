@@ -18,6 +18,7 @@ export interface BrokerMessageRuntimeDeps {
     requestId: string,
     error: StructuredError,
   ) => Promise<void>;
+  writeAgentLiveness?: (agentId: string) => Promise<void>;
 }
 
 export class BrokerMessageRuntime {
@@ -73,16 +74,24 @@ export class BrokerMessageRuntime {
             await this.deps.taskDispatcher.cancelTask(msg.payload),
           );
           break;
-        case "task_result":
+        case "task_result": {
+          const taskResultValue = await this.deps.taskDispatcher.recordTaskResult(
+            msg.from,
+            msg.payload,
+          );
           await this.deps.replyDispatcher.sendTaskResult(
             msg.from,
             msg.id,
-            await this.deps.taskDispatcher.recordTaskResult(
-              msg.from,
-              msg.payload,
-            ),
+            taskResultValue,
+          );
+          this.deps.writeAgentLiveness?.(msg.from).catch((err) =>
+            log.warn(
+              `Broker: failed to write liveness for ${msg.from}`,
+              err instanceof Error ? err : new Error(String(err)),
+            )
           );
           break;
+        }
         case "federation_link_open":
         case "federation_link_ack":
         case "federation_catalog_sync":

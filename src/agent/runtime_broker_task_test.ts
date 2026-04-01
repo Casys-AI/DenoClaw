@@ -549,6 +549,7 @@ Deno.test("AgentRuntime auto-retries a pending privileged tool after grant appro
     "user",
     "assistant",
     "tool",
+    "user",
     "assistant",
   ]);
   assertEquals(memory.getMessages()[2], {
@@ -556,6 +557,10 @@ Deno.test("AgentRuntime auto-retries a pending privileged tool after grant appro
     content: "Written 5 chars to note.txt",
     name: "write_file",
     tool_call_id: "tool-retry-1",
+  });
+  assertEquals(memory.getMessages()[3], {
+    role: "user",
+    content: "Grant write and continue",
   });
   assertEquals(broker.reportedTasks[1]?.artifacts[0]?.parts[0], {
     kind: "text",

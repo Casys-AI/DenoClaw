@@ -254,6 +254,7 @@ export class AgentRuntime {
     });
     resumed.history = [...existing.history, continuationMessage];
     await this.reportCanonicalTaskResult(resumed);
+    const inputText = extractRuntimeTaskText(continuationMessage);
     const runtimeGrantStore = new AgentRuntimeGrantStore();
     const approvedPrivilegeGrant = extractApprovedPrivilegeElevationGrant(
       existing,
@@ -327,7 +328,7 @@ export class AgentRuntime {
         skills: this.skills,
         memory,
         fromAgentId: msg.from,
-        inputText: "",
+        inputText,
         canonicalTask: resumed,
         memoryTopics: await memory.listTopics(),
         memoryFiles: this.memoryFiles,
@@ -340,7 +341,6 @@ export class AgentRuntime {
       return;
     }
 
-    const inputText = extractRuntimeTaskText(continuationMessage);
     log.info(
       `Canonical continuation received from ${msg.from}: ${
         inputText.slice(0, 100)

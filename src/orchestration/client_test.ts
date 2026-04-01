@@ -159,7 +159,7 @@ Deno.test("BrokerClient submit/get/continue/cancel use canonical task operations
   const submitted = await client.submitTask({
     targetAgent: "agent-beta",
     taskId: "task-1",
-    message: {
+    taskMessage: {
       messageId: crypto.randomUUID(),
       role: "user",
       parts: [{ kind: "text", text: "hello" }],
@@ -174,7 +174,7 @@ Deno.test("BrokerClient submit/get/continue/cancel use canonical task operations
 
   const resumed = await client.continueTask({
     taskId: "task-1",
-    message: {
+    continuationMessage: {
       messageId: crypto.randomUUID(),
       role: "user",
       parts: [{ kind: "text", text: "continue" }],

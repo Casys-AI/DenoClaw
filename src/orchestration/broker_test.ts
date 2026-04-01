@@ -469,7 +469,7 @@ Deno.test(
         targetAgent: "agent-beta",
         taskId: "task-continue",
         contextId: "ctx-continue",
-        message: createMessage("Need confirmation"),
+        taskMessage: createMessage("Need confirmation"),
       });
 
       const paused: Task = {
@@ -781,7 +781,7 @@ Deno.test(
       const submitted = await broker.submitAgentTask("agent-alpha", {
         targetAgent: "agent-beta",
         taskId: "task-a2a-regression",
-        message: createMessage("Still canonical"),
+        taskMessage: createMessage("Still canonical"),
       });
 
       assertEquals(submitted.status.state, "SUBMITTED");
@@ -800,7 +800,7 @@ Deno.test(
 
       await broker.continueAgentTask("agent-alpha", {
         taskId: submitted.id,
-        message: createMessage("Continue please"),
+        continuationMessage: createMessage("Continue please"),
       });
 
       const continuedForwarded = JSON.parse(
@@ -893,7 +893,7 @@ Deno.test("BrokerServer.submitAgentTask enforces peer policy", async () => {
         broker.submitAgentTask("agent-alpha", {
           targetAgent: "agent-beta",
           taskId: "blocked-task",
-          message: createMessage("Blocked"),
+          taskMessage: createMessage("Blocked"),
         }),
       Error,
       'Add "agent-beta" to agent-alpha.peers',

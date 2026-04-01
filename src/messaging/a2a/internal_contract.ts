@@ -34,11 +34,8 @@ export type RefusalTerminalReason = "user" | "policy" | "runtime" | "unknown";
 export interface CanonicalTaskInit {
   /**
    * First user intent message that initializes the canonical task lifecycle.
-   * Prefer `initialMessage`; `message` is a temporary alias.
    */
-  initialMessage?: A2AMessage;
-  /** @deprecated Use `initialMessage`. */
-  message?: A2AMessage;
+  initialMessage: A2AMessage;
   id: string;
   contextId?: string;
   metadata?: Record<string, unknown>;
@@ -48,11 +45,8 @@ export interface CanonicalTaskInit {
 export interface TaskTransitionOptions {
   /**
    * Canonical status update message attached to the next transition.
-   * Prefer `statusMessage`; `message` is a temporary alias.
    */
   statusMessage?: A2AMessage;
-  /** @deprecated Use `statusMessage`. */
-  message?: A2AMessage;
   metadata?: Record<string, unknown>;
   timestamp?: string;
 }
@@ -65,14 +59,7 @@ export function resolveTaskContextId(
 }
 
 export function createCanonicalTask(init: CanonicalTaskInit): Task {
-  const initialMessage = init.initialMessage ?? init.message;
-  if (!initialMessage) {
-    throw new DenoClawError(
-      "INVALID_TASK_TRANSITION",
-      { taskId: init.id },
-      "createCanonicalTask requires an initialMessage",
-    );
-  }
+  const initialMessage = init.initialMessage;
 
   return {
     id: init.id,
@@ -117,7 +104,7 @@ export function transitionTask(
   options: TaskTransitionOptions = {},
 ): Task {
   assertValidTaskTransition(task.status.state, state);
-  const statusMessage = options.statusMessage ?? options.message;
+  const statusMessage = options.statusMessage;
 
   return {
     ...task,

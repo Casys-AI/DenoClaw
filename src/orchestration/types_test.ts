@@ -52,11 +52,11 @@ Deno.test("Broker task classifier matches only canonical task messages", () => {
     baseMessage("task_submit", {
       targetAgent: "agent-b",
       taskId: "task-1",
-      message: taskMessage,
+      taskMessage: taskMessage,
     }),
     baseMessage("task_continue", {
       taskId: "task-1",
-      message: taskMessage,
+      continuationMessage: taskMessage,
     }),
     baseMessage("task_get", { taskId: "task-1" }),
     baseMessage("task_cancel", { taskId: "task-1" }),

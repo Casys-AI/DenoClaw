@@ -256,7 +256,7 @@ export class BrokerClient
       contextId: options.contextId,
       parentTaskId: options.parentTaskId,
       metadata: options.metadata,
-      message: {
+      taskMessage: {
         messageId: generateId(),
         role: "user",
         parts: [{ kind: "text", text: instruction }],

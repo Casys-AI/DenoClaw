@@ -44,16 +44,6 @@ Deno.test("createCanonicalTask keeps a stable id and explicit context policy", (
   assertEquals(resolveTaskContextId("task-1", "ctx-9"), "ctx-9");
 });
 
-Deno.test("createCanonicalTask preserves legacy message alias for compatibility", () => {
-  const message = createMessage("hello");
-  const task = createCanonicalTask({
-    id: "task-legacy",
-    message,
-  });
-
-  assertEquals(task.history[0], message);
-});
-
 Deno.test("canTransitionTaskState allows only canonical transitions", () => {
   assertEquals(canTransitionTaskState("SUBMITTED", "WORKING"), true);
   assertEquals(canTransitionTaskState("SUBMITTED", "INPUT_REQUIRED"), true);

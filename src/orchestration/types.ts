@@ -53,9 +53,7 @@ export interface ToolResponsePayload {
 export interface BrokerTaskSubmitPayload {
   targetAgent: string;
   taskId: string;
-  taskMessage?: A2AMessage;
-  /** @deprecated Use `taskMessage`. */
-  message?: A2AMessage;
+  taskMessage: A2AMessage;
   contextId?: string;
   parentTaskId?: string;
   metadata?: Record<string, unknown>;
@@ -63,9 +61,7 @@ export interface BrokerTaskSubmitPayload {
 
 export interface BrokerTaskContinuePayload {
   taskId: string;
-  continuationMessage?: A2AMessage;
-  /** @deprecated Use `continuationMessage`. */
-  message?: A2AMessage;
+  continuationMessage: A2AMessage;
   metadata?: Record<string, unknown>;
 }
 
@@ -80,19 +76,13 @@ export interface BrokerTaskResultPayload {
 export function extractBrokerSubmitTaskMessage(
   payload: BrokerTaskSubmitPayload,
 ): A2AMessage {
-  const taskMessage = payload.taskMessage ?? payload.message;
-  if (!taskMessage) throw new Error("Broker task submit requires taskMessage");
-  return taskMessage;
+  return payload.taskMessage;
 }
 
 export function extractBrokerContinuationMessage(
   payload: BrokerTaskContinuePayload,
 ): A2AMessage {
-  const continuationMessage = payload.continuationMessage ?? payload.message;
-  if (!continuationMessage) {
-    throw new Error("Broker task continue requires continuationMessage");
-  }
-  return continuationMessage;
+  return payload.continuationMessage;
 }
 
 // ── Federation control-plane operations ─────────────────

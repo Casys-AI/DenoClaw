@@ -6,7 +6,7 @@ export async function startBrokerRuntime(
   config: Config,
   port = 3000,
 ): Promise<void> {
-  const srv = new BrokerServer(config, createBrokerServerDeps(config));
+  const srv = new BrokerServer(config, await createBrokerServerDeps(config));
   await srv.start(port);
 
   console.log(`Broker started on port ${port}`);

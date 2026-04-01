@@ -3,7 +3,7 @@
  * Reads agent status, cron jobs, and agent tasks from KV.
  */
 
-import type { CronJob } from "../agent/types.ts";
+import type { BrokerCronJob } from "./broker/cron_types.ts";
 import type {
   ActiveTaskEntry,
   AgentStatusEntry,
@@ -64,9 +64,9 @@ export async function getAgentStatus(
   };
 }
 
-export async function listCronJobs(kv: Deno.Kv): Promise<CronJob[]> {
-  const jobs: CronJob[] = [];
-  for await (const entry of kv.list<CronJob>({ prefix: ["cron"] })) {
+export async function listCronJobs(kv: Deno.Kv): Promise<BrokerCronJob[]> {
+  const jobs: BrokerCronJob[] = [];
+  for await (const entry of kv.list<BrokerCronJob>({ prefix: ["cron"] })) {
     if (entry.value) jobs.push(entry.value);
   }
   return jobs;

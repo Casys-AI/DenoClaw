@@ -67,7 +67,7 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname === "/agents/status") {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
@@ -76,14 +76,14 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname.startsWith("/agents/") && url.pathname.endsWith("/status")) {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
     const agentId = url.pathname.split("/")[2];
     const status = await getAgentStatus(ctx.kv, agentId);
     if (!status) {
-      return Response.json({ error: { code: "AGENT_NOT_FOUND" } }, {
+      return Response.json({ error: { code: "AGENT_NOT_FOUND", recovery: "Register the agent before querying its status" } }, {
         status: 404,
       });
     }
@@ -92,7 +92,7 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname === "/tasks/observations") {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
@@ -101,13 +101,13 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname.startsWith("/tasks/context/")) {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
     const contextId = url.pathname.slice("/tasks/context/".length);
     if (!contextId) {
-      return Response.json({ error: { code: "MISSING_CONTEXT_ID" } }, {
+      return Response.json({ error: { code: "MISSING_CONTEXT_ID", recovery: "Provide a contextId in the URL path" } }, {
         status: 400,
       });
     }
@@ -118,7 +118,7 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname === "/cron/jobs") {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
@@ -129,7 +129,7 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname === "/traces") {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
@@ -147,14 +147,14 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname.startsWith("/traces/") && !url.pathname.endsWith("/spans")) {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }
     const traceId = url.pathname.split("/")[2];
     const trace = await getTrace(ctx.kv, traceId);
     if (!trace) {
-      return Response.json({ error: { code: "TRACE_NOT_FOUND" } }, {
+      return Response.json({ error: { code: "TRACE_NOT_FOUND", recovery: "Verify the traceId exists via GET /traces?agent=<agentId>" } }, {
         status: 404,
       });
     }
@@ -163,7 +163,7 @@ export async function handleGatewayMonitoringRoute(
 
   if (url.pathname.startsWith("/traces/") && url.pathname.endsWith("/spans")) {
     if (!ctx.kv) {
-      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+      return Response.json({ error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" } }, {
         status: 503,
       });
     }

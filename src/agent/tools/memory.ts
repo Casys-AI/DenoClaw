@@ -71,14 +71,7 @@ export class MemoryTool extends BaseTool {
     switch (action) {
       case "list_topics": {
         const topics = await this.memory.listTopics();
-        if (topics.length === 0) {
-          return this.ok("No topics in long-term memory yet.");
-        }
-        return this.ok(
-          `${topics.length} topic(s) in memory:\n${
-            topics.map((t) => `- ${t}`).join("\n")
-          }`,
-        );
+        return this.ok(JSON.stringify({ topics }));
       }
       case "remember": {
         if (!topic) {
@@ -98,7 +91,7 @@ export class MemoryTool extends BaseTool {
         }
         const source = (args.source as "user" | "agent" | "tool") || "agent";
         await this.memory.remember({ topic, content, source });
-        return this.ok(`Fact remembered under topic "${topic}".`);
+        return this.ok(JSON.stringify({ ok: true, topic }));
       }
 
       case "recall": {
@@ -110,17 +103,14 @@ export class MemoryTool extends BaseTool {
           );
         }
         const facts = await this.memory.recallTopic(topic);
-        if (facts.length === 0) {
-          return this.ok(`No facts found for topic "${topic}".`);
-        }
-        const formatted = facts.map((f, i) =>
-          `[${i + 1}] ${f.content}${
-            f.source ? ` (source: ${f.source})` : ""
-          } — ${f.timestamp}`
-        ).join("\n");
-        return this.ok(
-          `${facts.length} fact(s) for topic "${topic}":\n${formatted}`,
-        );
+        return this.ok(JSON.stringify({
+          topic,
+          facts: facts.map((f) => ({
+            content: f.content,
+            source: f.source,
+            timestamp: f.timestamp,
+          })),
+        }));
       }
 
       case "forget": {
@@ -132,7 +122,7 @@ export class MemoryTool extends BaseTool {
           );
         }
         await this.memory.forgetTopic(topic);
-        return this.ok(`All facts for topic "${topic}" have been forgotten.`);
+        return this.ok(JSON.stringify({ ok: true, topic }));
       }
 
       default:

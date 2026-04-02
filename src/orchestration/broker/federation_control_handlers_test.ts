@@ -76,7 +76,7 @@ Deno.test("createBrokerFederationControlHandlers validates catalog payloads", as
         }),
       ),
     Error,
-    "agents must be an array",
+    "FEDERATION_PAYLOAD_INVALID",
   );
 });
 

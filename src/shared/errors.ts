@@ -81,3 +81,42 @@ export class AgentError extends DenoClawError {
     this.name = "AgentError";
   }
 }
+
+export class OrchestrationError extends DenoClawError {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
+    super(code, context, recovery);
+    this.name = "OrchestrationError";
+  }
+}
+
+export class FederationError extends DenoClawError {
+  constructor(
+    code: string,
+    context?: Record<string, unknown>,
+    recovery?: string,
+  ) {
+    super(code, context, recovery);
+    this.name = "FederationError";
+  }
+}
+
+/** Safely extract a message string from an unknown thrown value. */
+export function toErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  return String(e);
+}
+
+/** Wrap an unknown thrown value into a DenoClawError. */
+export function wrapError(
+  e: unknown,
+  code: string,
+  recovery?: string,
+): DenoClawError {
+  const message = toErrorMessage(e);
+  return new DenoClawError(code, { cause: message }, recovery);
+}

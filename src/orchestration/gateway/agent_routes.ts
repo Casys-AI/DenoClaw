@@ -32,8 +32,14 @@ export async function handleGatewayAgentRoute(
       await ctx.agentStore.set(body.agentId, body.config);
       try {
         await ctx.workerPool.addAgent(body.agentId, body.config);
-      } catch {
-        // Agent may already be running.
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return Response.json({
+          ok: true,
+          agentId: body.agentId,
+          warning: "AGENT_START_SKIPPED",
+          context: { cause: msg },
+        });
       }
       return Response.json({ ok: true, agentId: body.agentId });
     } catch (error) {
@@ -58,9 +64,12 @@ export async function handleGatewayAgentRoute(
   if (req.method === "GET") {
     const config = await ctx.agentStore.get(agentId);
     if (!config) {
-      return Response.json({ error: { code: "AGENT_NOT_FOUND" } }, {
-        status: 404,
-      });
+      return Response.json({
+        error: {
+          code: "AGENT_NOT_FOUND",
+          recovery: "Register the agent via POST /api/agents before querying it",
+        },
+      }, { status: 404 });
     }
     return Response.json({ agentId, config });
   }

@@ -19,7 +19,8 @@
 | Docs/Schema (`05-docs-schema-config.md`) | — | 2 | 5 | 9 | 16 |
 | UX/CLI (`06-ux-cli.md`) | — | — | 8 | 10 | 18 |
 | Type Design (`07-type-design.md`) | — | — | — | 28 | 28 |
-| **Total** | **5** | **53** | **63** | **78** | **~199** |
+| AX Compliance (`08-ax-review.md`) | 1 | 12 | 25 | 12 | 50 |
+| **Total** | **6** | **65** | **88** | **90** | **~249** |
 
 > 3 security issues removed (SEC-03, SEC-09, SEC-13) — already tracked in
 > `notes/2026-03-30-denoclaw-api-token-followup.md` and
@@ -244,3 +245,4 @@ in a doc but the specific bug is not called out). These remain as valid findings
 | `docs/issues/05-docs-schema-config.md` | 16 documentation/schema issues |
 | `docs/issues/06-ux-cli.md` | 18 UX & CLI issues |
 | `docs/issues/07-type-design.md` | 28 type design issues + family ratings |
+| `docs/issues/08-ax-review.md` | 50 AX compliance issues (1 CRITICAL, 12 HIGH) |

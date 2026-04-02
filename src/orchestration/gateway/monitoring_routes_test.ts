@@ -77,6 +77,6 @@ Deno.test("handleGatewayMonitoringRoute reports missing KV for status routes", a
 
   assertEquals(res?.status, 503);
   assertEquals(await res?.json(), {
-    error: { code: "KV_UNAVAILABLE" },
+    error: { code: "KV_UNAVAILABLE", recovery: "Check broker KV_PATH and Deno.openKv permissions" },
   });
 });

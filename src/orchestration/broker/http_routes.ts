@@ -14,7 +14,12 @@ import {
   type ChannelRoutePlan,
   createDirectChannelRoutePlan,
 } from "../channel_routing/types.ts";
-import { createSSEResponse, listCronJobs } from "../monitoring.ts";
+import {
+  createSSEResponse,
+  getAgentStatus,
+  listAgentStatuses,
+  listCronJobs,
+} from "../monitoring.ts";
 import { handleGatewayAnalyticsRoute } from "../gateway/analytics_routes.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
@@ -52,7 +57,7 @@ export async function handleBrokerHttp(
   const url = new URL(req.url);
 
   if (url.pathname === "/") {
-    return new Response("DenoClaw Broker");
+    return Response.json({ service: "denoclaw-broker" });
   }
 
   if (url.pathname === "/health") {
@@ -116,6 +121,28 @@ export async function handleBrokerHttp(
     return Response.json(
       await listCronJobs(kv, url.searchParams.get("agent") ?? undefined),
     );
+  }
+
+  if (url.pathname === "/agents/status") {
+    const kv = await ctx.getKv();
+    return Response.json(await listAgentStatuses(kv));
+  }
+
+  if (
+    url.pathname.startsWith("/agents/") && url.pathname.endsWith("/status")
+  ) {
+    const agentId = url.pathname.split("/")[2];
+    const kv = await ctx.getKv();
+    const status = await getAgentStatus(kv, agentId);
+    if (!status) {
+      return Response.json({
+        error: {
+          code: "AGENT_NOT_FOUND",
+          recovery: "Register the agent before querying its status",
+        },
+      }, { status: 404 });
+    }
+    return Response.json(status);
   }
 
   if (url.pathname === "/events") {
@@ -285,7 +312,10 @@ export async function handleBrokerHttp(
   );
   if (federationResponse) return federationResponse;
 
-  return new Response("Not Found", { status: 404 });
+  return Response.json(
+    { error: { code: "NOT_FOUND", recovery: "Check the URL path" } },
+    { status: 404 },
+  );
 }
 
 function normalizeBrokerIngressRoutePlan(

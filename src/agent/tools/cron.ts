@@ -59,6 +59,11 @@ export class CreateCronTool extends CronToolBase {
               description:
                 "The instruction to execute each time the cron fires",
             },
+            dry_run: {
+              type: "boolean",
+              description:
+                "Preview the cron without creating it (default: true)",
+            },
           },
           required: ["name", "schedule", "prompt"],
         },
@@ -82,6 +87,13 @@ export class CreateCronTool extends CronToolBase {
         { name, schedule, prompt },
         "Provide non-empty name, schedule (cron expression), and prompt",
       );
+    }
+
+    if (args.dry_run !== false) {
+      return this.ok(JSON.stringify({
+        dry_run: true,
+        would_create: { name, schedule, prompt },
+      }));
     }
 
     return await this.port.create({ name, schedule, prompt });
@@ -128,6 +140,11 @@ export class DeleteCronTool extends CronToolBase {
               type: "string",
               description: "The ID of the cron job to delete",
             },
+            dry_run: {
+              type: "boolean",
+              description:
+                "Preview the deletion without executing it (default: true)",
+            },
           },
           required: ["cronJobId"],
         },
@@ -149,6 +166,10 @@ export class DeleteCronTool extends CronToolBase {
         { cronJobId },
         "Provide a non-empty cronJobId",
       );
+    }
+
+    if (args.dry_run !== false) {
+      return this.ok(JSON.stringify({ dry_run: true, would_delete: cronJobId }));
     }
 
     return await this.port.delete(cronJobId);
@@ -176,6 +197,10 @@ abstract class ToggleCronToolBase extends CronToolBase {
           type: "object",
           properties: {
             cronJobId: { type: "string", description },
+            dry_run: {
+              type: "boolean",
+              description: "Preview the operation without executing it (default: true)",
+            },
           },
           required: ["cronJobId"],
         },
@@ -206,6 +231,10 @@ export class EnableCronTool extends ToggleCronToolBase {
       );
     }
 
+    if (args.dry_run !== false) {
+      return this.ok(JSON.stringify({ dry_run: true, would_enable: cronJobId }));
+    }
+
     return await this.port.enable(cronJobId);
   }
 }
@@ -230,6 +259,10 @@ export class DisableCronTool extends ToggleCronToolBase {
         { cronJobId: args.cronJobId },
         "Provide a non-empty cronJobId",
       );
+    }
+
+    if (args.dry_run !== false) {
+      return this.ok(JSON.stringify({ dry_run: true, would_disable: cronJobId }));
     }
 
     return await this.port.disable(cronJobId);

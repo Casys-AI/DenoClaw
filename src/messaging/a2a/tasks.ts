@@ -120,16 +120,8 @@ export class TaskStore {
     return nextTask;
   }
 
-  async addMessage(taskId: string, message: A2AMessage): Promise<Task | null> {
-    return await this.appendHistoryMessage(taskId, message);
-  }
-
   async cancel(taskId: string): Promise<Task | null> {
     return await this.updateStatus(taskId, "CANCELED");
-  }
-
-  async cancelTask(taskId: string): Promise<Task | null> {
-    return await this.cancel(taskId);
   }
 
   canAcceptUpdates(task: Task): boolean {

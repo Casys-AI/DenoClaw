@@ -206,17 +206,17 @@ export class BrokerTaskDispatcher {
     );
     await this.deps.persistence.assertPeerAccess(fromAgentId, targetAgentId);
 
+    if (existing.status.state !== "INPUT_REQUIRED") {
+      throw new DenoClawError(
+        "TASK_NOT_WAITING_FOR_INPUT",
+        { taskId: existing.id, state: existing.status.state },
+        "Only INPUT_REQUIRED tasks can be resumed through broker continuation",
+      );
+    }
+
     const activeTask = await this.expireAwaitedInputIfNeeded(existing);
     if (activeTask.status.state !== "INPUT_REQUIRED") {
       return activeTask;
-    }
-
-    if (activeTask.status.state !== "INPUT_REQUIRED") {
-      throw new DenoClawError(
-        "TASK_NOT_WAITING_FOR_INPUT",
-        { taskId: activeTask.id, state: activeTask.status.state },
-        "Only INPUT_REQUIRED tasks can be resumed through broker continuation",
-      );
     }
 
     const continuationMessage = extractBrokerContinuationMessage(payload);

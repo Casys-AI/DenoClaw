@@ -2,6 +2,7 @@ import type { FederationControlHandlerMap } from "../federation/mod.ts";
 import type { AgentCard } from "../../messaging/a2a/types.ts";
 import type { BrokerMessage } from "../types.ts";
 import type { BrokerFederationMessagingDeps } from "./federation_routing_port.ts";
+import { FederationError } from "../../shared/errors.ts";
 
 export function createBrokerFederationControlHandlers(
   deps: BrokerFederationMessagingDeps,
@@ -12,8 +13,10 @@ export function createBrokerFederationControlHandlers(
     messageType: BrokerMessage["type"],
   ): string => {
     if (typeof value !== "string" || value.length === 0) {
-      throw new Error(
-        `Invalid ${messageType} payload: ${field} must be a non-empty string`,
+      throw new FederationError(
+        "FEDERATION_PAYLOAD_INVALID",
+        { field, messageType },
+        `Provide a non-empty string for '${field}'`,
       );
     }
     return value;
@@ -83,8 +86,10 @@ export function createBrokerFederationControlHandlers(
         envelope.type,
       );
       if (typeof payload.accepted !== "boolean") {
-        throw new Error(
-          `Invalid ${envelope.type} payload: accepted must be a boolean`,
+        throw new FederationError(
+          "FEDERATION_PAYLOAD_INVALID",
+          { field: "accepted", messageType: envelope.type },
+          "Provide a boolean value for 'accepted'",
         );
       }
       const service = await deps.getFederationService();
@@ -110,8 +115,10 @@ export function createBrokerFederationControlHandlers(
         envelope.type,
       );
       if (!Array.isArray(payload.agents)) {
-        throw new Error(
-          `Invalid ${envelope.type} payload: agents must be an array`,
+        throw new FederationError(
+          "FEDERATION_PAYLOAD_INVALID",
+          { field: "agents", messageType: envelope.type },
+          "Provide an array for 'agents'",
         );
       }
       const entries = payload.agents.map(
@@ -126,8 +133,10 @@ export function createBrokerFederationControlHandlers(
             const entry = agent as { agentId: string; card?: AgentCard };
             return { agentId: entry.agentId, card: entry.card ?? null };
           }
-          throw new Error(
-            `Invalid ${envelope.type} payload: each agent entry must be a string or { agentId, card? }`,
+          throw new FederationError(
+            "FEDERATION_PAYLOAD_INVALID",
+            { field: "agents[]", messageType: envelope.type },
+            "Each agent entry must be a string or { agentId, card? }",
           );
         },
       );

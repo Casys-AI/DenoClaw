@@ -1,4 +1,5 @@
 import type { SandboxPermission } from "../shared/types.ts";
+import { OrchestrationError } from "../shared/errors.ts";
 
 export const DENOCLAW_TUNNEL_PROTOCOL = "denoclaw.tunnel.v1";
 export const TUNNEL_IDLE_TIMEOUT_SECONDS = 30;
@@ -85,34 +86,48 @@ export function assertTunnelRegisterMessage(
   value: unknown,
 ): TunnelRegisterMessage {
   if (!isRecord(value) || value.type !== "register") {
-    throw new Error("Tunnel registration message must have type 'register'");
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "type", expected: "register" },
+      "Send a message with type 'register'",
+    );
   }
   if (value.tunnelType !== "local" && value.tunnelType !== "instance") {
-    throw new Error(
-      "Tunnel registration message must declare a valid tunnelType",
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "tunnelType", expected: "local | instance" },
+      "Set tunnelType to 'local' or 'instance'",
     );
   }
   if (!isStringArray(value.tools)) {
-    throw new Error(
-      "Tunnel registration message must declare tools as a string array",
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "tools", expected: "string[]" },
+      "Declare tools as a string array",
     );
   }
   if (!isStringArray(value.agents)) {
-    throw new Error(
-      "Tunnel registration message must declare agents as a string array",
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "agents", expected: "string[]" },
+      "Declare agents as a string array",
     );
   }
   if (!isStringArray(value.allowedAgents)) {
-    throw new Error(
-      "Tunnel registration message must declare allowedAgents as a string array",
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "allowedAgents", expected: "string[]" },
+      "Declare allowedAgents as a string array",
     );
   }
   if (
     value.toolPermissions !== undefined &&
     !isToolPermissions(value.toolPermissions)
   ) {
-    throw new Error(
-      "Tunnel registration message must declare toolPermissions as permission arrays",
+    throw new OrchestrationError(
+      "TUNNEL_REGISTER_INVALID",
+      { field: "toolPermissions", expected: "Record<string, SandboxPermission[]>" },
+      "Declare toolPermissions as permission arrays",
     );
   }
   return {
@@ -134,8 +149,10 @@ export function parseTunnelControlMessage(
 
   if (value.type === "registered") {
     if (typeof value.tunnelId !== "string" || value.tunnelId.length === 0) {
-      throw new Error(
-        "Tunnel registered message must include a non-empty tunnelId",
+      throw new OrchestrationError(
+        "TUNNEL_CONTROL_INVALID",
+        { field: "tunnelId", messageType: "registered" },
+        "Include a non-empty tunnelId in the registered message",
       );
     }
     return {
@@ -146,13 +163,17 @@ export function parseTunnelControlMessage(
 
   if (value.type === "session_token") {
     if (typeof value.token !== "string" || value.token.length === 0) {
-      throw new Error(
-        "Tunnel session_token message must include a non-empty token",
+      throw new OrchestrationError(
+        "TUNNEL_CONTROL_INVALID",
+        { field: "token", messageType: "session_token" },
+        "Include a non-empty token in the session_token message",
       );
     }
     if (typeof value.expiresAt !== "string" || value.expiresAt.length === 0) {
-      throw new Error(
-        "Tunnel session_token message must include a non-empty expiresAt",
+      throw new OrchestrationError(
+        "TUNNEL_CONTROL_INVALID",
+        { field: "expiresAt", messageType: "session_token" },
+        "Include a non-empty expiresAt in the session_token message",
       );
     }
     return {

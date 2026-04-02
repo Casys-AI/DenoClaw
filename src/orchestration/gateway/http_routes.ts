@@ -75,7 +75,7 @@ export async function handleGatewayHttp(
   }
 
   if (url.pathname === "/") {
-    return new Response("DenoClaw Gateway");
+    return Response.json({ service: "denoclaw-gateway" });
   }
 
   if (ctx.rateLimiter) {
@@ -111,7 +111,10 @@ export async function handleGatewayHttp(
   const monitoringRoute = await handleGatewayMonitoringRoute(ctx, url);
   if (monitoringRoute) return monitoringRoute;
 
-  return new Response("Not Found", { status: 404 });
+  return Response.json(
+    { error: { code: "NOT_FOUND", recovery: "Check the URL path" } },
+    { status: 404 },
+  );
 }
 
 async function handleGatewayChatRoute(

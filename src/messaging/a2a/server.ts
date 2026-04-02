@@ -325,7 +325,7 @@ export class A2AServer {
       );
     }
 
-    const canceled = await this.store.cancelTask(taskId);
+    const canceled = await this.store.cancel(taskId);
     return Response.json(this.rpcSuccess(rpc.id, canceled));
   }
 

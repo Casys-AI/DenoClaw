@@ -54,16 +54,23 @@ export class WebFetchTool extends BaseTool {
         ? text.slice(0, 10_000) + "\n...(truncated)"
         : text;
 
-      return this.ok(`HTTP ${res.status}\n${truncated}`);
+      return this.ok(JSON.stringify({
+        status: res.status,
+        body: truncated,
+        truncated: text.length > 10_000,
+      }));
     } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes("AbortError") || msg.includes("timed out")) {
+      if (
+        (e instanceof DOMException && e.name === "TimeoutError") ||
+        (e instanceof Error && e.name === "AbortError")
+      ) {
         return this.fail(
           "FETCH_TIMEOUT",
           { url, method },
           "URL took >30s to respond, try again or use a different URL",
         );
       }
+      const msg = e instanceof Error ? e.message : String(e);
       return this.fail(
         "FETCH_FAILED",
         { url, method, message: msg },

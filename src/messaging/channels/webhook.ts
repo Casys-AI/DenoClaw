@@ -49,14 +49,20 @@ export class WebhookChannel extends BaseChannel {
       }
 
       if (req.method !== "POST") {
-        return new Response("Method not allowed", { status: 405 });
+        return Response.json(
+          { error: { code: "METHOD_NOT_ALLOWED", recovery: "Use POST to send messages" } },
+          { status: 405 },
+        );
       }
 
       // Optional secret check
       if (this.config.secret) {
         const auth = req.headers.get("authorization");
         if (auth !== `Bearer ${this.config.secret}`) {
-          return new Response("Unauthorized", { status: 401 });
+          return Response.json(
+            { error: { code: "UNAUTHORIZED", recovery: "Provide a valid Bearer token in the Authorization header" } },
+            { status: 401 },
+          );
         }
       }
 
@@ -101,7 +107,13 @@ export class WebhookChannel extends BaseChannel {
         );
       } catch (e) {
         log.error("Webhook error", e);
-        return Response.json({ error: "Invalid request" }, { status: 400 });
+        return Response.json({
+          error: {
+            code: "WEBHOOK_PARSE_ERROR",
+            context: { cause: e instanceof Error ? e.message : String(e) },
+            recovery: "Send a JSON body with { content, userId }",
+          },
+        }, { status: 400 });
       }
     });
 

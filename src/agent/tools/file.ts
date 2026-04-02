@@ -121,20 +121,20 @@ export class WriteFileTool extends BaseTool {
   }
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    const path = args.path as string;
-    const content = args.content as string;
     const dryRun = args.dry_run !== false; // AX: safe default
 
-    if (!path) {
+    if (typeof args.path !== "string" || !args.path) {
       return this.fail("MISSING_ARG", { arg: "path" }, "Provide a file path");
     }
-    if (content === undefined) {
+    if (typeof args.content !== "string") {
       return this.fail(
         "MISSING_ARG",
         { arg: "content" },
         "Provide content to write",
       );
     }
+    const path = args.path;
+    const content = args.content;
 
     if (this.ctx) {
       const { blocked, resolvedPath, isDeploy } = resolveWorkspaceAccess(
@@ -155,7 +155,7 @@ export class WriteFileTool extends BaseTool {
 
       if (isDeploy && this.ctx.kv) {
         await writeWorkspaceKv(this.ctx.kv, this.ctx.agentId, path, content);
-        return this.ok(`Written ${content.length} chars to ${path}`);
+        return this.ok(JSON.stringify({ path, bytes: content.length }));
       }
 
       return writeTextFileResult(path, resolvedPath, content);

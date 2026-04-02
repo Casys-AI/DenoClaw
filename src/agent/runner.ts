@@ -1,12 +1,29 @@
 import type { AgentResponse } from "./types.ts";
+import type { AgentConfig } from "./types.ts";
 import type { FinalEvent } from "./events.ts";
 import { agentKernel } from "./kernel.ts";
 import type { KernelInput } from "./kernel.ts";
-import type { MiddlewarePipeline } from "./middleware.ts";
+import { MiddlewarePipeline } from "./middleware.ts";
 import type { SessionState } from "./middleware.ts";
 import type { EventStore } from "./event_store.ts";
-import { PrivilegeElevationPause } from "./middlewares/a2a_task.ts";
-import type { Message } from "../shared/types.ts";
+import { InMemoryEventStore } from "./event_store.ts";
+import type { Message, ToolDefinition } from "../shared/types.ts";
+import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
+import type { Task } from "../messaging/a2a/types.ts";
+import { llmMiddleware } from "./middlewares/llm.ts";
+import type { CompleteFn } from "./middlewares/llm.ts";
+import { toolMiddleware } from "./middlewares/tool.ts";
+import type { ExecuteToolFn } from "./middlewares/tool.ts";
+import { memoryMiddleware } from "./middlewares/memory.ts";
+import type { MemoryWriter } from "./middlewares/memory.ts";
+import { observabilityMiddleware } from "./middlewares/observability.ts";
+import type { ObservabilityDeps } from "./middlewares/observability.ts";
+import { contextRefreshMiddleware } from "./middlewares/context_refresh.ts";
+import type { ContextRefreshDeps } from "./middlewares/context_refresh.ts";
+import { a2aTaskMiddleware } from "./middlewares/a2a_task.ts";
+import type { A2ATaskDeps } from "./middlewares/a2a_task.ts";
+
+// ── Runner ───────────────────────────────────────────
 
 interface MemoryReader {
   getMessages(): Message[];
@@ -24,25 +41,17 @@ export class AgentRunner {
     const kernel = agentKernel(input);
     let next = await kernel.next();
 
-    try {
-      while (!next.done) {
-        const event = next.value;
-        await this.eventStore.commit(event);
-        const resolution = await this.pipeline.execute(event, this.session);
-        next = await kernel.next(resolution);
-      }
-
-      const finalEvent = next.value;
-      await this.eventStore.commit(finalEvent);
-      // Pass final event through pipeline (observation for a2a/observability)
-      await this.pipeline.execute(finalEvent, this.session);
-      return this.toAgentResult(finalEvent);
-    } catch (e) {
-      if (e instanceof PrivilegeElevationPause) {
-        return { content: "", finishReason: "privilege_elevation_pause" };
-      }
-      throw e;
+    while (!next.done) {
+      const event = next.value;
+      await this.eventStore.commit(event);
+      const resolution = await this.pipeline.execute(event, this.session);
+      next = await kernel.next(resolution);
     }
+
+    const finalEvent = next.value;
+    await this.eventStore.commit(finalEvent);
+    await this.pipeline.execute(finalEvent, this.session);
+    return this.toAgentResult(finalEvent);
   }
 
   private toAgentResult(event: FinalEvent): AgentResponse {
@@ -52,12 +61,149 @@ export class AgentRunner {
         finishReason: event.finishReason ?? "stop",
       };
     }
-    // Error (max_iterations) — return last assistant message
     const messages = this.memory.getMessages();
     const last = messages.findLast((m) => m.role === "assistant");
     return {
-      content: last?.content ?? "Max iterations reached without a final response.",
+      content: last?.content ??
+        "Max iterations reached without a final response.",
       finishReason: "max_iterations",
     };
   }
+}
+
+// ── Factory return type ──────────────────────────────
+
+export interface RunnerBundle {
+  runner: AgentRunner;
+  session: SessionState;
+  kernelInput: KernelInput;
+}
+
+// ── Factory: Local runner ────────────────────────────
+
+export interface LocalRunnerDeps {
+  agentId: string;
+  sessionId: string;
+  memoryTopics: string[];
+  memoryFiles: string[];
+  memory: MemoryWriter & MemoryReader;
+  complete: CompleteFn;
+  executeTool: ExecuteToolFn;
+  observability: ObservabilityDeps;
+  contextRefresh: ContextRefreshDeps;
+  /** Build context messages using current memoryTopics/memoryFiles from session. */
+  buildMessages: (
+    memoryTopics: string[],
+    memoryFiles: string[],
+  ) => Message[];
+  toolDefinitions: ToolDefinition[];
+  llmConfig: AgentConfig;
+  maxIterations: number;
+}
+
+export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
+  const session: SessionState = {
+    agentId: deps.agentId,
+    sessionId: deps.sessionId,
+    memoryTopics: deps.memoryTopics,
+    memoryFiles: deps.memoryFiles,
+    currentIteration: 0,
+  };
+
+  // getMessages reads session.memoryTopics/memoryFiles so context refreshes
+  // applied by contextRefreshMiddleware are visible on the next iteration.
+  const getMessages = () =>
+    deps.buildMessages(session.memoryTopics, session.memoryFiles);
+
+  const pipeline = new MiddlewarePipeline()
+    .use(observabilityMiddleware(deps.observability))
+    .use(memoryMiddleware(deps.memory))
+    .use(contextRefreshMiddleware(deps.contextRefresh))
+    .use(toolMiddleware(deps.executeTool))
+    .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>
+      deps.complete(getMessages(), model, temp, maxTok, tools)
+    ));
+
+  return {
+    runner: new AgentRunner(
+      pipeline,
+      new InMemoryEventStore(),
+      session,
+      deps.memory,
+    ),
+    session,
+    kernelInput: {
+      getMessages,
+      toolDefinitions: deps.toolDefinitions,
+      llmConfig: deps.llmConfig,
+      maxIterations: deps.maxIterations,
+    },
+  };
+}
+
+// ── Factory: Broker runner ───────────────────────────
+
+export interface BrokerRunnerDeps {
+  agentId: string;
+  canonicalTask: Task;
+  memoryFiles: string[];
+  runtimeGrants?: AgentRuntimeGrant[];
+  memory: MemoryWriter & MemoryReader;
+  complete: CompleteFn;
+  executeTool: ExecuteToolFn;
+  contextRefresh: ContextRefreshDeps;
+  a2aTask: A2ATaskDeps;
+  /** Build context messages using current memoryTopics/memoryFiles from session. */
+  buildMessages: (
+    memoryTopics: string[],
+    memoryFiles: string[],
+  ) => Message[];
+  toolDefinitions: ToolDefinition[];
+  llmConfig: AgentConfig;
+  maxIterations: number;
+}
+
+/**
+ * No observabilityMiddleware in the broker pipeline — the broker runtime
+ * currently has no TraceWriter dependency. Add it here when broker tracing
+ * is implemented.
+ */
+export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
+  const session: SessionState = {
+    agentId: deps.agentId,
+    sessionId: `agent:${deps.canonicalTask.contextId ?? deps.canonicalTask.id}`,
+    memoryTopics: [],
+    memoryFiles: deps.memoryFiles,
+    currentIteration: 0,
+    canonicalTask: deps.canonicalTask,
+    runtimeGrants: deps.runtimeGrants,
+  };
+
+  const getMessages = () =>
+    deps.buildMessages(session.memoryTopics, session.memoryFiles);
+
+  const pipeline = new MiddlewarePipeline()
+    .use(memoryMiddleware(deps.memory))
+    .use(contextRefreshMiddleware(deps.contextRefresh))
+    .use(a2aTaskMiddleware(deps.a2aTask))
+    .use(toolMiddleware(deps.executeTool))
+    .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>
+      deps.complete(getMessages(), model, temp, maxTok, tools)
+    ));
+
+  return {
+    runner: new AgentRunner(
+      pipeline,
+      new InMemoryEventStore(),
+      session,
+      deps.memory,
+    ),
+    session,
+    kernelInput: {
+      getMessages,
+      toolDefinitions: deps.toolDefinitions,
+      llmConfig: deps.llmConfig,
+      maxIterations: deps.maxIterations,
+    },
+  };
 }

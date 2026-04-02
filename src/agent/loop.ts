@@ -37,15 +37,7 @@ import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
-import { AgentRunner } from "./runner.ts";
-import { MiddlewarePipeline } from "./middleware.ts";
-import type { SessionState } from "./middleware.ts";
-import { InMemoryEventStore } from "./event_store.ts";
-import { llmMiddleware } from "./middlewares/llm.ts";
-import { toolMiddleware } from "./middlewares/tool.ts";
-import { memoryMiddleware } from "./middlewares/memory.ts";
-import { observabilityMiddleware } from "./middlewares/observability.ts";
-import { contextRefreshMiddleware } from "./middlewares/context_refresh.ts";
+import { createLocalRunner } from "./runner.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
@@ -218,40 +210,23 @@ export class AgentLoop implements AgentLoopLike {
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
     await this.initialize();
-
-    // Add user message to memory
     await this.memory.addMessage({ role: "user", content: userMessage });
 
-    // Build session state
-    const session: SessionState = {
+    const CHARS_PER_TOKEN = 4;
+    const CONTEXT_RATIO = 4;
+    const maxChars =
+      (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
+
+    const { runner, kernelInput } = createLocalRunner({
       agentId: this.agentId,
       sessionId: this.sessionId,
       memoryTopics: this.memoryTopics,
       memoryFiles: this.memoryFiles,
-      currentIteration: 0,
-    };
-
-    // Build getMessages callback with context building + truncation
-    const CHARS_PER_TOKEN = 4;
-    const CONTEXT_RATIO = 4;
-    const maxChars = (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
-    const getMessages = () => {
-      const raw = this.context.buildContextMessages(
-        this.memory.getMessages(),
-        this.skills.getSkills(),
-        this.tools.getDefinitions(),
-        session.memoryTopics,
-        session.memoryFiles,
-        this.getRuntimeGrants?.() ?? [],
-      );
-      return this.context.truncateContext(raw, maxChars);
-    };
-
-    // Build middleware pipeline
-    // llmMiddleware calls getMessages() fresh so context refreshes (skills/memory)
-    // applied by contextRefreshMiddleware are visible to the LLM.
-    const pipeline = new MiddlewarePipeline()
-      .use(observabilityMiddleware({
+      memory: this.memory,
+      complete: (messages, model, temperature, maxTokens, tools) =>
+        this.providers.complete(messages, model, temperature, maxTokens, tools),
+      executeTool: (name, args) => this.tools.execute(name, args),
+      observability: {
         traceWriter: this.traceWriter,
         agentId: this.agentId,
         sessionId: this.sessionId,
@@ -259,31 +234,29 @@ export class AgentLoop implements AgentLoopLike {
           ...(this.taskId ? { taskId: this.taskId } : {}),
           ...(this.contextId ? { contextId: this.contextId } : {}),
         },
-      }))
-      .use(memoryMiddleware(this.memory))
-      .use(contextRefreshMiddleware({
+      },
+      contextRefresh: {
         skills: this.skills,
         memory: this.memory,
         refreshMemoryFiles: () => this.refreshMemoryFiles(),
-      }))
-      .use(toolMiddleware((name, args) => this.tools.execute(name, args)))
-      .use(llmMiddleware((_messages, model, temperature, maxTokens, tools) =>
-        this.providers.complete(getMessages(), model, temperature, maxTokens, tools)
-      ));
-
-    const runner = new AgentRunner(
-      pipeline,
-      new InMemoryEventStore(),
-      session,
-      this.memory,
-    );
-
-    return await runner.run({
-      getMessages,
+      },
+      buildMessages: (memoryTopics, memoryFiles) => {
+        const raw = this.context.buildContextMessages(
+          this.memory.getMessages(),
+          this.skills.getSkills(),
+          this.tools.getDefinitions(),
+          memoryTopics,
+          memoryFiles,
+          this.getRuntimeGrants?.() ?? [],
+        );
+        return this.context.truncateContext(raw, maxChars);
+      },
       toolDefinitions: this.tools.getDefinitions(),
       llmConfig: this.config,
       maxIterations: this.maxIterations,
     });
+
+    return await runner.run(kernelInput);
   }
 
   getMemory(): MemoryPort {

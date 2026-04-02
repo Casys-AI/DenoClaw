@@ -18,7 +18,7 @@ Add an `EmbedderPort` abstraction for DI (Ollama local, OpenAI deploy).
 | Mastra integration | `MastraMemory implements MemoryPort` | Production impl, Mastra handles threads + vector |
 | Kernel getMessages | Async (`Promise<Message[]>`) | Enables DB-backed + vector-enriched context |
 | Message assembly | Moved from kernel to llmMiddleware | Fixes stale messages permanently |
-| Embedder | `EmbedderPort` with Ollama + OpenAI impls | Deno Deploy compat (no FFI), configurable |
+| Embedder | `EmbedderPort` — Mastra native local, Ollama cloud / OpenAI for deploy | FFI works locally (fastembed), HTTP for Deploy (no FFI) |
 | Postgres | Same instance as analytics (sub-project A) | Single DB, Mastra PgStore + PgVector |
 | Legacy Memory/KvdexMemory | Kept, adapted to async | Backward compat for local dev without Postgres |
 
@@ -33,8 +33,9 @@ MemoryPort (async interface)
 
 EmbedderPort (interface)
     │
-    ├── OllamaEmbedder ── HTTP /api/embeddings (local)
-    ├── OpenAIEmbedder ── HTTP /v1/embeddings (deploy)
+    ├── MastraEmbedder ── @mastra/fastembed (local, FFI/ONNX)
+    ├── OllamaEmbedder ── HTTP /api/embeddings (cloud Ollama instance)
+    ├── OpenAIEmbedder ── HTTP /v1/embeddings (cloud)
     └── NoopEmbedder ── (tests, returns zero vectors)
 
 Kernel ─yield→ LlmRequestEvent (no messages) ─pipeline→ llmMiddleware
@@ -340,17 +341,45 @@ export interface EmbedderPort {
 }
 ```
 
-### OllamaEmbedder
+### MastraEmbedder (local default)
+
+```typescript
+// src/agent/embedders/mastra.ts
+// Uses @mastra/fastembed — local ONNX inference, no external service needed.
+// Requires FFI (works on local Deno, NOT on Deno Deploy).
+
+import { fastembed } from "@mastra/fastembed";
+
+export class MastraEmbedder implements EmbedderPort {
+  readonly dimension = 384;
+  readonly modelName = "fastembed";
+
+  async embed(text: string): Promise<number[]> {
+    const result = await fastembed.embed([text]);
+    return result.embeddings[0];
+  }
+
+  async embedBatch(texts: string[]): Promise<number[][]> {
+    const result = await fastembed.embed(texts);
+    return result.embeddings;
+  }
+}
+```
+
+### OllamaEmbedder (cloud)
 
 ```typescript
 // src/agent/embedders/ollama.ts
+// Connects to a cloud-hosted Ollama instance via HTTP.
+// Use for Deno Deploy or any environment without FFI.
+// API: POST /api/embed — input: string | string[], response: { embeddings: number[][] }
 
 export class OllamaEmbedder implements EmbedderPort {
   readonly dimension: number;
   readonly modelName: string;
 
   constructor(
-    private baseUrl = "http://localhost:11434",
+    private baseUrl: string,  // e.g. "https://ollama.myinfra.com"
     model = "nomic-embed-text",
     dimension = 768,
   ) {
@@ -359,26 +388,34 @@ export class OllamaEmbedder implements EmbedderPort {
   }
 
   async embed(text: string): Promise<number[]> {
-    const res = await fetch(`${this.baseUrl}/api/embeddings`, {
+    const res = await fetch(`${this.baseUrl}/api/embed`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: this.modelName, prompt: text }),
+      body: JSON.stringify({ model: this.modelName, input: text }),
     });
     if (!res.ok) throw new Error(`Ollama embed failed: ${res.status}`);
     const body = await res.json();
-    return body.embedding;
+    return body.embeddings[0];
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {
-    return Promise.all(texts.map((t) => this.embed(t)));
+    const res = await fetch(`${this.baseUrl}/api/embed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: this.modelName, input: texts }),
+    });
+    if (!res.ok) throw new Error(`Ollama embed batch failed: ${res.status}`);
+    const body = await res.json();
+    return body.embeddings;
   }
 }
 ```
 
-### OpenAIEmbedder
+### OpenAIEmbedder (cloud)
 
 ```typescript
 // src/agent/embedders/openai.ts
+// Standard OpenAI embeddings API. Alternative to cloud Ollama.
 
 export class OpenAIEmbedder implements EmbedderPort {
   readonly dimension = 1536;
@@ -560,11 +597,12 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
 # Mastra memory (opt-in — falls back to KV if absent)
 DATABASE_URL=postgresql://denoclaw:denoclaw@localhost:5432/denoclaw
 
-# Embedder (opt-in — no vector search if absent)
-EMBEDDER_PROVIDER=ollama          # or "openai"
-EMBEDDER_MODEL=nomic-embed-text   # or "text-embedding-3-small"
-OLLAMA_URL=http://localhost:11434 # for ollama embedder
-OPENAI_API_KEY=sk-...            # for openai embedder
+# Embedder (opt-in — defaults to fastembed local if DATABASE_URL is set)
+# EMBEDDER_PROVIDER=fastembed     # local default (FFI/ONNX, no external service)
+# EMBEDDER_PROVIDER=ollama        # cloud Ollama instance (for Deploy)
+# EMBEDDER_PROVIDER=openai        # OpenAI API (for Deploy)
+# OLLAMA_URL=https://ollama.myinfra.com  # required for ollama provider
+# OPENAI_API_KEY=sk-...                  # required for openai provider
 ```
 
 ### Factory selection
@@ -584,14 +622,19 @@ function createMemory(agentId: string, sessionId: string): MemoryPort {
 }
 
 function createEmbedder(): EmbedderPort {
-  const provider = Deno.env.get("EMBEDDER_PROVIDER") ?? "ollama";
-  if (provider === "openai") {
-    return new OpenAIEmbedder(Deno.env.get("OPENAI_API_KEY")!);
+  const provider = Deno.env.get("EMBEDDER_PROVIDER") ?? "fastembed";
+  switch (provider) {
+    case "ollama":
+      return new OllamaEmbedder(
+        Deno.env.get("OLLAMA_URL")!,
+        Deno.env.get("EMBEDDER_MODEL"),
+      );
+    case "openai":
+      return new OpenAIEmbedder(Deno.env.get("OPENAI_API_KEY")!);
+    default:
+      // Local: Mastra fastembed (ONNX, no external service)
+      return new MastraEmbedder();
   }
-  return new OllamaEmbedder(
-    Deno.env.get("OLLAMA_URL"),
-    Deno.env.get("EMBEDDER_MODEL"),
-  );
 }
 ```
 
@@ -602,8 +645,9 @@ function createEmbedder(): EmbedderPort {
 | `src/agent/memory_mastra.ts` | MastraMemory implements MemoryPort |
 | `src/agent/memory_mastra_test.ts` | Tests with mock Mastra |
 | `src/agent/embedder_port.ts` | EmbedderPort interface |
-| `src/agent/embedders/ollama.ts` | OllamaEmbedder |
-| `src/agent/embedders/openai.ts` | OpenAIEmbedder |
+| `src/agent/embedders/mastra.ts` | MastraEmbedder (local default, fastembed) |
+| `src/agent/embedders/ollama.ts` | OllamaEmbedder (cloud Ollama) |
+| `src/agent/embedders/openai.ts` | OpenAIEmbedder (cloud) |
 | `src/agent/embedders/noop.ts` | NoopEmbedder (tests) |
 | `src/agent/embedders/ollama_test.ts` | Test with mock HTTP |
 | `src/agent/memory_factory.ts` | createMemory() + createEmbedder() |

@@ -15,6 +15,7 @@ import {
   createDirectChannelRoutePlan,
 } from "../channel_routing/types.ts";
 import { createSSEResponse, listCronJobs } from "../monitoring.ts";
+import { handleGatewayAnalyticsRoute } from "../gateway/analytics_routes.ts";
 import type { TunnelRegistry } from "./tunnel_registry.ts";
 import type { BrokerAgentRegistry } from "./agent_registry.ts";
 import {
@@ -273,6 +274,9 @@ export async function handleBrokerHttp(
       );
     }
   }
+
+  const analyticsResponse = await handleGatewayAnalyticsRoute({}, url);
+  if (analyticsResponse) return analyticsResponse;
 
   const federationResponse = await handleBrokerFederationHttpRoute(
     ctx,

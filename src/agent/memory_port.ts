@@ -10,23 +10,26 @@ export interface LongTermFact {
 
 /**
  * Agent memory access port (DDD).
- * Two facets: conversations (session-scoped) + long-term facts (agent-scoped).
- * getMessages() and getRecentMessages() are synchronous (in-memory cache).
+ * Two facets: conversations (session-scoped, async) + long-term facts (agent-scoped).
+ * All read methods are async to allow remote/KV-backed implementations.
  */
 export interface MemoryPort {
   load(): Promise<void>;
   close(): void;
 
-  // Conversations
+  // Conversations (async)
   addMessage(message: Message): Promise<void>;
-  getMessages(): Message[];
-  getRecentMessages(count: number): Message[];
+  getMessages(): Promise<Message[]>;
+  getRecentMessages(count: number): Promise<Message[]>;
   clear(): Promise<void>;
   readonly count: number;
 
-  // Long-term memory
+  // Semantic search
+  semanticRecall(query: string, topK?: number): Promise<Message[]>;
+
+  // Long-term facts
   remember(fact: Omit<LongTermFact, "timestamp">): Promise<void>;
-  recall(topic: string, limit?: number): Promise<LongTermFact[]>;
+  recallTopic(topic: string, limit?: number): Promise<LongTermFact[]>;
   listTopics(): Promise<string[]>;
   forgetTopic(topic: string): Promise<void>;
 }

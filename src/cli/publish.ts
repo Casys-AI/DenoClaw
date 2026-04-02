@@ -130,7 +130,7 @@ export async function publishAgents(
         agentsToPublish.map(([n]) => n).join(", ")
       }`,
     );
-    if (!await confirm("Publish all to Deno Deploy?")) return;
+    if (!options.force && !await confirm("Publish all to Deno Deploy?")) return;
   }
 
   const headers = createDeployApiHeaders(token);

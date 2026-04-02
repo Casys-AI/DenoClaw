@@ -60,6 +60,7 @@ export async function handleWorkerPeerDeliverRequest(
       requestId: msg.requestId,
       content: "Worker not initialized",
       error: true,
+      errorCode: "WORKER_NOT_INITIALIZED",
     });
     return;
   }
@@ -104,6 +105,7 @@ export async function handleWorkerPeerDeliverRequest(
       requestId: msg.requestId,
       content: errMsg,
       error: true,
+      errorCode: "PEER_TASK_FAILED",
     });
   } finally {
     deps.taskEvents.emitTaskCompleted(msg.requestId);

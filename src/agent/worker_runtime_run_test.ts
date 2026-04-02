@@ -37,6 +37,7 @@ Deno.test("handleWorkerRunRequest returns WORKER_NOT_INITIALIZED before executio
       requestId: "req-1",
       code: "WORKER_NOT_INITIALIZED",
       message: "Worker has not received init message",
+      recovery: "Ensure the worker receives an init message before run requests",
     },
   ]);
 });

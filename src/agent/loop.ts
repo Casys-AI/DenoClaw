@@ -7,6 +7,7 @@ import type {
 import type { SandboxConfig } from "../shared/types.ts";
 import type { ProvidersConfig } from "../llm/types.ts";
 import { ProviderManager } from "../llm/manager.ts";
+import { log } from "../shared/log.ts";
 import { createSandboxBackend } from "./tools/backends/factory.ts";
 
 /** Minimal Config projection required by AgentLoop — no dependency on config/. */
@@ -120,6 +121,12 @@ export class AgentLoop implements AgentLoopLike {
     }
     this.memory = deps.memory;
     this.tools = deps?.tools ?? new ToolRegistry();
+    if (!deps?.agentId) {
+      log.warn(
+        "AgentLoop: agentId not provided, falling back to sessionId — this may cause identity mismatches",
+        { sessionId },
+      );
+    }
     this.agentId = deps?.agentId ?? sessionId;
     this.sessionId = sessionId;
     this.workspaceDir = deps?.workspaceDir;

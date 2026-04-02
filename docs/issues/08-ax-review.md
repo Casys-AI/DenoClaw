@@ -50,12 +50,9 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-03 — Tools: `send_to_agent` has no `dry_run` guard
 
+- **Status:** Resolved on 2026-04-02. `dry_run` added (default `true`), returns preview.
 - **Principle:** AX#2 Safe Defaults
 - **File:** `src/agent/tools/send_to_agent.ts`
-- **Impact:** Dispatching to a peer agent is a side-effectful operation with no
-  preview mode. An uncertain agent fires live with no undo.
-- **Fix:** Add `dry_run?: boolean` (default `true`). Return
-  `{ would_send_to: agentId, message }` without invoking `sendFn`.
 
 ### AX-04 — `tunnel_protocol.ts`: 8 raw `throw new Error` at the WebSocket boundary
 
@@ -86,34 +83,23 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-08 — `worker_protocol.ts`: `run_error` missing `context`/`recovery` fields
 
+- **Status:** Resolved on 2026-04-02. Added `context?` and `recovery?` to `run_error`
+  type. All 3 error paths in `worker_runtime_run.ts` now populate `recovery`.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/agent/worker_protocol.ts:146`, `src/agent/worker_runtime_run.ts:26,77,85`
-- **Impact:** The `run_error` message has `{ code, message }` but no `context` or
-  `recovery`. This is inconsistent with `ToolResult.error` shape used everywhere
-  else. `WorkerPoolRequestTracker` wraps it with hardcoded
-  `recovery: "Check agent logs"` — not actionable.
-- **Fix:** Add `context?: Record<string, unknown>` and `recovery?: string` to the
-  `run_error` message type. Populate in `worker_runtime_run.ts`.
+- **File:** `src/agent/worker_protocol.ts`, `src/agent/worker_runtime_run.ts`
 
 ### AX-09 — `peer_delivery.ts`: peer error responses are bare strings
 
+- **Status:** Resolved on 2026-04-02. Added `errorCode?` to `peer_result` type.
+  Set `WORKER_NOT_INITIALIZED` / `PEER_TASK_FAILED` on both error paths.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/agent/worker_runtime_peer_delivery.ts:58-63,92-107`
-- **Impact:** `peer_result` error carries `{ content: "Worker not initialized", error: true }`.
-  No `code` field. Receiving agent cannot distinguish initialization failure from
-  task crash or permission denial.
-- **Fix:** Add `errorCode?: string` to `peer_result`. Set
-  `"WORKER_NOT_INITIALIZED"` / `"PEER_TASK_FAILED"` explicitly.
+- **File:** `src/agent/worker_runtime_peer_delivery.ts`
 
 ### AX-10 — `loop.ts`: `agentId` silently falls back to `sessionId`
 
+- **Status:** Resolved on 2026-04-02. Added `log.warn` when fallback is used.
 - **Principle:** AX#7 Explicit Over Implicit
-- **File:** `src/agent/loop.ts:116`
-- **Impact:** `this.agentId = deps?.agentId ?? sessionId`. These are distinct
-  semantic identifiers. The silent substitution causes wrong identity in
-  observability traces, KV namespace keys, and peer routing.
-- **Fix:** Require `deps.agentId` explicitly, or at minimum `log.warn` when
-  the fallback is used.
+- **File:** `src/agent/loop.ts`
 
 ### AX-11 — Missing `recovery` on 9+ monitoring/gateway HTTP error responses
 
@@ -408,14 +394,11 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ## Resolution Progress
 
-Resolved on 2026-04-02: **18 issues** (AX-01, 02, 04, 05, 06, 07, 11, 12, 13,
-25, 27, 28, 34, 35, 39, 45 + tests updated).
+Resolved on 2026-04-02: **22 issues** (AX-01, 02, 03, 04, 05, 06, 07, 08, 09,
+10, 11, 12, 13, 25, 27, 28, 34, 35, 39, 45 + tests updated).
 
 ### Remaining — P1 (AX compliance)
 
-- **AX-03** — `send_to_agent` dry_run
-- **AX-08/09** — Worker protocol error structure
-- **AX-10** — Explicit `agentId` requirement in loop
 - **AX-14/15** — A2A client/server error mapping + validation
 
 ### Remaining — P2 (Hardening)

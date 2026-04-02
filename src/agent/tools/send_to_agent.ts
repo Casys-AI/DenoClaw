@@ -58,6 +58,11 @@ export class SendToAgentTool extends BaseTool {
               description:
                 "The message/instruction to send to the target agent",
             },
+            dry_run: {
+              type: "boolean",
+              description:
+                "Preview the send without executing it (default: true)",
+            },
           },
           required: ["agent_id", "message"],
         },
@@ -82,6 +87,14 @@ export class SendToAgentTool extends BaseTool {
         { field: "message" },
         "Provide a non-empty message string",
       );
+    }
+
+    if (args.dry_run !== false) {
+      return this.ok(JSON.stringify({
+        dry_run: true,
+        would_send_to: agentId,
+        message_preview: message.slice(0, 200),
+      }));
     }
 
     try {

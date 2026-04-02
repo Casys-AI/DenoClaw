@@ -51,6 +51,7 @@ Deno.test("handleWorkerPeerDeliverRequest rejects uninitialized workers", async 
     requestId: "peer-1",
     content: "Worker not initialized",
     error: true,
+    errorCode: "WORKER_NOT_INITIALIZED",
   });
 });
 

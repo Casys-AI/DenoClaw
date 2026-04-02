@@ -27,6 +27,7 @@ export async function handleWorkerRunRequest(
       requestId: msg.requestId,
       code: "WORKER_NOT_INITIALIZED",
       message: "Worker has not received init message",
+      recovery: "Ensure the worker receives an init message before run requests",
     });
     return;
   }
@@ -78,6 +79,7 @@ export async function handleWorkerRunRequest(
       requestId: msg.requestId,
       code: result.error?.code ?? "AGENT_ERROR",
       message: result.error?.message ?? "Unknown error",
+      recovery: "Check agent configuration and LLM provider availability",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -86,6 +88,7 @@ export async function handleWorkerRunRequest(
       requestId: msg.requestId,
       code: "AGENT_ERROR",
       message,
+      recovery: "Check agent logs and retry the request",
     });
   } finally {
     deps.taskEvents.emitTaskCompleted(msg.requestId);

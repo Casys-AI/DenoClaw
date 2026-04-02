@@ -143,7 +143,14 @@ export type WorkerResponse =
     finishReason?: string;
   }
   // execution: local run error returned to main process
-  | { type: "run_error"; requestId: string; code: string; message: string }
+  | {
+    type: "run_error";
+    requestId: string;
+    code: string;
+    message: string;
+    context?: Record<string, unknown>;
+    recovery?: string;
+  }
   // execution: source worker asks main process to route a peer request
   | {
     type: "peer_send";
@@ -160,6 +167,7 @@ export type WorkerResponse =
     requestId: string;
     content: string;
     error?: boolean;
+    errorCode?: string;
   }
   // execution: worker emits task-level observability to main process
   | {

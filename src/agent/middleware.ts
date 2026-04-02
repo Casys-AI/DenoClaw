@@ -5,6 +5,7 @@ import type { Task } from "../messaging/a2a/types.ts";
 export interface SessionState {
   agentId: string;
   sessionId: string;
+  taskId?: string;
   memoryTopics: string[];
   memoryFiles: string[];
   canonicalTask?: Task;

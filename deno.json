@@ -11,6 +11,10 @@
     "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
     "dashboard": "deno run -A npm:vite --config vite.config.ts",
     "dashboard:build": "deno run -A npm:vite build --config vite.config.ts",
+    "db:generate": "deno run -A npm:prisma generate",
+    "db:push": "deno run -A npm:prisma db push",
+    "db:migrate": "deno run -A npm:prisma migrate dev",
+    "db:studio": "deno run -A npm:prisma studio",
     "test": "deno test --unstable-kv --unstable-cron --allow-all --env src/",
     "test:all": "deno test --unstable-kv --unstable-cron --allow-all --env src/ tests/",
     "test:unit": "deno test --unstable-kv --allow-all src/",
@@ -45,7 +49,9 @@
     "vite": "npm:vite@^7",
     "@tailwindcss/vite": "npm:@tailwindcss/vite@^4",
     "tailwindcss": "npm:tailwindcss@^4",
-    "daisyui": "npm:daisyui@^5.5.19"
+    "daisyui": "npm:daisyui@^5.5.19",
+    "@prisma/client": "npm:@prisma/client@^7",
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7"
   },
   "compilerOptions": {
     "strict": true,
@@ -55,9 +61,8 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
-  "unstable": ["kv", "cron"],
-  "deploy": {
-    "org": "casys",
-    "app": "denoclaw-broker"
-  }
+  "lint": {
+    "exclude": ["src/db/generated/"]
+  },
+  "unstable": ["kv", "cron"]
 }

@@ -50,6 +50,10 @@ import { BrokerSandboxManager } from "./sandbox_manager.ts";
 import type { BrokerCronManager } from "./cron_manager.ts";
 import type { ChannelRoutePlan } from "../channel_routing/types.ts";
 import { ensureAgentListed } from "../monitoring.ts";
+import {
+  recordTaskResult as recordAnalyticsTaskResult,
+  recordTaskSubmission as recordAnalyticsTaskSubmission,
+} from "./analytics_hooks.ts";
 
 /**
  * Broker server — runs on Deno Deploy.
@@ -348,7 +352,15 @@ export class BrokerServer {
     fromAgentId: string,
     payload: BrokerTaskSubmitPayload,
   ): Promise<Task> {
-    return await this.taskDispatcher.submitAgentTask(fromAgentId, payload);
+    const task = await this.taskDispatcher.submitAgentTask(fromAgentId, payload);
+    recordAnalyticsTaskSubmission({
+      taskId: task.id,
+      contextId: task.contextId,
+      fromAgent: fromAgentId,
+      targetAgent: payload.targetAgent,
+      submittedAt: new Date(task.status.timestamp),
+    });
+    return task;
   }
 
   async submitChannelMessage(
@@ -358,7 +370,18 @@ export class BrokerServer {
       taskId: string;
     },
   ): Promise<Task> {
-    return await this.taskDispatcher.submitChannelTask(message, input);
+    const task = await this.taskDispatcher.submitChannelTask(message, input);
+    const brokerMetadata = this.taskPersistence.getTaskBrokerMetadata(task);
+    if (brokerMetadata.submittedBy && brokerMetadata.targetAgent) {
+      recordAnalyticsTaskSubmission({
+        taskId: task.id,
+        contextId: task.contextId,
+        fromAgent: brokerMetadata.submittedBy,
+        targetAgent: brokerMetadata.targetAgent,
+        submittedAt: new Date(task.status.timestamp),
+      });
+    }
+    return task;
   }
 
   async getTask(payload: BrokerTaskQueryPayload): Promise<Task | null> {
@@ -387,7 +410,19 @@ export class BrokerServer {
     fromAgentId: string,
     payload: BrokerTaskResultPayload,
   ): Promise<Task | null> {
-    return await this.taskDispatcher.recordTaskResult(fromAgentId, payload);
+    const task = await this.taskDispatcher.recordTaskResult(fromAgentId, payload);
+    if (task) {
+      const brokerMetadata = this.taskPersistence.getTaskBrokerMetadata(task);
+      recordAnalyticsTaskResult({
+        taskId: task.id,
+        contextId: task.contextId,
+        fromAgent: brokerMetadata.submittedBy ?? "broker",
+        targetAgent: brokerMetadata.targetAgent ?? fromAgentId,
+        state: task.status.state,
+        changedAt: new Date(task.status.timestamp),
+      });
+    }
+    return task;
   }
 
   // ── Federation control-plane ───────────────────────────

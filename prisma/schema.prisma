@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/db/generated"
+  runtime  = "deno"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model LlmCall {
+  id               String   @id @default(uuid())
+  agentId          String
+  sessionId        String?
+  taskId           String?
+  model            String
+  provider         String
+  promptTokens     Int
+  completionTokens Int
+  latencyMs        Int
+  createdAt        DateTime @default(now())
+
+  @@index([agentId])
+  @@index([model])
+  @@index([createdAt])
+}
+
+model ToolExecution {
+  id         String   @id @default(uuid())
+  agentId    String
+  sessionId  String?
+  taskId     String?
+  toolName   String
+  success    Boolean
+  durationMs Int
+  errorCode  String?
+  createdAt  DateTime @default(now())
+
+  @@index([agentId, toolName])
+  @@index([createdAt])
+}
+
+model Conversation {
+  id         String   @id @default(uuid())
+  agentId    String
+  sessionId  String
+  taskId     String?
+  role       String
+  content    String
+  toolName   String?
+  toolCallId String?
+  createdAt  DateTime @default(now())
+
+  @@index([agentId, sessionId])
+  @@index([createdAt])
+}
+
+model AgentTask {
+  id          String    @id
+  contextId   String?
+  fromAgent   String
+  targetAgent String
+  state       String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([fromAgent])
+  @@index([targetAgent])
+  @@index([state])
+  @@index([createdAt])
+}
+
+model DailyMetrics {
+  id             String   @id @default(uuid())
+  agentId        String
+  date           DateTime @db.Date
+  totalLlmCalls  Int      @default(0)
+  totalTokens    Int      @default(0)
+  totalToolCalls Int      @default(0)
+  totalTasks     Int      @default(0)
+  errorCount     Int      @default(0)
+  avgLatencyMs   Int      @default(0)
+
+  @@unique([agentId, date])
+  @@index([date])
+}

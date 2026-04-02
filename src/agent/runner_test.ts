@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { AgentRunner } from "./runner.ts";
+import { AgentRunner, createLocalRunner } from "./runner.ts";
 import { MiddlewarePipeline } from "./middleware.ts";
 import type { SessionState } from "./middleware.ts";
 import { InMemoryEventStore } from "./event_store.ts";
@@ -144,4 +144,39 @@ Deno.test("AgentRunner returns last assistant message on max_iterations", async 
 
   assertEquals(result.finishReason, "max_iterations");
   assertEquals(result.content, "still thinking...");
+});
+
+Deno.test("createLocalRunner works when analytics are explicitly disabled", async () => {
+  const memory = new StubMemory();
+  const { runner, kernelInput } = createLocalRunner({
+    agentId: "agent-1",
+    sessionId: "sess-1",
+    memoryTopics: [],
+    memoryFiles: [],
+    memory,
+    complete: () => Promise.resolve({
+      content: "Hello from local runner",
+      finishReason: "stop",
+    }),
+    executeTool: () => Promise.resolve({ success: true, output: "unused" }),
+    observability: {
+      traceWriter: null,
+      agentId: "agent-1",
+      sessionId: "sess-1",
+      correlationIds: {},
+    },
+    contextRefresh: {
+      skills: { reload: () => Promise.resolve() },
+      memory: { listTopics: () => Promise.resolve([]) },
+      refreshMemoryFiles: undefined,
+    },
+    analytics: null,
+    buildMessages: () => [{ role: "user", content: "hi" }],
+    toolDefinitions: [],
+    llmConfig: { model: "test" },
+    maxIterations: 3,
+  });
+
+  const result = await runner.run(kernelInput);
+  assertEquals(result.content, "Hello from local runner");
 });

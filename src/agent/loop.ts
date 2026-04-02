@@ -222,6 +222,7 @@ export class AgentLoop implements AgentLoopLike {
     const { runner, kernelInput } = createLocalRunner({
       agentId: this.agentId,
       sessionId: this.sessionId,
+      taskId: this.taskId,
       memoryTopics: this.memoryTopics,
       memoryFiles: this.memoryFiles,
       memory: this.memory,

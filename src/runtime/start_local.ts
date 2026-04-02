@@ -22,6 +22,7 @@ import { log } from "../shared/log.ts";
 import { createDashboardHandler } from "../../web/mod.ts";
 import type { ChannelMessage } from "../messaging/types.ts";
 import type { BrokerCronJob } from "../orchestration/broker/cron_types.ts";
+import { registerAnalyticsAggregationCron } from "../db/aggregate.ts";
 
 export async function startLocalGateway(config: Config): Promise<void> {
   const agentIds = Object.keys(getResolvedAgentRegistry(config));
@@ -37,6 +38,7 @@ export async function startLocalGateway(config: Config): Promise<void> {
     kv = await Deno.openKv("./data/shared.db");
   }
   const metrics = new MetricsCollector(kv);
+  registerAnalyticsAggregationCron();
 
   const workerPool = new WorkerPool(config, {
     onWorkerReady: (id) => {

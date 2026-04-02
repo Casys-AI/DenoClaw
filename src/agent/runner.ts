@@ -24,6 +24,9 @@ import { contextRefreshMiddleware } from "./middlewares/context_refresh.ts";
 import type { ContextRefreshDeps } from "./middlewares/context_refresh.ts";
 import { a2aTaskMiddleware } from "./middlewares/a2a_task.ts";
 import type { A2ATaskDeps } from "./middlewares/a2a_task.ts";
+import { analyticsMiddleware } from "./middlewares/analytics.ts";
+import type { AnalyticsStore } from "../db/analytics.ts";
+import { resolveAnalyticsStore } from "../db/analytics.ts";
 
 // ── Runner ───────────────────────────────────────────
 
@@ -110,6 +113,7 @@ export interface RunnerBundle {
 export interface LocalRunnerDeps {
   agentId: string;
   sessionId: string;
+  taskId?: string;
   memoryTopics: string[];
   memoryFiles: string[];
   memory: MemoryWriter & MemoryReader;
@@ -117,6 +121,7 @@ export interface LocalRunnerDeps {
   executeTool: ExecuteToolFn;
   observability: ObservabilityDeps;
   contextRefresh: ContextRefreshDeps;
+  analytics?: AnalyticsStore | null;
   /** Build context messages using current memoryTopics/memoryFiles from session. */
   buildMessages: (
     memoryTopics: string[],
@@ -131,9 +136,11 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
   const session: SessionState = {
     agentId: deps.agentId,
     sessionId: deps.sessionId,
+    taskId: deps.taskId,
     memoryTopics: deps.memoryTopics,
     memoryFiles: deps.memoryFiles,
   };
+  const analytics = resolveAnalyticsStore(deps.analytics);
 
   // getMessages reads session.memoryTopics/memoryFiles so context refreshes
   // applied by contextRefreshMiddleware are visible on the next iteration.
@@ -143,7 +150,13 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
   const pipeline = new MiddlewarePipeline()
     .use(observabilityMiddleware(deps.observability))
     .use(memoryMiddleware(deps.memory))
-    .use(contextRefreshMiddleware(deps.contextRefresh))
+    .use(contextRefreshMiddleware(deps.contextRefresh));
+
+  if (analytics) {
+    pipeline.use(analyticsMiddleware({ analytics }));
+  }
+
+  pipeline
     .use(toolMiddleware(deps.executeTool))
     .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>
       deps.complete(getMessages(), model, temp, maxTok, tools)
@@ -178,6 +191,7 @@ export interface BrokerRunnerDeps {
   executeTool: ExecuteToolFn;
   contextRefresh: ContextRefreshDeps;
   a2aTask: A2ATaskDeps;
+  analytics?: AnalyticsStore | null;
   /** Build context messages using current memoryTopics/memoryFiles from session. */
   buildMessages: (
     memoryTopics: string[],
@@ -197,18 +211,26 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
   const session: SessionState = {
     agentId: deps.agentId,
     sessionId: `agent:${deps.canonicalTask.contextId ?? deps.canonicalTask.id}`,
+    taskId: deps.canonicalTask.id,
     memoryTopics: [],
     memoryFiles: deps.memoryFiles,
     canonicalTask: deps.canonicalTask,
     runtimeGrants: deps.runtimeGrants,
   };
+  const analytics = resolveAnalyticsStore(deps.analytics);
 
   const getMessages = () =>
     deps.buildMessages(session.memoryTopics, session.memoryFiles);
 
   const pipeline = new MiddlewarePipeline()
     .use(memoryMiddleware(deps.memory))
-    .use(contextRefreshMiddleware(deps.contextRefresh))
+    .use(contextRefreshMiddleware(deps.contextRefresh));
+
+  if (analytics) {
+    pipeline.use(analyticsMiddleware({ analytics }));
+  }
+
+  pipeline
     .use(a2aTaskMiddleware(deps.a2aTask))
     .use(toolMiddleware(deps.executeTool))
     .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>

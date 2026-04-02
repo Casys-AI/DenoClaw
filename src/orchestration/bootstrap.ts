@@ -9,6 +9,7 @@ import { DenoSandboxBackend } from "../agent/tools/backends/cloud.ts";
 import { LocalToolExecutionAdapter } from "./adapters/tool_execution_local.ts";
 import { BrokerSandboxManager } from "./broker/sandbox_manager.ts";
 import { BrokerCronManager } from "./broker/cron_manager.ts";
+import { registerAnalyticsAggregationCron } from "../db/aggregate.ts";
 
 export function createBrokerToolExecutionPort(
   _config: Config,
@@ -43,6 +44,7 @@ export async function createBrokerServerDeps(
 ): Promise<BrokerServerDeps> {
   const kv = await Deno.openKv();
   const cronManager = new BrokerCronManager(kv);
+  registerAnalyticsAggregationCron();
   return {
     toolExecution: createBrokerToolExecutionPort(config),
     kv,

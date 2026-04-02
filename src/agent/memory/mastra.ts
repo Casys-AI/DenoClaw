@@ -33,54 +33,90 @@ export interface MastraMemoryConfig {
   workingMemoryTemplate?: string;
 }
 
-interface MastraMessage {
-  id?: string;
+interface MastraMessageV1 {
+  id: string;
   role: string;
-  content: string;
-  name?: string;
-  toolCallId?: string;
-  createdAt?: string;
+  content: string | unknown;
+  createdAt: Date;
+  threadId?: string;
+  resourceId?: string;
+  type: "text" | "tool-call" | "tool-result";
+  toolCallIds?: string[];
+  toolCallArgs?: Record<string, unknown>[];
+  toolNames?: string[];
 }
 
-interface MastraRecallResult {
-  messages: MastraMessage[];
-  totalMessages?: number;
+interface MastraRememberResult {
+  messages: MastraMessageV1[];
+  messagesV2?: unknown[];
+}
+
+interface MastraThread {
+  id: string;
+  resourceId: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  metadata?: Record<string, unknown>;
 }
 
 interface MastraMemoryInstance {
-  recall(opts: Record<string, unknown>): Promise<MastraRecallResult>;
-  saveMessages(opts: { threadId: string; messages: MastraMessage[] }): Promise<void>;
-  getThreadById(opts: { threadId: string }): Promise<unknown | null>;
-  createThread(opts: Record<string, unknown>): Promise<void>;
+  query(opts: {
+    threadId: string;
+    resourceId?: string;
+    selectBy?: {
+      vectorSearchString?: string;
+      last?: number | false;
+    };
+  }): Promise<{ messages: unknown[]; messagesV2?: unknown[] }>;
+  rememberMessages(opts: {
+    threadId: string;
+    resourceId?: string;
+    vectorMessageSearch?: string;
+    config?: Record<string, unknown>;
+  }): Promise<MastraRememberResult>;
+  saveMessages(opts: { messages: MastraMessageV1[] }): Promise<MastraMessageV1[]>;
+  getThreadById(opts: { threadId: string }): Promise<MastraThread | null>;
+  saveThread(opts: { thread: MastraThread }): Promise<MastraThread>;
   deleteThread(threadId: string): Promise<void>;
   getWorkingMemory(opts: { threadId: string }): Promise<string | null>;
   updateWorkingMemory(opts: { threadId: string; workingMemory: string }): Promise<void>;
 }
 
-function toMastraMessage(msg: Message): MastraMessage {
+function toMastraMessage(msg: Message, threadId: string): MastraMessageV1 {
   return {
-    role: msg.role === "tool" ? "tool" : msg.role,
+    id: crypto.randomUUID(),
+    role: msg.role,
     content: msg.content,
-    ...(msg.name ? { name: msg.name } : {}),
-    ...(msg.tool_call_id ? { toolCallId: msg.tool_call_id } : {}),
+    createdAt: new Date(),
+    threadId,
+    resourceId: threadId,
+    type: msg.role === "tool" ? "tool-result" : "text",
+    ...(msg.tool_call_id ? { toolCallIds: [msg.tool_call_id] } : {}),
   };
 }
 
-function fromMastraMessage(msg: MastraMessage): Message {
+function fromMastraMessage(msg: MastraMessageV1): Message {
   return {
     role: msg.role as Message["role"],
     content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-    ...(msg.name ? { name: msg.name } : {}),
-    ...(msg.toolCallId ? { tool_call_id: msg.toolCallId } : {}),
+    ...(msg.toolCallIds?.[0] ? { tool_call_id: msg.toolCallIds[0] } : {}),
   };
 }
 
 function toMastraEmbedder(port: EmbedderPort) {
+  // Return an AI SDK v1 EmbeddingModel-compatible object
   return {
-    embed: async (texts: string[]) => {
-      const embeddings = await port.embedBatch(texts);
+    specificationVersion: "v1" as const,
+    provider: "denoclaw",
+    modelId: port.modelName,
+    maxEmbeddingsPerCall: 100,
+    supportsParallelCalls: false,
+    doEmbed: async ({ values }: { values: string[] }) => {
+      const embeddings = await port.embedBatch(values);
       return { embeddings };
     },
+    // Expose dimension for Mastra vector index creation
     dimensions: port.dimension,
   };
 }
@@ -108,20 +144,28 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
     try {
       const { Memory } = await import("@mastra/memory");
       const { PostgresStore, PgVector } = await import("@mastra/pg");
-      const memoryConfig = {
+      const embedder = toMastraEmbedder(this.config.embedder);
+      // Only enable vector/semantic recall when embedder has a valid positive dimension.
+      // dimension=0 (e.g. NoopEmbedder) means no real embeddings — skip vector store.
+      const hasVector = this.config.embedder.dimension > 0;
+      const semanticRecallConfig = hasVector
+        ? (this.config.semanticRecall ?? { topK: 3, messageRange: 2 })
+        : false;
+      const memoryConfig: Record<string, unknown> = {
         storage: new PostgresStore({ connectionString: this.config.connectionString }),
-        vector: new PgVector({ connectionString: this.config.connectionString }),
-        embedder: toMastraEmbedder(this.config.embedder),
+        embedder,
         options: {
           lastMessages: this.config.lastMessages ?? 50,
-          semanticRecall: this.config.semanticRecall ?? { topK: 3, messageRange: 2 },
+          semanticRecall: semanticRecallConfig,
           workingMemory: {
             enabled: true,
             template: this.config.workingMemoryTemplate ?? DEFAULT_WORKING_MEMORY_TEMPLATE,
           },
-          observationalMemory: true,
         },
       };
+      if (hasVector) {
+        memoryConfig.vector = new PgVector({ connectionString: this.config.connectionString });
+      }
       const instance = new Memory(memoryConfig as unknown as ConstructorParameters<typeof Memory>[0]);
       return instance as unknown as MastraMemoryInstance;
     } catch (e) {
@@ -136,10 +180,19 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
     const mastra = await this.getMastra();
     const existing = await mastra.getThreadById({ threadId: this.threadId });
     if (!existing) {
-      await mastra.createThread({ threadId: this.threadId, resourceId: this.threadId });
+      const now = new Date();
+      await mastra.saveThread({
+        thread: {
+          id: this.threadId,
+          resourceId: this.threadId,
+          title: this.threadId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
     }
     // Initialize count from stored messages
-    const result = await mastra.recall({ threadId: this.threadId });
+    const result = await mastra.rememberMessages({ threadId: this.threadId });
     this.messageCount = result.messages.length;
   }
 
@@ -150,8 +203,7 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
   async addMessage(message: Message): Promise<void> {
     const mastra = await this.getMastra();
     await mastra.saveMessages({
-      threadId: this.threadId,
-      messages: [toMastraMessage(message)],
+      messages: [toMastraMessage(message, this.threadId)],
     });
     this.messageCount++;
     if (message.role === "user") {
@@ -161,17 +213,20 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
 
   async getMessages(): Promise<Message[]> {
     const mastra = await this.getMastra();
-    const result = await mastra.recall({
+    const result = await mastra.rememberMessages({
       threadId: this.threadId,
-      ...(this.lastUserMessage ? { vectorSearchString: this.lastUserMessage } : {}),
+      ...(this.lastUserMessage ? { vectorMessageSearch: this.lastUserMessage } : {}),
     });
     return result.messages.map(fromMastraMessage);
   }
 
   async getRecentMessages(count: number): Promise<Message[]> {
     const mastra = await this.getMastra();
-    const result = await mastra.recall({ threadId: this.threadId, perPage: count });
-    return result.messages.map(fromMastraMessage);
+    const result = await mastra.query({
+      threadId: this.threadId,
+      selectBy: { last: count },
+    });
+    return (result.messages as MastraMessageV1[]).map(fromMastraMessage);
   }
 
   get count(): number {
@@ -182,7 +237,16 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
     try {
       const mastra = await this.getMastra();
       await mastra.deleteThread(this.threadId);
-      await mastra.createThread({ threadId: this.threadId, resourceId: this.threadId });
+      const now = new Date();
+      await mastra.saveThread({
+        thread: {
+          id: this.threadId,
+          resourceId: this.threadId,
+          title: this.threadId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
       this.messageCount = 0;
       this.lastUserMessage = undefined;
     } catch (e) {
@@ -193,12 +257,38 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
 
   async semanticRecall(query: string, topK = 3): Promise<Message[]> {
     const mastra = await this.getMastra();
-    const result = await mastra.recall({
+    const result = await mastra.rememberMessages({
       threadId: this.threadId,
-      vectorSearchString: query,
-      threadConfig: { semanticRecall: { topK, messageRange: 2 } },
+      vectorMessageSearch: query,
+      config: { semanticRecall: { topK, messageRange: 2 } },
     });
     return result.messages.map(fromMastraMessage);
+  }
+
+  async trimMessages(messages: Message[], maxTokens: number): Promise<Message[]> {
+    // Use Mastra's TokenLimiterProcessor for accurate token counting
+    try {
+      const { TokenLimiterProcessor } = await import("@mastra/core/processors");
+      const limiter = new TokenLimiterProcessor({ limit: maxTokens });
+      const mastraMessages = messages.map((m) => toMastraMessage(m, this.threadId));
+      const result = await limiter.processInput(mastraMessages as never);
+      return (result as MastraMessageV1[]).map(fromMastraMessage);
+    } catch {
+      // Fallback: simple character-based trimming if TokenLimiter unavailable
+      const system = messages.filter((m) => m.role === "system");
+      const others = messages.filter((m) => m.role !== "system");
+      const CHARS_PER_TOKEN = 4;
+      const maxChars = maxTokens * CHARS_PER_TOKEN;
+      let used = system.reduce((s, m) => s + m.content.length, 0);
+      if (used >= maxChars) return system;
+      const kept: Message[] = [];
+      for (let i = others.length - 1; i >= 0; i--) {
+        if (used + others[i].content.length > maxChars) break;
+        kept.unshift(others[i]);
+        used += others[i].content.length;
+      }
+      return [...system, ...kept];
+    }
   }
 
   async getWorkingMemory(): Promise<string> {

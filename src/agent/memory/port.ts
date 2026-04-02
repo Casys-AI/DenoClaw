@@ -18,4 +18,7 @@ export interface MemoryPort {
 
   // Semantic search
   semanticRecall(query: string, topK?: number): Promise<Message[]>;
+
+  // Token limiting — trim messages to fit within context window
+  trimMessages(messages: Message[], maxTokens: number): Promise<Message[]>;
 }

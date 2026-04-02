@@ -1,6 +1,7 @@
 import type { AgentResponse } from "./types.ts";
 import type { AgentConfig } from "./types.ts";
-import type { FinalEvent } from "./events.ts";
+import type { ErrorEvent, FinalEvent } from "./events.ts";
+import { createEventFactory } from "./events.ts";
 import { log } from "../shared/log.ts";
 import { agentKernel } from "./kernel.ts";
 import type { KernelInput } from "./kernel.ts";
@@ -42,17 +43,33 @@ export class AgentRunner {
     const kernel = agentKernel(input);
     let next = await kernel.next();
 
-    while (!next.done) {
-      const event = next.value;
-      await this.eventStore.commit(event);
-      const resolution = await this.pipeline.execute(event, this.session);
-      next = await kernel.next(resolution);
-    }
+    try {
+      while (!next.done) {
+        const event = next.value;
+        await this.eventStore.commit(event);
+        const resolution = await this.pipeline.execute(event, this.session);
+        next = await kernel.next(resolution);
+      }
 
-    const finalEvent = next.value;
-    await this.eventStore.commit(finalEvent);
-    await this.pipeline.execute(finalEvent, this.session);
-    return this.toAgentResult(finalEvent);
+      const finalEvent = next.value;
+      await this.eventStore.commit(finalEvent);
+      await this.pipeline.execute(finalEvent, this.session);
+      return this.toAgentResult(finalEvent);
+    } catch (e) {
+      // Commit a synthetic error event for auditing only — do NOT pass
+      // through the pipeline (a2a middleware would double-report task state).
+      // Trace cleanup is handled by observabilityMiddleware's own try/catch.
+      const evt = createEventFactory();
+      await this.eventStore.commit(evt<ErrorEvent>(
+        {
+          type: "error",
+          code: "RUNNER_ERROR",
+          context: { message: e instanceof Error ? e.message : String(e) },
+        },
+        0,
+      )).catch(() => {});
+      throw e;
+    }
   }
 
   private toAgentResult(event: FinalEvent): AgentResponse {
@@ -62,7 +79,13 @@ export class AgentRunner {
         finishReason: event.finishReason ?? "stop",
       };
     }
-    // event.type === "error"
+
+    // Structural errors (misconfigured pipeline) should surface loudly
+    if (event.code === "MISSING_LLM_RESOLUTION" || event.code === "MISSING_TOOL_RESOLUTION") {
+      throw new Error(`Kaku kernel: ${event.code} — ${event.recovery ?? "check pipeline"}`);
+    }
+
+    // Graceful degradation (max_iterations etc.)
     log.warn(`Agent kernel error: ${event.code}${event.recovery ? ` — ${event.recovery}` : ""}`);
     const messages = this.memory.getMessages();
     const last = messages.findLast((m) => m.role === "assistant");

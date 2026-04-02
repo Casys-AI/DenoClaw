@@ -119,6 +119,7 @@ export class MastraMemory implements MemoryPort, WorkingMemoryPort {
             enabled: true,
             template: this.config.workingMemoryTemplate ?? DEFAULT_WORKING_MEMORY_TEMPLATE,
           },
+          observationalMemory: true,
         },
       };
       const instance = new Memory(memoryConfig as unknown as ConstructorParameters<typeof Memory>[0]);

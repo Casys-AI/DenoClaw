@@ -189,12 +189,12 @@ Deno.test({
     });
 
     const tools = loop.getTools();
-    // Our injected stub + memory tool (always registered)
-    assertEquals(tools.size, 2);
+    // Our injected stub only (memory tool removed — Mastra manages memory)
+    assertEquals(tools.size, 1);
     const defs = tools.getDefinitions();
-    assertEquals(defs.length, 2);
+    assertEquals(defs.length, 1);
     const names = defs.map((d) => d.function.name).sort();
-    assertEquals(names, ["memory", "stub"]);
+    assertEquals(names, ["stub"]);
 
     loop.close();
   },
@@ -210,8 +210,8 @@ Deno.test({
     });
 
     const tools = loop.getTools();
-    // 9 built-in tools + memory tool
-    assertEquals(tools.size, 10);
+    // 9 built-in tools (memory tool removed — Mastra manages memory)
+    assertEquals(tools.size, 9);
 
     const names = tools.getDefinitions().map((d) => d.function.name).sort();
     assertEquals(names, [
@@ -220,7 +220,6 @@ Deno.test({
       "disable_cron",
       "enable_cron",
       "list_crons",
-      "memory",
       "read_file",
       "shell",
       "web_fetch",

@@ -35,7 +35,6 @@ import type { WorkspaceContext } from "./tools/file.ts";
 import { WebFetchTool } from "./tools/web.ts";
 import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
-import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
 import { createLocalRunner } from "./runner.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
@@ -139,7 +138,6 @@ export class AgentLoop implements AgentLoopLike {
         new SendToAgentTool(deps.sendToAgent, deps.availablePeers),
       );
     }
-    this.tools.register(new MemoryTool(this.memory));
     if (deps?.sandboxConfig) {
       const backend = createSandboxBackend(deps.sandboxConfig);
       const toolsCfg = {

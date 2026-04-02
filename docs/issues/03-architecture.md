@@ -6,14 +6,11 @@ Review date: 2026-04-01
 
 ## HIGH
 
-### ARCH-01 — `EventStream` island defined but never mounted
-- **Files:** `web/islands/EventStream.tsx`, all routes
-- **Impact:** `AgentStatusGrid` subscribes to signals that EventStream populates, but EventStream is never rendered. Live indicator in NavBar is static CSS with no actual live connection.
-- **Fix:** Mount in `_app.tsx` or remove both EventStream and AgentStatusGrid as dead code
+### ~~ARCH-01~~ — RESOLVED: `EventStream` mounted in `_app.tsx`
+- **Status:** Resolved in code on 2026-04-02.
 
-### ARCH-02 — `AgentStatusGrid` island defined but never used
-- **File:** `web/islands/AgentStatusGrid.tsx`
-- **Fix:** Remove or wire up (depends on ARCH-01)
+### ~~ARCH-02~~ — RESOLVED: `AgentStatusGrid` wired into `overview.tsx`
+- **Status:** Resolved in code on 2026-04-02.
 
 ### ARCH-03 — Two KV namespaces for agent config (drift risk)
 - **Files:** `src/orchestration/agent_store.ts` (`["config", "agents", agentId]`), broker registry (`["agents", agentId, "config"]`)
@@ -37,9 +34,8 @@ Review date: 2026-04-01
 - **File:** `src/messaging/channels/manager.ts:69-75`
 - **Fix:** Require explicit `ChannelAddress` or document limitation
 
-### ARCH-07 — `PageLayout` component defined but never used
-- **File:** `web/components/PageLayout.tsx`
-- **Fix:** Use everywhere or delete
+### ~~ARCH-07~~ — RESOLVED: `PageLayout` deleted (superseded by per-route headings)
+- **Status:** Resolved in code on 2026-04-02.
 
 ### ARCH-08 — Inline fetch calls bypass `api-client.ts` abstractions
 - **Files:** `web/routes/overview.tsx`, `a2a/index.tsx`, `agents/[id].tsx`, `cost.tsx`
@@ -50,9 +46,8 @@ Review date: 2026-04-01
 - **Impact:** Consumers of shared get transitive deps on agent/ and orchestration/
 - **Fix:** Move re-exports out; consumers import from origin domain
 
-### ARCH-10 — Four legacy telemetry shim files still in use
-- **Files:** `src/telemetry/traces.ts`, `trace_types.ts`, `trace_writer.ts`, `trace_reader.ts`
-- **Fix:** Update callers to import from `./traces/mod.ts`; delete shims
+### ~~ARCH-10~~ — PARTIALLY RESOLVED: 3 unused shims deleted (`trace_types.ts`, `trace_writer.ts`, `trace_reader.ts`)
+- **Status:** Partially resolved on 2026-04-02. `traces.ts` shim kept (still actively imported by callers).
 
 ### ARCH-11 — `naming.ts` not in shared barrel; import boundary inconsistency
 - **File:** `src/shared/mod.ts`
@@ -66,12 +61,12 @@ Review date: 2026-04-01
 
 ## LOW
 
-### ARCH-13 — `listByContext` is dead code (full KV scan, never called)
-- **File:** `src/messaging/a2a/tasks.ts:140-149`
-### ARCH-14 — `publishGateway` dead deprecated export
-- **File:** `src/cli/setup/broker_deploy.ts:321-323`
-### ARCH-15 — `subhosting_publish.ts` broken re-export to non-existent file
-- **File:** `src/cli/setup/subhosting_publish.ts:1`
+### ~~ARCH-13~~ — RESOLVED: `listByContext` exposed via `GET /tasks/context/:contextId`
+- **Status:** Resolved in code on 2026-04-02.
+### ~~ARCH-14~~ — RESOLVED: `publishGateway` deleted
+- **Status:** Resolved in code on 2026-04-02.
+### ~~ARCH-15~~ — RESOLVED: `subhosting_publish.ts` deleted (broken shim)
+- **Status:** Resolved in code on 2026-04-02.
 ### ~~ARCH-16~~ — FALSE POSITIVE: `getDashboardAllowedUsers` — the `web/lib/` copy is unused but a live version exists in `src/orchestration/gateway/dashboard_auth.ts` and is actively called
 - **File:** `web/lib/dashboard-auth.ts:124-131` (unused duplicate), `src/orchestration/gateway/dashboard_auth.ts:15` (live version)
 ### ARCH-17 — Duplicate `cancel`/`cancelTask` methods (verb overlap, AX-1)

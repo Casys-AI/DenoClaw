@@ -11,11 +11,14 @@ import {
   listCronJobs,
   listTaskObservations,
 } from "../monitoring.ts";
+import { TaskStore } from "../../messaging/a2a/tasks.ts";
 import {
   getTrace,
   getTraceSpans,
   listAgentTraces,
 } from "../../telemetry/traces.ts";
+import type { AnalyticsStore } from "../../db/analytics.ts";
+import { handleGatewayAnalyticsRoute } from "./analytics_routes.ts";
 
 export interface GatewayMonitoringRoutesContext {
   config: Config;
@@ -24,6 +27,7 @@ export interface GatewayMonitoringRoutesContext {
   workerPool: Pick<WorkerPool, "getAgentIds">;
   metrics: MetricsCollector | null;
   kv: Deno.Kv | null;
+  analytics?: AnalyticsStore | null;
 }
 
 export async function handleGatewayMonitoringRoute(
@@ -49,6 +53,9 @@ export async function handleGatewayMonitoringRoute(
   if (url.pathname === "/stats/agents" && ctx.metrics) {
     return Response.json(await ctx.metrics.getAllMetrics());
   }
+
+  const analyticsRoute = await handleGatewayAnalyticsRoute(ctx, url);
+  if (analyticsRoute) return analyticsRoute;
 
   if (url.pathname === "/events" && ctx.kv) {
     return createSSEResponse(ctx.kv, ctx.workerPool.getAgentIds());
@@ -90,6 +97,23 @@ export async function handleGatewayMonitoringRoute(
       });
     }
     return Response.json(await listTaskObservations(ctx.kv));
+  }
+
+  if (url.pathname.startsWith("/tasks/context/")) {
+    if (!ctx.kv) {
+      return Response.json({ error: { code: "KV_UNAVAILABLE" } }, {
+        status: 503,
+      });
+    }
+    const contextId = url.pathname.slice("/tasks/context/".length);
+    if (!contextId) {
+      return Response.json({ error: { code: "MISSING_CONTEXT_ID" } }, {
+        status: 400,
+      });
+    }
+    const store = new TaskStore(ctx.kv);
+    const tasks = await store.listByContext(decodeURIComponent(contextId));
+    return Response.json(tasks);
   }
 
   if (url.pathname === "/cron/jobs") {

@@ -25,6 +25,7 @@ import { StatusDot } from "../components/StatusBadge.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { InstanceSelector } from "../components/InstanceSelector.tsx";
 import { AlertStrip } from "../components/AlertStrip.tsx";
+import AgentStatusGrid from "../islands/AgentStatusGrid.tsx";
 import type {
   AgentMetrics,
   AgentStatusEntry,
@@ -349,6 +350,9 @@ export default function Overview({ data }: { data: OverviewData }) {
           <div class="card bg-base-200">
             <div class="card-body">
               <h2 class="card-title font-display">Agents</h2>
+              {/* Live agent grid (updates via SSE) */}
+              <AgentStatusGrid />
+              {/* SSR fallback: detailed agent cards with metrics */}
               {agents.length === 0
                 ? (
                   <div role="alert" class="alert alert-info">

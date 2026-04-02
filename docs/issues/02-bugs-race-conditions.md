@@ -191,8 +191,6 @@ Review date: 2026-04-01
 
 ## LOW
 
-### BUG-37 — Max-iterations logged as trace status "completed"
-- **File:** `src/agent/loop_process.ts:231-238`
 ### BUG-38 — `truncateContext` can split tool-call/result pairs
 - **File:** `src/agent/context.ts:135-153`
 ### BUG-39 — Timer not cleared if `process.output()` throws
@@ -320,16 +318,6 @@ Review date: 2026-04-01
 - **Impact:** Session appears stale to `getActive`/`cleanup`; may be erroneously deleted
 - **Fix:** Wrap in try/catch, log failure
 
-### BUG-69 — CRITICAL: `loop_process.ts` endTrace `.catch(() => {})` — completely silent trace loss
-- **File:** `src/agent/loop_process.ts:246-248`
-- **Impact:** Trace data silently lost with zero log output; operator cannot diagnose tracing gaps
-- **Fix:** Add `log.warn` inside catch
-
-### BUG-70 — CRITICAL: `loop_process.ts` JSON.parse catch discards error context entirely
-- **File:** `src/agent/loop_process.ts:144-155`
-- **Impact:** No record of what malformed string looked like — impossible to diagnose LLM formatting regressions
-- **Fix:** Bind error variable; log `tc.function.arguments.slice(0, 200)` and error message
-
 ### BUG-71 — HIGH: `worker_pool_observability.ts` three `catch(() => {})` on KV writes — dashboard state silently stale
 - **File:** `src/agent/worker_pool_observability.ts:18-41`
 - **Impact:** `writeActiveTask`, `clearActiveTask`, `writeAgentStatus` all silently fail → dashboard shows wrong state
@@ -374,10 +362,6 @@ Review date: 2026-04-01
 - **Impact:** First close error leaves remaining memories unclosed
 - **Fix:** Wrap each close in individual try/catch
 
-### BUG-80 — MEDIUM: `loop_process.ts` traceWriter calls unguarded inside task loop
-- **File:** `src/agent/loop_process.ts:50-226`
-- **Impact:** Transient KV trace write error kills entire user task
-- **Fix:** Wrap traceWriter calls in best-effort pattern with `log.warn`
 
 ### BUG-81 — MEDIUM: `reply_dispatch.ts` `routeToTunnel` synchronous — no DOMException protection
 - **File:** `src/orchestration/broker/reply_dispatch.ts:22-26`

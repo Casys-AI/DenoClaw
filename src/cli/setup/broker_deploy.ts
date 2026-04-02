@@ -316,8 +316,3 @@ export async function deployBroker(opts?: {
     `  Test: curl -H "Authorization: Bearer ${apiToken}" ${deployedUrl}/health`,
   );
 }
-
-/** @deprecated Use deployBroker instead */
-export async function publishGateway(): Promise<void> {
-  await deployBroker();
-}

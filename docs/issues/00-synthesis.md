@@ -13,13 +13,13 @@
 | Category | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |----------|:---:|:---:|:---:|:---:|:---:|
 | Security (`01-security.md`) | 2 | 14 | 6 | — | 22 |
-| Bugs & Races (`02-bugs-race-conditions.md`) | 5 | 30 | 30 | 17 | 82 |
-| Architecture (`03-architecture.md`) | — | 3 | 11 | 11 | 25 |
+| Bugs & Races (`02-bugs-race-conditions.md`) | 3 | 30 | 29 | 16 | 78 |
+| Architecture (`03-architecture.md`) | — | 1 | 9 | 8 | 18 |
 | Test Gaps (`04-test-gaps.md`) | — | 6 | 6 | 7 | 19 |
 | Docs/Schema (`05-docs-schema-config.md`) | — | 2 | 5 | 9 | 16 |
 | UX/CLI (`06-ux-cli.md`) | — | — | 8 | 10 | 18 |
 | Type Design (`07-type-design.md`) | — | — | — | 28 | 28 |
-| **Total** | **7** | **55** | **66** | **82** | **~210** |
+| **Total** | **5** | **53** | **63** | **78** | **~199** |
 
 > 3 security issues removed (SEC-03, SEC-09, SEC-13) — already tracked in
 > `notes/2026-03-30-denoclaw-api-token-followup.md` and

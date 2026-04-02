@@ -4,6 +4,7 @@ import {
   stripDashboardBasePath,
 } from "../lib/base-path.ts";
 import { NavBar } from "../components/NavBar.tsx";
+import EventStream from "../islands/EventStream.tsx";
 
 export default function App({ Component, url }: PageProps) {
   const currentPath = stripDashboardBasePath(url.pathname);
@@ -29,6 +30,7 @@ export default function App({ Component, url }: PageProps) {
         <main class={isLogin ? "" : "container mx-auto px-4 py-4"}>
           <Component />
         </main>
+        {!isLogin && <EventStream />}
       </body>
     </html>
   );

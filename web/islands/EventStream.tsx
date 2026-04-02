@@ -6,16 +6,13 @@ import type { AgentStatusEntry } from "../lib/types.ts";
 export const agentStatuses = signal<AgentStatusEntry[]>([]);
 export const connected = signal(false);
 
-interface EventStreamProps {
-  brokerUrl: string;
-}
-
 /**
  * EventStream island — singleton SSE connection manager.
- * Mount once in _app.tsx. Manages SSE connection to broker/gateway,
- * updates shared Preact signals that other islands subscribe to.
+ * Mount once in _app.tsx. Manages SSE connection to broker/gateway
+ * via same-origin proxy, updates shared Preact signals that other
+ * islands subscribe to.
  */
-export default function EventStream({ brokerUrl }: EventStreamProps) {
+export default function EventStream() {
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnectTimer: number | undefined;
@@ -50,8 +47,8 @@ export default function EventStream({ brokerUrl }: EventStreamProps) {
             }
 
             case "agents_list_updated":
-              // Refetch full agent list
-              fetch(`${brokerUrl}/agents`)
+              // Refetch full agent list via same-origin proxy
+              fetch("api/agents")
                 .then((r) => r.json())
                 .then((agents) => {
                   agentStatuses.value = agents;
@@ -81,7 +78,7 @@ export default function EventStream({ brokerUrl }: EventStreamProps) {
       es?.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-  }, [brokerUrl]);
+  }, []);
 
   return (
     <div class="fixed bottom-4 right-4">

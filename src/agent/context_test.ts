@@ -92,26 +92,6 @@ Deno.test("buildSystemPrompt includes temporary runtime grants", () => {
   );
 });
 
-Deno.test("truncateContext keeps all messages when under limit", () => {
-  const msgs: Message[] = [
-    { role: "system", content: "sys" },
-    { role: "user", content: "hello" },
-  ];
-  const result = builder.truncateContext(msgs, 10000);
-  assertEquals(result.length, 2);
-});
-
-Deno.test("truncateContext drops old messages when over limit", () => {
-  const msgs: Message[] = [
-    { role: "system", content: "sys" },
-    { role: "user", content: "a".repeat(100) },
-    { role: "assistant", content: "b".repeat(100) },
-    { role: "user", content: "recent" },
-  ];
-  const result = builder.truncateContext(msgs, 20);
-  assertEquals(result[0].role, "system");
-  assertEquals(result.at(-1)?.content, "recent");
-});
 
 Deno.test("buildContextMessages prepends system message", () => {
   const msgs: Message[] = [{ role: "user", content: "hi" }];

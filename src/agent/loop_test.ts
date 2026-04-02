@@ -86,6 +86,10 @@ class FakeMemory implements MemoryPort {
     this.#messages = [];
     return Promise.resolve();
   }
+
+  trimMessages(messages: Message[], _maxTokens: number): Promise<Message[]> {
+    return Promise.resolve(messages);
+  }
 }
 
 class RecordingTraceWriter extends TraceWriter {

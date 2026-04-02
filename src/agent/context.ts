@@ -116,25 +116,4 @@ Guidelines:
       ...conversation,
     ];
   }
-
-  truncateContext(messages: Message[], maxLength: number): Message[] {
-    const system = messages.filter((m) => m.role === "system");
-    const others = messages.filter((m) => m.role !== "system");
-
-    let total = 0;
-    for (const m of messages) total += m.content.length;
-    if (total <= maxLength) return messages;
-
-    let used = system.reduce((s, m) => s + m.content.length, 0);
-    if (used >= maxLength) return system;
-
-    const kept: Message[] = [];
-    for (let i = others.length - 1; i >= 0; i--) {
-      if (used + others[i].content.length > maxLength) break;
-      kept.unshift(others[i]);
-      used += others[i].content.length;
-    }
-
-    return [...system, ...kept];
-  }
 }

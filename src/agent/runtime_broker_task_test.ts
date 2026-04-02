@@ -51,6 +51,9 @@ class MemoryStub implements MemoryPort {
     this.messages = [];
     return Promise.resolve();
   }
+  trimMessages(messages: Message[], _maxTokens: number): Promise<Message[]> {
+    return Promise.resolve(messages);
+  }
   get count(): number {
     return this.messages.length;
   }

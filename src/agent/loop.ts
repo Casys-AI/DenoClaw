@@ -226,11 +226,6 @@ export class AgentLoop implements AgentLoopLike {
     await this.initialize();
     await this.memory.addMessage({ role: "user", content: userMessage });
 
-    const CHARS_PER_TOKEN = 4;
-    const CONTEXT_RATIO = 4;
-    const maxChars =
-      (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
-
     const { runner, kernelInput } = createLocalRunner({
       agentId: this.agentId,
       sessionId: this.sessionId,
@@ -263,7 +258,7 @@ export class AgentLoop implements AgentLoopLike {
           memoryFiles,
           this.getRuntimeGrants?.() ?? [],
         );
-        return this.context.truncateContext(raw, maxChars);
+        return this.memory.trimMessages(raw, this.config.maxTokens || 4096);
       },
       toolDefinitions: this.tools.getDefinitions(),
       llmConfig: this.config,

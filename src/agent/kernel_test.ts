@@ -14,7 +14,6 @@ import type {
 
 function makeInput(overrides?: Partial<KernelInput>): KernelInput {
   return {
-    getMessages: () => [{ role: "user", content: "hello" }],
     toolDefinitions: [],
     llmConfig: { model: "test/model" },
     maxIterations: 5,

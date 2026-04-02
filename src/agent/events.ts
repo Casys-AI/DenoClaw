@@ -1,7 +1,6 @@
 import type { AgentConfig } from "./types.ts";
 import type {
   LLMResponse,
-  Message,
   ToolCall,
   ToolDefinition,
   ToolResult,
@@ -19,9 +18,6 @@ interface BaseEvent {
 
 export interface LlmRequestEvent extends BaseEvent {
   type: "llm_request";
-  /** Messages snapshot at kernel yield time. May be stale if context was refreshed by middleware.
-   *  The llmMiddleware uses getMessages() fresh — this field is for event store auditing only. */
-  messages: Message[];
   tools: ToolDefinition[];
   config: AgentConfig;
 }

@@ -1,4 +1,4 @@
-import type { Message, ToolDefinition } from "../shared/types.ts";
+import type { ToolDefinition } from "../shared/types.ts";
 import type { AgentConfig } from "./types.ts";
 import type {
   AgentEvent,
@@ -13,7 +13,6 @@ import { createEventFactory } from "./events.ts";
 import { log } from "../shared/log.ts";
 
 export interface KernelInput {
-  getMessages: () => Message[];
   toolDefinitions: ToolDefinition[];
   llmConfig: AgentConfig;
   maxIterations: number;
@@ -32,7 +31,6 @@ export async function* agentKernel(
     const rawLlm = yield event<AgentEvent>(
       {
         type: "llm_request",
-        messages: input.getMessages(),
         tools: input.toolDefinitions,
         config: input.llmConfig,
       },

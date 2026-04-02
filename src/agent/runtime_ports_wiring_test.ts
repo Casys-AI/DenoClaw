@@ -24,11 +24,14 @@ class MemoryStub implements MemoryPort {
     this.messages.push(message);
     return Promise.resolve();
   }
-  getMessages(): Message[] {
-    return [...this.messages];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.messages]);
   }
-  getRecentMessages(count: number): Message[] {
-    return this.messages.slice(-count);
+  getRecentMessages(count: number): Promise<Message[]> {
+    return Promise.resolve(this.messages.slice(-count));
+  }
+  semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return Promise.resolve([]);
   }
   clear(): Promise<void> {
     this.messages = [];
@@ -40,7 +43,7 @@ class MemoryStub implements MemoryPort {
   remember(): Promise<void> {
     return Promise.resolve();
   }
-  recall(): Promise<[]> {
+  recallTopic(): Promise<[]> {
     return Promise.resolve([]);
   }
   listTopics(): Promise<string[]> {

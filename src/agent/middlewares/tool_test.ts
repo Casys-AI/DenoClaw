@@ -29,7 +29,7 @@ Deno.test("toolMiddleware passes through non-tool_call events", async () => {
   const mw = toolMiddleware(executeFn);
   const event = {
     eventId: 0, timestamp: Date.now(), iterationId: 1,
-    type: "llm_request" as const, messages: [], tools: [], config: { model: "m" },
+    type: "llm_request" as const,  tools: [], config: { model: "m" },
   };
   const nextResult = { type: "llm" as const, content: "ok" };
   const result = await mw({ event, session: makeSession() }, () => Promise.resolve(nextResult));

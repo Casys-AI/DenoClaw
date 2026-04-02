@@ -244,9 +244,9 @@ export class AgentLoop implements AgentLoopLike {
         memory: this.memory,
         refreshMemoryFiles: () => this.refreshMemoryFiles(),
       },
-      buildMessages: (memoryTopics, memoryFiles) => {
+      buildMessages: async (memoryTopics, memoryFiles) => {
         const raw = this.context.buildContextMessages(
-          this.memory.getMessages(),
+          await this.memory.getMessages(),
           this.skills.getSkills(),
           this.tools.getDefinitions(),
           memoryTopics,

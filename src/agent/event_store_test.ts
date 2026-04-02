@@ -6,7 +6,7 @@ Deno.test("InMemoryEventStore stores and retrieves events", async () => {
   const store = new InMemoryEventStore();
   const e1: LlmRequestEvent = {
     eventId: 0, timestamp: Date.now(), iterationId: 1,
-    type: "llm_request", messages: [], tools: [], config: { model: "test" },
+    type: "llm_request",  tools: [], config: { model: "test" },
   };
   const e2: CompleteEvent = {
     eventId: 1, timestamp: Date.now(), iterationId: 1,

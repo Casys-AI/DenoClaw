@@ -29,7 +29,7 @@ Deno.test("contextRefreshMiddleware reloads skills after write_file to skills/",
   // Refresh happens on next llm_request
   const llmReq: LlmRequestEvent = {
     eventId: 4, timestamp: Date.now(), iterationId: 2,
-    type: "llm_request", messages: [], tools: [], config: { model: "m" },
+    type: "llm_request",  tools: [], config: { model: "m" },
   };
   await mw({ event: llmReq, session }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
   assertEquals(reloaded, true);
@@ -52,7 +52,7 @@ Deno.test("contextRefreshMiddleware reloads memory files after write_file to mem
 
   const llmReq: LlmRequestEvent = {
     eventId: 4, timestamp: Date.now(), iterationId: 2,
-    type: "llm_request", messages: [], tools: [], config: { model: "m" },
+    type: "llm_request",  tools: [], config: { model: "m" },
   };
   await mw({ event: llmReq, session }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
   assertEquals(session.memoryFiles, ["new-mem.md"]);
@@ -75,7 +75,7 @@ Deno.test("contextRefreshMiddleware reloads topics after memory remember/forget"
 
   const llmReq: LlmRequestEvent = {
     eventId: 4, timestamp: Date.now(), iterationId: 2,
-    type: "llm_request", messages: [], tools: [], config: { model: "m" },
+    type: "llm_request",  tools: [], config: { model: "m" },
   };
   await mw({ event: llmReq, session }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
   assertEquals(session.memoryTopics, ["new-topic"]);
@@ -99,7 +99,7 @@ Deno.test("contextRefreshMiddleware ignores dry_run writes", async () => {
 
   const llmReq: LlmRequestEvent = {
     eventId: 4, timestamp: Date.now(), iterationId: 2,
-    type: "llm_request", messages: [], tools: [], config: { model: "m" },
+    type: "llm_request",  tools: [], config: { model: "m" },
   };
   await mw({ event: llmReq, session }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
   assertEquals(reloaded, false);

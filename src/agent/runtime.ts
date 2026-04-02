@@ -227,9 +227,9 @@ export class AgentRuntime {
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
-      buildMessages: (memoryTopics, memoryFiles) =>
+      buildMessages: async (memoryTopics, memoryFiles) =>
         this.context.buildContextMessages(
-          memory.getMessages(),
+          await memory.getMessages(),
           this.skills.getSkills(),
           this.toolDefinitions,
           memoryTopics,
@@ -364,9 +364,9 @@ export class AgentRuntime {
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
-      buildMessages: (memoryTopics, memoryFiles) =>
+      buildMessages: async (memoryTopics, memoryFiles) =>
         this.context.buildContextMessages(
-          memory.getMessages(),
+          await memory.getMessages(),
           this.skills.getSkills(),
           this.toolDefinitions,
           memoryTopics,

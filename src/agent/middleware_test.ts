@@ -6,7 +6,7 @@ import type { LlmRequestEvent } from "./events.ts";
 function makeEvent(): LlmRequestEvent {
   return {
     eventId: 0, timestamp: Date.now(), iterationId: 1,
-    type: "llm_request", messages: [], tools: [], config: { model: "test" },
+    type: "llm_request",  tools: [], config: { model: "test" },
   };
 }
 

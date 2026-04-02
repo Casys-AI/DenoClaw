@@ -70,16 +70,16 @@ export class Memory implements MemoryPort {
     await this.save();
   }
 
-  async getMessages(): Promise<Message[]> {
-    return [...this.messages];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.messages]);
   }
 
-  async getRecentMessages(count: number): Promise<Message[]> {
-    return this.messages.slice(-count);
+  getRecentMessages(count: number): Promise<Message[]> {
+    return Promise.resolve(this.messages.slice(-count));
   }
 
-  async semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
-    return [];
+  semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return Promise.resolve([]);
   }
 
   async clear(): Promise<void> {

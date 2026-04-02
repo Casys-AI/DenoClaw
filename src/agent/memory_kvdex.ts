@@ -151,16 +151,16 @@ export class KvdexMemory implements MemoryPort {
     }
   }
 
-  async getMessages(): Promise<Message[]> {
-    return [...this.cache];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.cache]);
   }
 
-  async getRecentMessages(count: number): Promise<Message[]> {
-    return this.cache.slice(-count);
+  getRecentMessages(count: number): Promise<Message[]> {
+    return Promise.resolve(this.cache.slice(-count));
   }
 
-  async semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
-    return [];
+  semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return Promise.resolve([]);
   }
 
   async clear(): Promise<void> {

@@ -38,11 +38,14 @@ class MemoryStub implements MemoryPort {
     this.messages.push(message);
     return Promise.resolve();
   }
-  getMessages(): Message[] {
-    return [...this.messages];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.messages]);
   }
-  getRecentMessages(count: number): Message[] {
-    return this.messages.slice(-count);
+  getRecentMessages(count: number): Promise<Message[]> {
+    return Promise.resolve(this.messages.slice(-count));
+  }
+  semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return Promise.resolve([]);
   }
   clear(): Promise<void> {
     this.messages = [];
@@ -54,7 +57,7 @@ class MemoryStub implements MemoryPort {
   remember(): Promise<void> {
     return Promise.resolve();
   }
-  recall(): Promise<[]> {
+  recallTopic(): Promise<[]> {
     return Promise.resolve([]);
   }
   listTopics(): Promise<string[]> {
@@ -194,7 +197,7 @@ Deno.test("AgentRuntime handles broker task_submit through canonical task report
     kind: "text",
     text: "completed",
   });
-  assertEquals(memory.getMessages().map((message) => message.role), [
+  assertEquals((await memory.getMessages()).map((message) => message.role), [
     "user",
     "assistant",
   ]);
@@ -443,9 +446,10 @@ Deno.test("AgentRuntime turns broker privilege elevation requirements into canon
     taskId: "task-privilege-pause",
     contextId: "ctx-privilege-pause",
   });
-  assertEquals(memory.getMessages().length, 2);
-  assertEquals(memory.getMessages()[0]?.role, "user");
-  assertEquals(memory.getMessages()[1]?.role, "assistant");
+  const msgs449 = await memory.getMessages();
+  assertEquals(msgs449.length, 2);
+  assertEquals(msgs449[0]?.role, "user");
+  assertEquals(msgs449[1]?.role, "assistant");
 });
 
 Deno.test("AgentRuntime auto-retries a pending privileged tool after grant approval", async () => {
@@ -555,20 +559,21 @@ Deno.test("AgentRuntime auto-retries a pending privileged tool after grant appro
     "WORKING",
     "COMPLETED",
   ]);
-  assertEquals(memory.getMessages().map((message) => message.role), [
+  const msgs562 = await memory.getMessages();
+  assertEquals(msgs562.map((message) => message.role), [
     "user",
     "assistant",
     "tool",
     "user",
     "assistant",
   ]);
-  assertEquals(memory.getMessages()[2], {
+  assertEquals(msgs562[2], {
     role: "tool",
     content: "Written 5 chars to note.txt",
     name: "write_file",
     tool_call_id: "tool-retry-1",
   });
-  assertEquals(memory.getMessages()[3], {
+  assertEquals(msgs562[3], {
     role: "user",
     content: "Grant write and continue",
   });
@@ -602,5 +607,5 @@ Deno.test("AgentRuntime rejects non-canonical broker envelopes fail-fast", async
   );
 
   assertEquals(broker.reportedTasks.length, 0);
-  assertEquals(memory.getMessages().length, 0);
+  assertEquals((await memory.getMessages()).length, 0);
 });

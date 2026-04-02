@@ -11,7 +11,7 @@ import type {
 
 Deno.test("createEventFactory produces sequential eventIds", () => {
   const event = createEventFactory();
-  const e1 = event({ type: "llm_request", messages: [], tools: [], config: { model: "test" } }, 1);
+  const e1 = event({ type: "llm_request", tools: [], config: { model: "test" } }, 1);
   const e2 = event({ type: "llm_response", content: "hi", toolCalls: [] }, 1);
   assertEquals(e1.eventId, 0);
   assertEquals(e2.eventId, 1);
@@ -38,7 +38,7 @@ Deno.test("formatToolResultContent formats error", () => {
 Deno.test("event types are discriminated by type field", () => {
   const event = createEventFactory();
   const llmReq: LlmRequestEvent = event(
-    { type: "llm_request", messages: [], tools: [], config: { model: "m" } },
+    { type: "llm_request", tools: [], config: { model: "m" } },
     1,
   );
   const llmRes: LlmResponseEvent = event(

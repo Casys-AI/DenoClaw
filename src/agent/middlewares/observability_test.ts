@@ -45,7 +45,7 @@ Deno.test("observabilityMiddleware starts trace on first event", async () => {
   });
   const event = {
     eventId: 0, timestamp: Date.now(), iterationId: 1,
-    type: "llm_request" as const, messages: [], tools: [], config: { model: "test/m" },
+    type: "llm_request" as const,  tools: [], config: { model: "test/m" },
   };
   await mw({ event, session: makeSession() }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
   assertEquals(writer.traceStarted, true);
@@ -60,7 +60,7 @@ Deno.test("observabilityMiddleware writes LLM span on llm_response", async () =>
   });
   // First: trigger trace start with llm_request
   await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "test/m" } }, session: makeSession() },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "test/m" } }, session: makeSession() },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   // Then: llm_response observation
@@ -80,7 +80,7 @@ Deno.test("observabilityMiddleware ends trace on complete event", async () => {
   const session = makeSession();
   // Start trace
   await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "m" } }, session },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   // Complete
@@ -98,7 +98,7 @@ Deno.test("observabilityMiddleware works without traceWriter (no-op)", async () 
     traceWriter: null, agentId: "a", sessionId: "s", correlationIds: {},
   });
   const result = await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session: makeSession() },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "m" } }, session: makeSession() },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   assertEquals(result?.type, "llm");
@@ -112,7 +112,7 @@ Deno.test("observabilityMiddleware writes tool span on tool_call", async () => {
   const session = makeSession();
   // Start trace via llm_request
   await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "m" } }, session },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   // tool_call
@@ -131,7 +131,7 @@ Deno.test("observabilityMiddleware ends trace with failed on error event", async
   });
   const session = makeSession();
   await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "m" } }, session },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   await mw(
@@ -150,12 +150,12 @@ Deno.test("observabilityMiddleware handles iteration span transitions", async ()
   const session = makeSession();
   // Iteration 1
   await mw(
-    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request",  tools: [], config: { model: "m" } }, session },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   // Iteration 2 - should end iter 1 span and start iter 2
   await mw(
-    { event: { eventId: 3, timestamp: Date.now(), iterationId: 2, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    { event: { eventId: 3, timestamp: Date.now(), iterationId: 2, type: "llm_request",  tools: [], config: { model: "m" } }, session },
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   const iterCalls = writer.calls.filter((c) => c.method === "writeIterationSpan");

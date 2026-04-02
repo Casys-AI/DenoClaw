@@ -13,8 +13,8 @@ class StubMemory {
     this.messages.push(msg);
     return Promise.resolve();
   }
-  getMessages(): Message[] {
-    return [...this.messages];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.messages]);
   }
 }
 
@@ -39,7 +39,6 @@ Deno.test("AgentRunner orchestrates kernel + pipeline to completion", async () =
   const memory = new StubMemory();
   const runner = new AgentRunner(pipeline, store, makeSession(), memory);
   const result = await runner.run({
-    getMessages: () => [{ role: "user", content: "hi" }],
     toolDefinitions: [],
     llmConfig: { model: "test" },
     maxIterations: 5,
@@ -101,7 +100,6 @@ Deno.test("AgentRunner handles tool calls across iterations", async () => {
   const memory = new StubMemory();
   const runner = new AgentRunner(pipeline, new InMemoryEventStore(), makeSession(), memory);
   const result = await runner.run({
-    getMessages: () => [{ role: "user", content: "list files" }, ...memory.getMessages()],
     toolDefinitions: [],
     llmConfig: { model: "test" },
     maxIterations: 5,
@@ -136,7 +134,6 @@ Deno.test("AgentRunner returns last assistant message on max_iterations", async 
 
   const runner = new AgentRunner(pipeline, new InMemoryEventStore(), makeSession(), memory);
   const result = await runner.run({
-    getMessages: () => [{ role: "user", content: "test" }, ...memory.getMessages()],
     toolDefinitions: [],
     llmConfig: { model: "test" },
     maxIterations: 1,
@@ -171,7 +168,7 @@ Deno.test("createLocalRunner works when analytics are explicitly disabled", asyn
       refreshMemoryFiles: undefined,
     },
     analytics: null,
-    buildMessages: () => [{ role: "user", content: "hi" }],
+    buildMessages: () => Promise.resolve([{ role: "user", content: "hi" }]),
     toolDefinitions: [],
     llmConfig: { model: "test" },
     maxIterations: 3,

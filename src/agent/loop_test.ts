@@ -3,7 +3,7 @@ import { join } from "@std/path";
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopLike } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
-import type { MemoryPort } from "./memory_port.ts";
+import type { LongTermFact, MemoryPort } from "./memory_port.ts";
 import type {
   LLMResponse,
   Message,
@@ -71,12 +71,16 @@ class FakeMemory implements MemoryPort {
     return Promise.resolve();
   }
 
-  getMessages(): Message[] {
-    return [...this.#messages];
+  getMessages(): Promise<Message[]> {
+    return Promise.resolve([...this.#messages]);
   }
 
-  getRecentMessages(count: number): Message[] {
-    return this.#messages.slice(-count);
+  getRecentMessages(count: number): Promise<Message[]> {
+    return Promise.resolve(this.#messages.slice(-count));
+  }
+
+  semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return Promise.resolve([]);
   }
 
   clear(): Promise<void> {
@@ -101,17 +105,9 @@ class FakeMemory implements MemoryPort {
     return Promise.resolve();
   }
 
-  recall(
+  recallTopic(
     topic: string,
-  ): Promise<
-    {
-      topic: string;
-      content: string;
-      source?: "user" | "agent" | "tool";
-      confidence?: number;
-      timestamp: string;
-    }[]
-  > {
+  ): Promise<LongTermFact[]> {
     return Promise.resolve(
       (this.#facts.get(topic) ?? []).map((fact) => ({
         topic,

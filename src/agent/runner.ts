@@ -14,6 +14,7 @@ import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import { llmMiddleware } from "./middlewares/llm.ts";
 import type { CompleteFn } from "./middlewares/llm.ts";
+import type { GetMessagesFn } from "./middlewares/llm.ts";
 import { toolMiddleware } from "./middlewares/tool.ts";
 import type { ExecuteToolFn } from "./middlewares/tool.ts";
 import { memoryMiddleware } from "./middlewares/memory.ts";
@@ -31,7 +32,7 @@ import { resolveAnalyticsStore } from "../db/analytics.ts";
 // ── Runner ───────────────────────────────────────────
 
 interface MemoryReader {
-  getMessages(): Message[];
+  getMessages(): Promise<Message[]>;
 }
 
 export class AgentRunner {
@@ -57,7 +58,7 @@ export class AgentRunner {
       const finalEvent = next.value;
       await this.eventStore.commit(finalEvent);
       await this.pipeline.execute(finalEvent, this.session);
-      return this.toAgentResult(finalEvent);
+      return await this.toAgentResult(finalEvent);
     } catch (e) {
       // Commit a synthetic error event for auditing only — do NOT pass
       // through the pipeline (a2a middleware would double-report task state).
@@ -75,7 +76,7 @@ export class AgentRunner {
     }
   }
 
-  private toAgentResult(event: FinalEvent): AgentResponse {
+  private async toAgentResult(event: FinalEvent): Promise<AgentResponse> {
     if (event.type === "complete") {
       return {
         content: event.content,
@@ -90,7 +91,7 @@ export class AgentRunner {
 
     // Graceful degradation (max_iterations etc.)
     log.warn(`Agent kernel error: ${event.code}${event.recovery ? ` — ${event.recovery}` : ""}`);
-    const messages = this.memory.getMessages();
+    const messages = await this.memory.getMessages();
     const last = messages.findLast((m) => m.role === "assistant");
     return {
       content: last?.content ??
@@ -126,7 +127,7 @@ export interface LocalRunnerDeps {
   buildMessages: (
     memoryTopics: string[],
     memoryFiles: string[],
-  ) => Message[];
+  ) => Promise<Message[]>;
   toolDefinitions: ToolDefinition[];
   llmConfig: AgentConfig;
   maxIterations: number;
@@ -144,7 +145,7 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
 
   // getMessages reads session.memoryTopics/memoryFiles so context refreshes
   // applied by contextRefreshMiddleware are visible on the next iteration.
-  const getMessages = () =>
+  const getMessages: GetMessagesFn = () =>
     deps.buildMessages(session.memoryTopics, session.memoryFiles);
 
   const pipeline = new MiddlewarePipeline()
@@ -158,9 +159,7 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
 
   pipeline
     .use(toolMiddleware(deps.executeTool))
-    .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>
-      deps.complete(getMessages(), model, temp, maxTok, tools)
-    ));
+    .use(llmMiddleware({ getMessages, complete: deps.complete }));
 
   return {
     runner: new AgentRunner(
@@ -171,7 +170,6 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
     ),
     session,
     kernelInput: {
-      getMessages,
       toolDefinitions: deps.toolDefinitions,
       llmConfig: deps.llmConfig,
       maxIterations: deps.maxIterations,
@@ -196,7 +194,7 @@ export interface BrokerRunnerDeps {
   buildMessages: (
     memoryTopics: string[],
     memoryFiles: string[],
-  ) => Message[];
+  ) => Promise<Message[]>;
   toolDefinitions: ToolDefinition[];
   llmConfig: AgentConfig;
   maxIterations: number;
@@ -219,7 +217,7 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
   };
   const analytics = resolveAnalyticsStore(deps.analytics);
 
-  const getMessages = () =>
+  const getMessages: GetMessagesFn = () =>
     deps.buildMessages(session.memoryTopics, session.memoryFiles);
 
   const pipeline = new MiddlewarePipeline()
@@ -233,9 +231,7 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
   pipeline
     .use(a2aTaskMiddleware(deps.a2aTask))
     .use(toolMiddleware(deps.executeTool))
-    .use(llmMiddleware((_msgs, model, temp, maxTok, tools) =>
-      deps.complete(getMessages(), model, temp, maxTok, tools)
-    ));
+    .use(llmMiddleware({ getMessages, complete: deps.complete }));
 
   return {
     runner: new AgentRunner(
@@ -246,7 +242,6 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
     ),
     session,
     kernelInput: {
-      getMessages,
       toolDefinitions: deps.toolDefinitions,
       llmConfig: deps.llmConfig,
       maxIterations: deps.maxIterations,

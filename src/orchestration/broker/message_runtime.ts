@@ -115,7 +115,7 @@ export class BrokerMessageRuntime {
             from: msg.from,
             cause: err.message,
           },
-          recovery: "Check broker logs for details",
+          recovery: "Retry the request or check the payload format",
         });
       } catch (sendErr) {
         log.error(

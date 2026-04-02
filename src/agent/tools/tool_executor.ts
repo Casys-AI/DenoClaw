@@ -57,6 +57,34 @@ try {
   }
 
   const input: ExecutorInput = JSON.parse(raw);
+
+  if (typeof input.tool !== "string" || !input.tool) {
+    const err: ToolResult = {
+      success: false,
+      output: "",
+      error: {
+        code: "EXECUTOR_INVALID_INPUT",
+        context: { field: "tool" },
+        recovery: "Provide a non-empty tool name string",
+      },
+    };
+    console.log(JSON.stringify(err));
+    Deno.exit(1);
+  }
+  if (typeof input.args !== "object" || input.args === null) {
+    const err: ToolResult = {
+      success: false,
+      output: "",
+      error: {
+        code: "EXECUTOR_INVALID_INPUT",
+        context: { field: "args" },
+        recovery: "Provide a non-null args object",
+      },
+    };
+    console.log(JSON.stringify(err));
+    Deno.exit(1);
+  }
+
   const tool = instantiateTool(input.tool, input.config);
 
   if (!tool) {

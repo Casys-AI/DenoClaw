@@ -192,9 +192,9 @@ export class A2AClient {
     const response = await res.json() as JsonRpcResponse;
     if (response.error) {
       throw new DenoClawError(
-        "A2A_RPC_ERROR",
-        { code: response.error.code },
-        response.error.message,
+        mapRpcErrorCode(response.error.code),
+        { rpcCode: response.error.code, message: response.error.message },
+        "Check task parameters",
       );
     }
     return response.result as Task;
@@ -231,11 +231,23 @@ export class A2AClient {
     const response = await res.json() as JsonRpcResponse;
     if (response.error) {
       throw new DenoClawError(
-        "A2A_RPC_ERROR",
-        { code: response.error.code },
-        response.error.message,
+        mapRpcErrorCode(response.error.code),
+        { rpcCode: response.error.code, message: response.error.message },
+        "Check task parameters",
       );
     }
     return response.result as Task;
   }
+}
+
+const RPC_CODE_MAP: Record<number, string> = {
+  [-32001]: "A2A_TASK_NOT_FOUND",
+  [-32002]: "A2A_TASK_NOT_CANCELABLE",
+  [-32003]: "A2A_PUSH_NOT_SUPPORTED",
+  [-32004]: "A2A_UNSUPPORTED_OPERATION",
+  [-32005]: "A2A_CONTENT_TYPE_INCOMPATIBLE",
+};
+
+function mapRpcErrorCode(code: number): string {
+  return RPC_CODE_MAP[code] ?? "A2A_RPC_ERROR";
 }

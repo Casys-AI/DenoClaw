@@ -46,7 +46,7 @@ Deno.test({
     );
     const port = server.addr.port;
     const embedder = new OllamaEmbedder(`http://localhost:${port}`);
-    await assertRejects(() => embedder.embed("test"), Error, "Ollama embed failed");
+    await assertRejects(() => embedder.embed("test"), Error, "OLLAMA_EMBED_FAILED");
     await server.shutdown();
   },
   sanitizeResources: false,

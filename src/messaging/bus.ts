@@ -28,9 +28,14 @@ export class MessageBus {
     this.ownsKv = !kv;
   }
 
+  private listenerRegistered = false;
+
   async init(): Promise<void> {
+    if (this.listenerRegistered) return;
+
     if (this.kvReady && this.kv) {
       // KV already injected via constructor — just start listening
+      this.listenerRegistered = true;
       this.kv.listenQueue(async (raw: unknown) => {
         const message = raw as ChannelMessage;
         log.debug(`KV Queue: message received (${message.id})`);
@@ -41,6 +46,7 @@ export class MessageBus {
     }
 
     this.kv = await Deno.openKv();
+    this.listenerRegistered = true;
     this.kv.listenQueue(async (raw: unknown) => {
       const message = raw as ChannelMessage;
       log.debug(`KV Queue: message received (${message.id})`);
@@ -132,5 +138,6 @@ export class MessageBus {
       this.kv = null;
     }
     this.kvReady = false;
+    this.listenerRegistered = false;
   }
 }

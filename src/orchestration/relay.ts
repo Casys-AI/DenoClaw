@@ -5,6 +5,7 @@ import type {
   ToolResult,
 } from "../shared/types.ts";
 import { log } from "../shared/log.ts";
+import { OrchestrationError } from "../shared/errors.ts";
 import {
   createTunnelRegisterMessage,
   DENOCLAW_TUNNEL_PROTOCOL,
@@ -69,10 +70,18 @@ export function assertRelaySocketWritable(
   socket: Pick<WebSocket, "readyState" | "bufferedAmount">,
 ): void {
   if (socket.readyState !== WebSocket.OPEN) {
-    throw new Error("Relay WebSocket is not open");
+    throw new OrchestrationError(
+      "RELAY_SOCKET_NOT_WRITABLE",
+      { readyState: socket.readyState },
+      "Wait for the relay WebSocket to open",
+    );
   }
   if (socket.bufferedAmount > WS_BUFFERED_AMOUNT_HIGH_WATERMARK) {
-    throw new Error("Relay WebSocket send buffer is saturated");
+    throw new OrchestrationError(
+      "RELAY_SOCKET_SATURATED",
+      { bufferedAmount: socket.bufferedAmount },
+      "Wait for the relay WebSocket send buffer to drain",
+    );
   }
 }
 
@@ -154,7 +163,11 @@ export class LocalRelay {
       try {
         if (typeof e.data !== "string") {
           this.ws?.close(1003, "Tunnel control frames must be text JSON");
-          throw new Error("Relay: broker sent a non-text tunnel frame");
+          throw new OrchestrationError(
+          "RELAY_INVALID_FRAME",
+          { dataType: typeof e.data },
+          "Tunnel control frames must be text JSON",
+        );
         }
 
         const raw = JSON.parse(e.data);
@@ -292,7 +305,11 @@ export class LocalRelay {
 
   private sendJson(payload: unknown): void {
     if (!this.ws) {
-      throw new Error("Relay WebSocket is not initialized");
+      throw new OrchestrationError(
+        "RELAY_NOT_CONNECTED",
+        {},
+        "Call connect() before sending messages",
+      );
     }
     assertRelaySocketWritable(this.ws);
     this.ws.send(JSON.stringify(payload));

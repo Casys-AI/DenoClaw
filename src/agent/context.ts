@@ -115,6 +115,7 @@ Guidelines:
     memoryTopics?: string[],
     memoryFiles?: string[],
     runtimeGrants: AgentRuntimeGrant[] = [],
+    now: Date = new Date(),
   ): Message[] {
     return [
       {
@@ -122,7 +123,7 @@ Guidelines:
         content: this.buildSystemPrompt(
           skills,
           tools,
-          new Date(),
+          now,
           memoryTopics,
           memoryFiles,
           runtimeGrants,

@@ -57,7 +57,7 @@ Deno.test("assertRelaySocketWritable rejects closed or saturated sockets", () =>
         bufferedAmount: 0,
       }),
     Error,
-    "not open",
+    "RELAY_SOCKET_NOT_WRITABLE",
   );
   assertThrows(
     () =>
@@ -66,7 +66,7 @@ Deno.test("assertRelaySocketWritable rejects closed or saturated sockets", () =>
         bufferedAmount: 2_000_000,
       }),
     Error,
-    "saturated",
+    "RELAY_SOCKET_SATURATED",
   );
   assertRelaySocketWritable({ readyState: WebSocket.OPEN, bufferedAmount: 0 });
 });

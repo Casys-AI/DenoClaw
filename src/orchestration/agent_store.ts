@@ -8,6 +8,7 @@
 
 import type { AgentEntry } from "../shared/types.ts";
 import { log } from "../shared/log.ts";
+import { DenoClawError } from "../shared/errors.ts";
 
 const AGENTS_PREFIX = ["agents"] as const;
 const LEGACY_AGENTS_PREFIX = ["config", "agents"] as const;
@@ -72,7 +73,11 @@ export class AgentStore {
       .delete(createLegacyAgentConfigKey(agentId))
       .commit();
     if (!result.ok) {
-      throw new Error(`AgentStore: failed to save ${agentId}`);
+      throw new DenoClawError(
+        "AGENT_STORE_COMMIT_FAILED",
+        { agentId, operation: "save" },
+        "KV atomic commit failed — retry the operation",
+      );
     }
     log.info(`AgentStore: saved ${agentId}`);
   }
@@ -87,7 +92,11 @@ export class AgentStore {
       .delete(createLegacyAgentConfigKey(agentId))
       .commit();
     if (!result.ok) {
-      throw new Error(`AgentStore: failed to delete ${agentId}`);
+      throw new DenoClawError(
+        "AGENT_STORE_COMMIT_FAILED",
+        { agentId, operation: "delete" },
+        "KV atomic commit failed — retry the operation",
+      );
     }
     log.info(`AgentStore: deleted ${agentId}`);
     return true;

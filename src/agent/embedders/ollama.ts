@@ -1,4 +1,5 @@
 import type { EmbedderPort } from "../embedder_port.ts";
+import { ProviderError } from "../../shared/errors.ts";
 
 export class OllamaEmbedder implements EmbedderPort {
   readonly dimension: number;
@@ -34,18 +35,28 @@ export class OllamaEmbedder implements EmbedderPort {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "(unreadable)");
-        throw new Error(`Ollama embed failed: HTTP ${res.status} — ${body}`);
+        throw new ProviderError(
+          "OLLAMA_EMBED_FAILED",
+          { status: res.status, model: this.modelName, body: body.slice(0, 200) },
+          "Check Ollama server availability and model name",
+        );
       }
       const body = await res.json();
       if (!Array.isArray(body.embeddings) || body.embeddings.length === 0) {
-        throw new Error(
-          `Ollama embed: unexpected response shape — ${JSON.stringify(body).slice(0, 200)}`,
+        throw new ProviderError(
+          "OLLAMA_EMBED_INVALID_RESPONSE",
+          { model: this.modelName, body: JSON.stringify(body).slice(0, 200) },
+          "Ollama returned an unexpected response shape",
         );
       }
       return body.embeddings[0];
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
-        throw new Error(`Ollama embed timed out after 10s (model: ${this.modelName})`);
+        throw new ProviderError(
+          "OLLAMA_EMBED_TIMEOUT",
+          { model: this.modelName, timeoutMs: 10_000 },
+          "Ollama embed timed out — check server load or increase timeout",
+        );
       }
       throw e;
     } finally {
@@ -65,18 +76,28 @@ export class OllamaEmbedder implements EmbedderPort {
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "(unreadable)");
-        throw new Error(`Ollama embed batch failed: HTTP ${res.status} — ${body}`);
+        throw new ProviderError(
+          "OLLAMA_EMBED_FAILED",
+          { status: res.status, model: this.modelName, body: body.slice(0, 200), batch: true },
+          "Check Ollama server availability and model name",
+        );
       }
       const body = await res.json();
       if (!Array.isArray(body.embeddings) || body.embeddings.length === 0) {
-        throw new Error(
-          `Ollama embed batch: unexpected response shape — ${JSON.stringify(body).slice(0, 200)}`,
+        throw new ProviderError(
+          "OLLAMA_EMBED_INVALID_RESPONSE",
+          { model: this.modelName, body: JSON.stringify(body).slice(0, 200), batch: true },
+          "Ollama returned an unexpected response shape",
         );
       }
       return body.embeddings;
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
-        throw new Error(`Ollama embed batch timed out after 10s (model: ${this.modelName})`);
+        throw new ProviderError(
+          "OLLAMA_EMBED_TIMEOUT",
+          { model: this.modelName, timeoutMs: 10_000, batch: true },
+          "Ollama embed batch timed out — check server load or increase timeout",
+        );
       }
       throw e;
     } finally {

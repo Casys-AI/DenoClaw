@@ -128,13 +128,10 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-14 — `A2A client`: error field mapping is inconsistent
 
+- **Status:** Resolved on 2026-04-02. Added `mapRpcErrorCode()` that maps numeric
+  RPC codes to typed `A2A_TASK_NOT_FOUND` etc. All 3 methods now use it consistently.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/messaging/a2a/client.ts:192-200,231-238`
-- **Impact:** `getTask()` and `cancelTask()` flip structured error fields:
-  the RPC numeric code is buried in `context.code` instead of being surfaced
-  as the primary `code`. Contrast with `send()` at line 90-95. The `A2A_ERRORS`
-  constants from `types.ts` are available but unused in the mapping.
-- **Fix:** Map RPC error codes to typed constants from `A2A_ERRORS`.
+- **File:** `src/messaging/a2a/client.ts`
 
 ### AX-15 — `A2A server`: no validation of `rpc.id` or message shape
 
@@ -192,25 +189,21 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-21 — `agent_store.ts`: raw `throw new Error` on KV failures
 
+- **Status:** Resolved on 2026-04-02.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/orchestration/agent_store.ts:75,90`
-- **Impact:** KV atomic commit failures propagate as unstructured errors.
-  No catch in `gateway/agent_routes.ts` POST path -> unstructured 500.
-- **Fix:** `new DenoClawError("AGENT_STORE_COMMIT_FAILED", { agentId, operation }, "...")`
+- **File:** `src/orchestration/agent_store.ts`
 
 ### AX-22 — `relay.ts`: 3 raw `throw new Error`
 
+- **Status:** Resolved on 2026-04-02. All 4 throws converted to `OrchestrationError`.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/orchestration/relay.ts:72,75,157,295`
-- **Impact:** Hot send path throws plain Error. Lost context on relay failures.
-- **Fix:** `new DenoClawError("RELAY_SOCKET_NOT_WRITABLE", { readyState, bufferedAmount }, "...")`
+- **File:** `src/orchestration/relay.ts`
 
 ### AX-23 — `ollama.ts` embedder: 6 raw `throw new Error`
 
+- **Status:** Resolved on 2026-04-02. All 6 throws converted to `ProviderError`.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/agent/embedders/ollama.ts:37,41,48,68,72,79`
-- **Impact:** Memory write path throws unstructured HTTP/timeout errors.
-- **Fix:** `new ProviderError("OLLAMA_EMBED_FAILED"|"OLLAMA_EMBED_TIMEOUT", { status, model }, "...")`
+- **File:** `src/agent/embedders/ollama.ts`
 
 ### AX-24 — `deploy_api.ts`: 6 raw `throw new Error` in CLI deploy paths
 
@@ -260,19 +253,15 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-30 — `bus.ts`: double-init risk (listenQueue registered twice)
 
+- **Status:** Resolved on 2026-04-02. Added `listenerRegistered` guard.
 - **Principle:** AGENTS.md Single Responsibility
-- **File:** `src/messaging/bus.ts:31-50`
-- **Impact:** If `init()` called on already-initialized bus, registers a second
-  `listenQueue` listener -> duplicate message dispatch.
-- **Fix:** Add `if (this.kvReady) return;` guard at top of `init()`.
+- **File:** `src/messaging/bus.ts`
 
 ### AX-31 — `message_runtime.ts:105`: recovery is "Check broker logs"
 
+- **Status:** Resolved on 2026-04-02. Recovery changed to actionable message.
 - **Principle:** AX#4 Machine-Readable Errors
-- **File:** `src/orchestration/broker/message_runtime.ts:105`
-- **Impact:** `recovery: "Check broker logs for details"` is not actionable for
-  an agent. Agents cannot read broker logs.
-- **Fix:** Include `retryable: true/false` so agent runtime can decide.
+- **File:** `src/orchestration/broker/message_runtime.ts`
 
 ### AX-32 — `A2A server.ts`: `failTask` embeds error as prose TextPart
 
@@ -323,11 +312,9 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-38 — `context.ts`: `new Date()` hardcoded in `buildContextMessages`
 
+- **Status:** Resolved on 2026-04-02. Added `now` parameter to `buildContextMessages`.
 - **Principle:** AX#6 Deterministic Outputs
-- **File:** `src/agent/context.ts:119-125`
-- **Impact:** Wall clock injected into system prompt, not injectable by tests.
-  `buildSystemPrompt` already accepts `now: Date` but `buildContextMessages` doesn't.
-- **Fix:** Thread `now?: Date` through `buildContextMessages`.
+- **File:** `src/agent/context.ts`
 
 ### AX-39 — `web.ts`: timeout detection via string matching
 
@@ -355,10 +342,9 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-43 — `tool_executor.ts`: no input validation at subprocess boundary
 
+- **Status:** Resolved on 2026-04-02. Added `tool` and `args` validation after parse.
 - **Principle:** AX#9 Narrow Contracts
-- **File:** `src/agent/tools/tool_executor.ts:25-59`
-- **Impact:** JSON blob parsed from CLI arg without schema validation.
-- **Fix:** Verify `typeof input.tool === "string"`, `input.args` is object, etc.
+- **File:** `src/agent/tools/tool_executor.ts`
 
 ### AX-44 — `channels/base.ts`: `ChannelAdapter` forces inbound+outbound interface
 
@@ -394,27 +380,21 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ## Resolution Progress
 
-Resolved on 2026-04-02: **22 issues** (AX-01, 02, 03, 04, 05, 06, 07, 08, 09,
-10, 11, 12, 13, 25, 27, 28, 34, 35, 39, 45 + tests updated).
+Resolved on 2026-04-02: **31 issues** (AX-01–14, 21–23, 25, 27, 28, 30, 31,
+34, 35, 38, 39, 43, 45 + tests updated).
 
-### Remaining — P1 (AX compliance)
+### Remaining — P2 (structural refactors / design decisions)
 
-- **AX-14/15** — A2A client/server error mapping + validation
-
-### Remaining — P2 (Hardening)
-
+- **AX-15** — A2A server rpc.id + message shape validation
+- **AX-16** — webhook empty content validation
 - **AX-17/18/19** — Remove magic defaults (session, model, workspace backend)
 - **AX-20** — Gateway websocket token assignment
-- **AX-21/22/23/24** — Convert remaining raw throws to DenoClawError
-- **AX-26** — Refactor A2A handleStream
+- **AX-24** — deploy_api.ts raw throws (CLI-only paths)
+- **AX-26** — Refactor A2A handleStream monolith
 - **AX-29** — Sandbox ownershipScope default
-- **AX-30** — Fix bus double-init
-- **AX-31** — message_runtime recovery
 - **AX-32** — A2A failTask prose error
 - **AX-33** — Discord/Telegram send() swallows failures
 - **AX-36/37** — Deterministic traceId/artifactId
-- **AX-38** — context.ts clock injection
 - **AX-40/41** — A2A card path / URL validation
 - **AX-42** — registry.ts positional params
-- **AX-43** — tool_executor input validation
 - **AX-44** — ChannelAdapter interface segregation

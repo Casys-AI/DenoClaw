@@ -109,7 +109,7 @@ export class MemoryTool extends BaseTool {
             "Provide 'topic' for recall action",
           );
         }
-        const facts = await this.memory.recall(topic);
+        const facts = await this.memory.recallTopic(topic);
         if (facts.length === 0) {
           return this.ok(`No facts found for topic "${topic}".`);
         }

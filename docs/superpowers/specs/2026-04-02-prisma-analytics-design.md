@@ -525,10 +525,113 @@ This keeps the local dev experience unchanged (no Postgres required).
 - Agent execution — no latency added (fire-and-forget)
 - Local dev without Postgres — unchanged (DATABASE_URL opt-in)
 
+## Deploy provisioning
+
+Integrated into the existing `deno task deploy` → `deployBroker()` flow in
+`src/cli/setup/broker_deploy.ts`, following the same pattern as KV provisioning.
+
+### Naming convention
+
+Add to `src/shared/naming.ts`:
+
+```typescript
+export function deriveBrokerPrismaName(
+  appName = deriveBrokerAppName(),
+): string {
+  return `${normalizeDeploySlug(appName)}-db`;
+}
+```
+
+Result: `denoclaw-broker-db` (follows existing `denoclaw-broker-kv` pattern).
+
+### Deploy flow addition
+
+Add `ensureBrokerPrismaDatabase()` in `broker_deploy.ts`, called right after
+`ensureBrokerKvDatabase()` inside `deployBroker()`:
+
+```typescript
+async function ensureBrokerPrismaDatabase(): Promise<void> {
+  const prismaDatabase = deriveBrokerPrismaName(app);
+  print(`Ensuring Prisma Postgres database ${prismaDatabase}...`);
+
+  const provisionResult = await runDeployCli([
+    "deploy", "database", "provision", prismaDatabase,
+    "--kind", "prisma",
+    "--region", region,  // uses the same --region as the app
+    "--org", org,
+  ]);
+  if (!provisionResult.success) {
+    const output = `${provisionResult.stdout}\n${provisionResult.stderr}`;
+    if (!output.includes("already in use")) {
+      throw new Error(`failed to provision Prisma database: ${output.trim()}`);
+    }
+  }
+
+  const assignResult = await runDeployCli([
+    "deploy", "database", "assign", prismaDatabase,
+    "--org", org, "--app", app,
+  ]);
+  if (!assignResult.success) {
+    const output = `${assignResult.stdout}\n${assignResult.stderr}`;
+    if (!output.includes("already")) {
+      throw new Error(`failed to assign Prisma database: ${output.trim()}`);
+    }
+  }
+
+  success(`Prisma database ${prismaDatabase} assigned to ${app}`);
+  // DATABASE_URL is auto-injected by Deno Deploy after assign
+}
+```
+
+### Migration at deploy time
+
+Prisma migrations run as part of the deploy build step. The build command in
+the Deploy app config should include:
+
+```typescript
+const brokerAppConfig = {
+  install: "true",
+  build: "true",
+  predeploy: "deno run -A npm:prisma migrate deploy",
+  // ...existing config
+};
+```
+
+### Config persistence
+
+Store the Prisma database name alongside the KV name:
+
+```typescript
+config.deploy = {
+  org, app, region,
+  kvDatabase,
+  prismaDatabase,  // NEW
+  url: deployedUrl,
+};
+```
+
+### Modified files for deploy
+
+| File | Change |
+|---|---|
+| `src/shared/naming.ts` | Add `deriveBrokerPrismaName()` |
+| `src/cli/setup/broker_deploy.ts` | Add `ensureBrokerPrismaDatabase()` in deploy flow |
+| `src/cli/setup/broker_deploy_naming.ts` | Add `prismaDatabase` to naming resolution |
+
+### No separate command needed
+
+The single `deno task deploy` command handles everything:
+1. Create app (existing)
+2. Provision + assign KV (existing)
+3. **Provision + assign Prisma** (new)
+4. Set env vars (existing)
+5. Deploy with migrations (existing, add predeploy)
+
+For local dev: `docker-compose up -d` + `deno task db:push` — no Deploy needed.
+
 ## Future extensions (not in this iteration)
 
 - **pgvector + Mastra memory** — sub-project B, separate spec
 - **Data retention** — prune raw data older than N days
 - **Cost estimation** — multiply tokens by model pricing table
-- **Prisma on Deno Deploy** — provision via `deno deploy database`
 - **Replace KV metrics** — once Postgres is proven stable

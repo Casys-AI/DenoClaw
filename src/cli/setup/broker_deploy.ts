@@ -218,9 +218,21 @@ export async function deployBroker(opts?: {
 
   await ensureBrokerKvDatabase();
 
+  function resolvePrismaRegion(deployRegion: string): string {
+    const shortToFull: Record<string, string> = {
+      us: "us-east-1",
+      eu: "eu-west-1",
+      global: "us-east-1",
+    };
+    return shortToFull[deployRegion] ?? deployRegion;
+  }
+
   async function ensureBrokerPrismaDatabase(): Promise<void> {
     const prismaDatabase = deriveBrokerPrismaName(app);
-    print(`Ensuring Prisma Postgres database ${prismaDatabase}...`);
+    // Prisma requires full region names (e.g. "us-east-1"), not short Deploy
+    // region slugs ("us", "eu", "global"). Map short → full if needed.
+    const prismaRegion = resolvePrismaRegion(region);
+    print(`Ensuring Prisma Postgres database ${prismaDatabase} (${prismaRegion})...`);
 
     const provisionResult = await runDeployCli([
       "deploy",
@@ -230,7 +242,7 @@ export async function deployBroker(opts?: {
       "--kind",
       "prisma",
       "--region",
-      region,
+      prismaRegion,
       "--org",
       org,
     ], { cwd: "/tmp" });

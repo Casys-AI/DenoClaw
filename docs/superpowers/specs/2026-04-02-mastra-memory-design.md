@@ -34,8 +34,7 @@ MemoryPort (async interface)
 EmbedderPort (interface)
     │
     ├── MastraEmbedder ── @mastra/fastembed (local, FFI/ONNX)
-    ├── OllamaEmbedder ── HTTP /api/embeddings (cloud Ollama instance)
-    ├── OpenAIEmbedder ── HTTP /v1/embeddings (cloud)
+    ├── OllamaEmbedder ── HTTP /api/embed (cloud Ollama instance)
     └── NoopEmbedder ── (tests, returns zero vectors)
 
 Kernel ─yield→ LlmRequestEvent (no messages) ─pipeline→ llmMiddleware
@@ -411,53 +410,6 @@ export class OllamaEmbedder implements EmbedderPort {
 }
 ```
 
-### OpenAIEmbedder (cloud)
-
-```typescript
-// src/agent/embedders/openai.ts
-// Standard OpenAI embeddings API. Alternative to cloud Ollama.
-
-export class OpenAIEmbedder implements EmbedderPort {
-  readonly dimension = 1536;
-  readonly modelName: string;
-
-  constructor(
-    private apiKey: string,
-    model = "text-embedding-3-small",
-  ) {
-    this.modelName = model;
-  }
-
-  async embed(text: string): Promise<number[]> {
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({ model: this.modelName, input: text }),
-    });
-    if (!res.ok) throw new Error(`OpenAI embed failed: ${res.status}`);
-    const body = await res.json();
-    return body.data[0].embedding;
-  }
-
-  async embedBatch(texts: string[]): Promise<number[][]> {
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({ model: this.modelName, input: texts }),
-    });
-    if (!res.ok) throw new Error(`OpenAI embed batch failed: ${res.status}`);
-    const body = await res.json();
-    return body.data.map((d: { embedding: number[] }) => d.embedding);
-  }
-}
-```
-
 ### Mastra embedder adapter
 
 ```typescript
@@ -600,9 +552,8 @@ DATABASE_URL=postgresql://denoclaw:denoclaw@localhost:5432/denoclaw
 # Embedder (opt-in — defaults to fastembed local if DATABASE_URL is set)
 # EMBEDDER_PROVIDER=fastembed     # local default (FFI/ONNX, no external service)
 # EMBEDDER_PROVIDER=ollama        # cloud Ollama instance (for Deploy)
-# EMBEDDER_PROVIDER=openai        # OpenAI API (for Deploy)
-# OLLAMA_URL=https://ollama.myinfra.com  # required for ollama provider
-# OPENAI_API_KEY=sk-...                  # required for openai provider
+# OLLAMA_EMBED_URL=https://ollama.myinfra.com  # required for ollama provider
+# OLLAMA_EMBED_MODEL=nomic-embed-text          # model pulled on the cloud instance
 ```
 
 ### Factory selection
@@ -623,18 +574,14 @@ function createMemory(agentId: string, sessionId: string): MemoryPort {
 
 function createEmbedder(): EmbedderPort {
   const provider = Deno.env.get("EMBEDDER_PROVIDER") ?? "fastembed";
-  switch (provider) {
-    case "ollama":
-      return new OllamaEmbedder(
-        Deno.env.get("OLLAMA_URL")!,
-        Deno.env.get("EMBEDDER_MODEL"),
-      );
-    case "openai":
-      return new OpenAIEmbedder(Deno.env.get("OPENAI_API_KEY")!);
-    default:
-      // Local: Mastra fastembed (ONNX, no external service)
-      return new MastraEmbedder();
+  if (provider === "ollama") {
+    return new OllamaEmbedder(
+      Deno.env.get("OLLAMA_EMBED_URL")!,
+      Deno.env.get("OLLAMA_EMBED_MODEL"),
+    );
   }
+  // Default: Mastra fastembed (local ONNX, no external service)
+  return new MastraEmbedder();
 }
 ```
 
@@ -647,7 +594,6 @@ function createEmbedder(): EmbedderPort {
 | `src/agent/embedder_port.ts` | EmbedderPort interface |
 | `src/agent/embedders/mastra.ts` | MastraEmbedder (local default, fastembed) |
 | `src/agent/embedders/ollama.ts` | OllamaEmbedder (cloud Ollama) |
-| `src/agent/embedders/openai.ts` | OpenAIEmbedder (cloud) |
 | `src/agent/embedders/noop.ts` | NoopEmbedder (tests) |
 | `src/agent/embedders/ollama_test.ts` | Test with mock HTTP |
 | `src/agent/memory_factory.ts` | createMemory() + createEmbedder() |

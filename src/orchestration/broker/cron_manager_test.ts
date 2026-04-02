@@ -224,3 +224,45 @@ Deno.test("BrokerCronManager.reloadAll registers persisted jobs and fires them",
     kv.close();
   }
 });
+
+Deno.test("BrokerCronManager forwards the runtime shutdown signal to Deno.cron", async () => {
+  const kv = await Deno.openKv(":memory:");
+  const callbacks = new Map<string, () => Promise<void> | void>();
+  const signals = new Map<string, AbortSignal | undefined>();
+  const shutdown = new AbortController();
+  try {
+    const mgr = new BrokerCronManager(kv, {
+      signal: shutdown.signal,
+      registerCron: ((
+        name: string,
+        _schedule: string | Deno.CronSchedule,
+        ...rest: [
+          (() => Promise<void> | void) | {
+            backoffSchedule?: number[];
+            signal?: AbortSignal;
+          },
+          (() => Promise<void> | void)?,
+        ]
+      ) => {
+        const options = typeof rest[0] === "function" ? undefined : rest[0];
+        const callback = typeof rest[0] === "function" ? rest[0] : rest[1];
+        if (!callback) throw new Error("Expected cron handler callback");
+        callbacks.set(name, callback);
+        signals.set(name, options?.signal);
+        return Promise.resolve();
+      }) as typeof Deno.cron,
+    });
+
+    const job = await mgr.create({
+      agentId: "alice",
+      name: "heartbeat",
+      schedule: "* * * * *",
+      prompt: "ping",
+    });
+
+    assertExists(callbacks.get(`cron-${job.agentId}-${job.id}`));
+    assertEquals(signals.get(`cron-${job.agentId}-${job.id}`), shutdown.signal);
+  } finally {
+    kv.close();
+  }
+});

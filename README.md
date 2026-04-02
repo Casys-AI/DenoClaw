@@ -100,20 +100,20 @@ curl -fsSL https://deno.land/install.sh | sh
 # Copy environment template and fill in your keys
 cp .env.example .env
 
-# Configure an LLM provider
-deno task start setup provider
+# Guided setup
+denoclaw init
 
-# Configure a channel
-deno task start setup channel
+# Run the local runtime without watch
+deno task start
 
-# Run an interactive agent session
-deno task start agent
+# Run the local runtime with watch
+deno task dev
+
+# Interactive agent session
+denoclaw dev --agent alice
 
 # Send a one-off message
-deno task start agent -- -m "Hello DenoClaw"
-
-# Start the local gateway
-deno task start gateway
+denoclaw dev --agent alice -m "Hello DenoClaw"
 ```
 
 ### Postgres analytics (optional)
@@ -162,7 +162,9 @@ For the operator workflow and current deploy status, see
 
 ```bash
 deno task dev       # Backend with watch
-deno task dashboard # Dashboard dev server
+deno task start     # Backend without watch
+deno task dashboard:dev     # Standalone dashboard with Vite dev server
+deno task dashboard:preview # Preview the built dashboard locally
 deno task test      # Source test suite (default)
 deno task test:e2e  # End-to-end tests
 deno task test:all  # Source + tests/ suites
@@ -170,6 +172,10 @@ deno task check     # Type-check
 deno task lint      # Lint
 deno task fmt       # Format
 ```
+
+`deno task dashboard:dev` runs the UI on `http://127.0.0.1:3001` with the
+manual login flow, so it can connect directly to a remote broker without a
+local runtime. Enter the broker URL and optional bearer token on `/login`.
 
 ## Project Docs
 

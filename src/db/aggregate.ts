@@ -3,15 +3,22 @@ import { log } from "../shared/log.ts";
 
 let analyticsAggregationRegistered = false;
 
-export function registerAnalyticsAggregationCron(): void {
+export interface AnalyticsAggregationCronOptions {
+  signal?: AbortSignal;
+  registerCron?: typeof Deno.cron;
+}
+
+export function registerAnalyticsAggregationCron(
+  options?: AnalyticsAggregationCronOptions,
+): void {
   if (analyticsAggregationRegistered) return;
 
   const analytics = getConfiguredAnalyticsStore();
   if (!analytics) return;
 
   analyticsAggregationRegistered = true;
-
-  Deno.cron("daily-metrics-aggregation", "0 2 * * *", async () => {
+  const registerCron = options?.registerCron ?? Deno.cron;
+  const handler = async () => {
     const targetDate = startOfUtcDay(addDays(new Date(), -1));
     const date = formatDate(targetDate);
     try {
@@ -26,7 +33,18 @@ export function registerAnalyticsAggregationCron(): void {
         },
       );
     }
-  });
+  };
+
+  if (options?.signal) {
+    registerCron(
+      "daily-metrics-aggregation",
+      "0 2 * * *",
+      { signal: options.signal },
+      handler,
+    );
+  } else {
+    registerCron("daily-metrics-aggregation", "0 2 * * *", handler);
+  }
 }
 
 function startOfUtcDay(date: Date): Date {

@@ -5,6 +5,7 @@ import { log } from "../../shared/log.ts";
 export interface CronManagerOptions {
   registerDenoCron?: boolean;
   registerCron?: typeof Deno.cron;
+  signal?: AbortSignal;
 }
 
 export interface CreateCronParams {
@@ -18,6 +19,7 @@ export class BrokerCronManager {
   private kv: Deno.Kv;
   private registerDenoCron: boolean;
   private registerCronImpl: typeof Deno.cron;
+  private signal?: AbortSignal;
   private disabledJobIds = new Set<string>();
   private registeredJobIds = new Set<string>();
   private onFireCallback?: (job: BrokerCronJob) => Promise<void>;
@@ -26,6 +28,7 @@ export class BrokerCronManager {
     this.kv = kv;
     this.registerDenoCron = opts?.registerDenoCron ?? true;
     this.registerCronImpl = opts?.registerCron ?? Deno.cron;
+    this.signal = opts?.signal;
   }
 
   async create(params: CreateCronParams): Promise<BrokerCronJob> {
@@ -128,7 +131,7 @@ export class BrokerCronManager {
     }
     const callback = onFire ?? this.onFireCallback;
     const cronName = `cron-${job.agentId}-${job.id}`;
-    this.registerCronImpl(cronName, job.schedule, async () => {
+    const handler = async () => {
       if (this.disabledJobIds.has(job.id)) return;
       const current = await this.kv.get<BrokerCronJob>([
         "cron",
@@ -149,7 +152,12 @@ export class BrokerCronManager {
           );
         }
       }
-    });
+    };
+    if (this.signal) {
+      this.registerCronImpl(cronName, job.schedule, { signal: this.signal }, handler);
+    } else {
+      this.registerCronImpl(cronName, job.schedule, handler);
+    }
     this.registeredJobIds.add(job.id);
   }
 

@@ -8,9 +8,9 @@
     "start": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts dev",
     "deploy": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts deploy",
     "publish": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts publish",
-    "gateway": "deno run --unstable-kv --unstable-cron --allow-all --env main.ts gateway",
-    "dashboard": "deno run -A npm:vite --config vite.config.ts",
+    "dashboard:dev": "DENOCLAW_DASHBOARD_AUTH_MODE=token deno run -A npm:vite --config vite.config.ts",
     "dashboard:build": "deno run -A npm:vite build --config vite.config.ts",
+    "dashboard:preview": "DENOCLAW_DASHBOARD_AUTH_MODE=token deno run -A npm:vite preview --config vite.config.ts",
     "db:generate": "deno run -A npm:prisma generate",
     "db:push": "deno run -A npm:prisma db push",
     "db:migrate": "deno run -A npm:prisma migrate dev",
@@ -67,5 +67,8 @@
   "lint": {
     "exclude": ["src/db/generated/"]
   },
-  "unstable": ["kv", "cron"]
+  "unstable": [
+    "kv",
+    "cron"
+  ]
 }

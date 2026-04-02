@@ -4,6 +4,7 @@ import { MiddlewarePipeline } from "./middleware.ts";
 import type { SessionState } from "./middleware.ts";
 import { InMemoryEventStore } from "./event_store.ts";
 import type { LlmResolution, LlmResponseEvent, ToolResultEvent } from "./events.ts";
+import { memoryMiddleware } from "./middlewares/memory.ts";
 import type { Message } from "../shared/types.ts";
 
 class StubMemory {
@@ -111,20 +112,10 @@ Deno.test("AgentRunner handles tool calls across iterations", async () => {
 });
 
 Deno.test("AgentRunner returns last assistant message on max_iterations", async () => {
+  const memory = new StubMemory();
   const pipeline = new MiddlewarePipeline();
 
-  // Memory middleware
-  pipeline.use(async (ctx, next) => {
-    if (ctx.event.type === "llm_response") {
-      const e = ctx.event as LlmResponseEvent;
-      await memory.addMessage({ role: "assistant", content: e.content || "", tool_calls: e.toolCalls });
-    }
-    if (ctx.event.type === "tool_result") {
-      const e = ctx.event as ToolResultEvent;
-      await memory.addMessage({ role: "tool", content: e.result.output, name: e.name, tool_call_id: e.callId });
-    }
-    return next();
-  });
+  pipeline.use(memoryMiddleware(memory));
 
   // Always return tool calls (forces looping until max_iterations)
   pipeline.use((ctx, next) => {
@@ -143,7 +134,6 @@ Deno.test("AgentRunner returns last assistant message on max_iterations", async 
     return next();
   });
 
-  const memory = new StubMemory();
   const runner = new AgentRunner(pipeline, new InMemoryEventStore(), makeSession(), memory);
   const result = await runner.run({
     getMessages: () => [{ role: "user", content: "test" }, ...memory.getMessages()],

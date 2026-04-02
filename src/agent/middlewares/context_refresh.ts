@@ -48,6 +48,7 @@ function applyRefreshDetection(
   state: ContextRefreshState, tool: string, args: Record<string, unknown>,
 ): void {
   if (tool === "write_file") {
+    // Only trigger reload on actual writes — dry_run: true and dry_run: undefined (omitted) both skip.
     if (args.dry_run !== false) return;
     const path = normalizeWorkspaceRelativePath(args.path);
     if (path?.startsWith("skills/")) state.reloadSkills = true;

@@ -13,7 +13,7 @@ function makeEvent(): LlmRequestEvent {
 function makeSession(): SessionState {
   return {
     agentId: "agent-1", sessionId: "sess-1",
-    memoryTopics: [], memoryFiles: [],
+    memoryFiles: [],
   };
 }
 

@@ -212,7 +212,7 @@ export class AgentRuntime {
       await memory.addMessage({ role: "user", content: inputText });
     }
 
-    const { runner, session, kernelInput } = createBrokerRunner({
+    const { runner, kernelInput } = createBrokerRunner({
       agentId: this.agentId,
       canonicalTask: workingTask,
       memoryFiles: this.memoryFiles,
@@ -226,26 +226,23 @@ export class AgentRuntime {
         }),
       contextRefresh: {
         skills: this.skills,
-        memory,
         refreshMemoryFiles: () => this.loadMemoryFiles(),
       },
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
       analytics: getConfiguredAnalyticsStore(),
-      buildMessages: async (memoryTopics, memoryFiles) =>
+      buildMessages: async (memoryFiles) =>
         this.context.buildContextMessages(
           await memory.getMessages(),
           this.skills.getSkills(),
           this.toolDefinitions,
-          memoryTopics,
           memoryFiles,
         ),
       toolDefinitions: this.toolDefinitions,
       llmConfig: this.config,
       maxIterations: this.maxIterations,
     });
-    session.memoryTopics = await memory.listTopics();
 
     try {
       await runner.run(kernelInput);
@@ -349,7 +346,7 @@ export class AgentRuntime {
     );
 
     const grants = runtimeGrantStore.list();
-    const { runner, session, kernelInput } = createBrokerRunner({
+    const { runner, kernelInput } = createBrokerRunner({
       agentId: this.agentId,
       canonicalTask: resumed,
       memoryFiles: this.memoryFiles,
@@ -364,19 +361,17 @@ export class AgentRuntime {
         }),
       contextRefresh: {
         skills: this.skills,
-        memory,
         refreshMemoryFiles: () => this.loadMemoryFiles(),
       },
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
       analytics: getConfiguredAnalyticsStore(),
-      buildMessages: async (memoryTopics, memoryFiles) =>
+      buildMessages: async (memoryFiles) =>
         this.context.buildContextMessages(
           await memory.getMessages(),
           this.skills.getSkills(),
           this.toolDefinitions,
-          memoryTopics,
           memoryFiles,
           grants,
         ),
@@ -384,7 +379,6 @@ export class AgentRuntime {
       llmConfig: this.config,
       maxIterations: this.maxIterations,
     });
-    session.memoryTopics = await memory.listTopics();
 
     try {
       await runner.run(kernelInput);

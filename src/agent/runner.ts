@@ -119,7 +119,6 @@ export interface LocalRunnerDeps {
   agentId: string;
   sessionId: string;
   taskId?: string;
-  memoryTopics: string[];
   memoryFiles: string[];
   memory: MemoryWriter & MemoryReader;
   complete: CompleteFn;
@@ -127,9 +126,8 @@ export interface LocalRunnerDeps {
   observability: ObservabilityDeps;
   contextRefresh: ContextRefreshDeps;
   analytics?: AnalyticsStore | null;
-  /** Build context messages using current memoryTopics/memoryFiles from session. */
+  /** Build context messages using current memoryFiles from session. */
   buildMessages: (
-    memoryTopics: string[],
     memoryFiles: string[],
   ) => Promise<Message[]>;
   toolDefinitions: ToolDefinition[];
@@ -142,13 +140,12 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
     agentId: deps.agentId,
     sessionId: deps.sessionId,
     taskId: deps.taskId,
-    memoryTopics: deps.memoryTopics,
     memoryFiles: deps.memoryFiles,
   };
-  // getMessages reads session.memoryTopics/memoryFiles so context refreshes
+  // getMessages reads session.memoryFiles so context refreshes
   // applied by contextRefreshMiddleware are visible on the next iteration.
   const getMessages: GetMessagesFn = () =>
-    deps.buildMessages(session.memoryTopics, session.memoryFiles);
+    deps.buildMessages(session.memoryFiles);
 
   const pipeline = new MiddlewarePipeline()
     .use(observabilityMiddleware(deps.observability))
@@ -192,9 +189,8 @@ export interface BrokerRunnerDeps {
   contextRefresh: ContextRefreshDeps;
   a2aTask: A2ATaskDeps;
   analytics?: AnalyticsStore | null;
-  /** Build context messages using current memoryTopics/memoryFiles from session. */
+  /** Build context messages using current memoryFiles from session. */
   buildMessages: (
-    memoryTopics: string[],
     memoryFiles: string[],
   ) => Promise<Message[]>;
   toolDefinitions: ToolDefinition[];
@@ -212,13 +208,12 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
     agentId: deps.agentId,
     sessionId: `agent:${deps.canonicalTask.contextId ?? deps.canonicalTask.id}`,
     taskId: deps.canonicalTask.id,
-    memoryTopics: [],
     memoryFiles: deps.memoryFiles,
     canonicalTask: deps.canonicalTask,
     runtimeGrants: deps.runtimeGrants,
   };
   const getMessages: GetMessagesFn = () =>
-    deps.buildMessages(session.memoryTopics, session.memoryFiles);
+    deps.buildMessages(session.memoryFiles);
 
   const pipeline = new MiddlewarePipeline()
     .use(memoryMiddleware(deps.memory))

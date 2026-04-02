@@ -54,18 +54,6 @@ class MemoryStub implements MemoryPort {
   get count(): number {
     return this.messages.length;
   }
-  remember(): Promise<void> {
-    return Promise.resolve();
-  }
-  recallTopic(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-  listTopics(): Promise<string[]> {
-    return Promise.resolve([]);
-  }
-  forgetTopic(): Promise<void> {
-    return Promise.resolve();
-  }
 }
 
 function createBrokerStub(responseText = "done"): BrokerTaskPortStub {
@@ -135,7 +123,6 @@ function createRuntime(
         messages: Message[],
         _skills: unknown[],
         _facts: unknown[],
-        _memoryTopics?: string[],
         _memoryFiles?: string[],
         runtimeGrants?: AgentRuntimeGrant[],
       ): Message[];
@@ -152,7 +139,6 @@ function createRuntime(
       messages: Message[],
       _skills?: unknown[],
       _facts?: unknown[],
-      _memoryTopics?: string[],
       _memoryFiles?: string[],
       runtimeGrants?: AgentRuntimeGrant[],
     ) {

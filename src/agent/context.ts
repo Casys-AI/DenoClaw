@@ -20,14 +20,12 @@ export class ContextBuilder {
 
   /**
    * @param now — explicit timestamp for AX-6 determinism. Defaults to current time.
-   * @param memoryTopics — topics in long-term memory, injected so the agent knows what it remembers.
    * @param memoryFiles — workspace memory .md files the agent can read/write.
    */
   buildSystemPrompt(
     skills: Skill[],
     tools: ToolDefinition[],
     now: Date = new Date(),
-    memoryTopics?: string[],
     memoryFiles?: string[],
     runtimeGrants: AgentRuntimeGrant[] = [],
   ): string {
@@ -35,18 +33,6 @@ export class ContextBuilder {
 
     parts.push(this.config.systemPrompt || this.defaultPrompt());
     parts.push(`\nCurrent time: ${formatDate(now)}`);
-
-    if (memoryTopics && memoryTopics.length > 0) {
-      parts.push("\n## Long-term Memory");
-      parts.push(
-        `You have ${memoryTopics.length} topic(s) in memory: ${
-          memoryTopics.join(", ")
-        }`,
-      );
-      parts.push(
-        "Use the memory tool with action 'recall' to retrieve facts, or 'remember' to store new ones.",
-      );
-    }
 
     if (memoryFiles && memoryFiles.length > 0) {
       parts.push("\n## Memory Files");
@@ -112,7 +98,6 @@ Guidelines:
     conversation: Message[],
     skills: Skill[],
     tools: ToolDefinition[],
-    memoryTopics?: string[],
     memoryFiles?: string[],
     runtimeGrants: AgentRuntimeGrant[] = [],
     now: Date = new Date(),
@@ -124,7 +109,6 @@ Guidelines:
           skills,
           tools,
           now,
-          memoryTopics,
           memoryFiles,
           runtimeGrants,
         ),

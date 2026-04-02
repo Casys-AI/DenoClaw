@@ -3,7 +3,7 @@ import { join } from "@std/path";
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopLike } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
-import type { LongTermFact, MemoryPort } from "./memory/port.ts";
+import type { MemoryPort } from "./memory/port.ts";
 import type {
   LLMResponse,
   Message,
@@ -52,7 +52,6 @@ class StubTool extends BaseTool {
 
 class FakeMemory implements MemoryPort {
   #messages: Message[] = [];
-  #facts = new Map<string, { content: string; timestamp: string }[]>();
 
   get count(): number {
     return this.#messages.length;
@@ -85,44 +84,6 @@ class FakeMemory implements MemoryPort {
 
   clear(): Promise<void> {
     this.#messages = [];
-    return Promise.resolve();
-  }
-
-  remember(
-    fact: {
-      topic: string;
-      content: string;
-      source?: "user" | "agent" | "tool";
-      confidence?: number;
-    },
-  ): Promise<void> {
-    const existing = this.#facts.get(fact.topic) ?? [];
-    existing.push({
-      content: fact.content,
-      timestamp: new Date().toISOString(),
-    });
-    this.#facts.set(fact.topic, existing);
-    return Promise.resolve();
-  }
-
-  recallTopic(
-    topic: string,
-  ): Promise<LongTermFact[]> {
-    return Promise.resolve(
-      (this.#facts.get(topic) ?? []).map((fact) => ({
-        topic,
-        content: fact.content,
-        timestamp: fact.timestamp,
-      })),
-    );
-  }
-
-  listTopics(): Promise<string[]> {
-    return Promise.resolve([...this.#facts.keys()]);
-  }
-
-  forgetTopic(topic: string): Promise<void> {
-    this.#facts.delete(topic);
     return Promise.resolve();
   }
 }

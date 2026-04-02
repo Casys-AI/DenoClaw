@@ -74,7 +74,6 @@ Deno.test("buildSystemPrompt includes temporary runtime grants", () => {
     [],
     new Date("2025-01-15T10:30:00.000Z"),
     undefined,
-    undefined,
     [
       {
         kind: "privilege-elevation",

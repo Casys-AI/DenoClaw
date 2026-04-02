@@ -72,7 +72,6 @@ function makeSession(): SessionState {
     agentId: "agent-1",
     sessionId: "session-1",
     taskId: "task-1",
-    memoryTopics: [],
     memoryFiles: [],
   };
 }

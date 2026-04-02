@@ -4,18 +4,16 @@ import type { Middleware } from "../middleware.ts";
 interface ContextRefreshState {
   reloadSkills: boolean;
   reloadMemoryFiles: boolean;
-  reloadMemoryTopics: boolean;
 }
 
 export interface ContextRefreshDeps {
   skills: { reload(): Promise<void> };
-  memory: { listTopics(): Promise<string[]> };
   refreshMemoryFiles: (() => Promise<string[]>) | undefined;
 }
 
 export function contextRefreshMiddleware(deps: ContextRefreshDeps): Middleware {
   let refreshState: ContextRefreshState = {
-    reloadSkills: false, reloadMemoryFiles: false, reloadMemoryTopics: false,
+    reloadSkills: false, reloadMemoryFiles: false,
   };
   let lastRefreshedIteration = 0;
 
@@ -26,11 +24,8 @@ export function contextRefreshMiddleware(deps: ContextRefreshDeps): Middleware {
       if (refreshState.reloadMemoryFiles && deps.refreshMemoryFiles) {
         ctx.session.memoryFiles = await deps.refreshMemoryFiles();
       }
-      if (refreshState.reloadMemoryTopics) {
-        ctx.session.memoryTopics = await deps.memory.listTopics();
-      }
       lastRefreshedIteration = ctx.event.iterationId;
-      refreshState = { reloadSkills: false, reloadMemoryFiles: false, reloadMemoryTopics: false };
+      refreshState = { reloadSkills: false, reloadMemoryFiles: false };
     }
 
     // Detect refresh triggers on tool_result
@@ -53,11 +48,6 @@ function applyRefreshDetection(
     const path = normalizeWorkspaceRelativePath(args.path);
     if (path?.startsWith("skills/")) state.reloadSkills = true;
     if (path?.startsWith("memories/")) state.reloadMemoryFiles = true;
-    return;
-  }
-  if (tool === "memory") {
-    const action = typeof args.action === "string" ? args.action : "";
-    if (action === "remember" || action === "forget") state.reloadMemoryTopics = true;
   }
 }
 

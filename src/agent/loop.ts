@@ -38,6 +38,8 @@ import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
 import { createLocalRunner } from "./runner.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
+import { WorkingMemoryTool } from "./tools/working_memory.ts";
+import type { WorkingMemoryPort } from "./tools/working_memory.ts";
 import { getConfiguredAnalyticsStore } from "../db/analytics.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
@@ -138,6 +140,14 @@ export class AgentLoop implements AgentLoopLike {
         new SendToAgentTool(deps.sendToAgent, deps.availablePeers),
       );
     }
+    // Register working memory tool if the memory supports it (MastraMemory)
+    const wmPort = deps.memory as unknown as WorkingMemoryPort;
+    if (
+      typeof wmPort.getWorkingMemory === "function" &&
+      typeof wmPort.updateWorkingMemory === "function"
+    ) {
+      this.tools.register(new WorkingMemoryTool(wmPort));
+    }
     if (deps?.sandboxConfig) {
       const backend = createSandboxBackend(deps.sandboxConfig);
       const toolsCfg = {
@@ -197,8 +207,6 @@ export class AgentLoop implements AgentLoopLike {
     return new SkillsLoader();
   }
 
-  private memoryTopics: string[] = [];
-
   private async refreshMemoryFiles(): Promise<string[]> {
     return await listAgentMemoryFiles({
       agentId: this.agentId,
@@ -211,7 +219,6 @@ export class AgentLoop implements AgentLoopLike {
   async initialize(): Promise<void> {
     await this.memory.load();
     await this.skills.loadSkills();
-    this.memoryTopics = await this.memory.listTopics();
     this.memoryFiles = await this.refreshMemoryFiles();
   }
 
@@ -228,7 +235,6 @@ export class AgentLoop implements AgentLoopLike {
       agentId: this.agentId,
       sessionId: this.sessionId,
       taskId: this.taskId,
-      memoryTopics: this.memoryTopics,
       memoryFiles: this.memoryFiles,
       memory: this.memory,
       complete: (messages, model, temperature, maxTokens, tools) =>
@@ -246,16 +252,14 @@ export class AgentLoop implements AgentLoopLike {
       },
       contextRefresh: {
         skills: this.skills,
-        memory: this.memory,
         refreshMemoryFiles: () => this.refreshMemoryFiles(),
       },
       analytics: getConfiguredAnalyticsStore(),
-      buildMessages: async (memoryTopics, memoryFiles) => {
+      buildMessages: async (memoryFiles) => {
         const raw = this.context.buildContextMessages(
           await this.memory.getMessages(),
           this.skills.getSkills(),
           this.tools.getDefinitions(),
-          memoryTopics,
           memoryFiles,
           this.getRuntimeGrants?.() ?? [],
         );

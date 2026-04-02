@@ -1,6 +1,6 @@
 import { collection, kvdex, model } from "@olli/kvdex";
 import type { Message } from "../../shared/types.ts";
-import type { LongTermFact, MemoryPort } from "./port.ts";
+import type { MemoryPort } from "./port.ts";
 import { log } from "../../shared/log.ts";
 
 type ConvMessageDoc = {
@@ -14,23 +14,12 @@ type ConvMessageDoc = {
   timestamp: string;
 };
 
-type LongTermDoc = {
-  topic: string;
-  content: string;
-  source: string | undefined;
-  confidence: number | undefined;
-  timestamp: string;
-};
-
 function openDb(kv: Deno.Kv) {
   return kvdex({
     kv,
     schema: {
       convMessages: collection(model<ConvMessageDoc>(), {
         indices: { sessionId: "secondary" },
-      }),
-      longTermFacts: collection(model<LongTermDoc>(), {
-        indices: { topic: "secondary" },
       }),
     },
   });
@@ -178,75 +167,6 @@ export class KvdexMemory implements MemoryPort {
 
   get count(): number {
     return this.cache.length;
-  }
-
-  async remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
-    try {
-      const db = await this.getDb();
-      const doc: LongTermDoc = {
-        topic: fact.topic,
-        content: fact.content,
-        source: fact.source,
-        confidence: fact.confidence,
-        timestamp: new Date().toISOString(),
-      };
-      await db.longTermFacts.add(doc);
-      log.debug(
-        `Remembered fact [${fact.topic}]: ${fact.content.slice(0, 80)}`,
-      );
-    } catch (e) {
-      log.error(`Failed to remember (${fact.topic})`, e);
-    }
-  }
-
-  async recallTopic(topic: string, limit = 10): Promise<LongTermFact[]> {
-    try {
-      const db = await this.getDb();
-      const result = await db.longTermFacts.findBySecondaryIndex(
-        "topic",
-        topic,
-        { limit },
-      );
-      return result.result
-        .filter((d) => d.value != null)
-        .map((d) => ({
-          topic: d.value!.topic,
-          content: d.value!.content,
-          source: d.value!.source as LongTermFact["source"],
-          confidence: d.value!.confidence,
-          timestamp: d.value!.timestamp,
-        }));
-    } catch (e) {
-      log.error(`Failed to recall (${topic})`, e);
-      return [];
-    }
-  }
-
-  async listTopics(): Promise<string[]> {
-    try {
-      const db = await this.getDb();
-      const all = await db.longTermFacts.getMany();
-      const topics = new Set<string>();
-      for (const doc of all.result) {
-        if (doc.value?.topic) topics.add(doc.value.topic);
-      }
-      return [...topics].sort();
-    } catch (e) {
-      log.error("Failed to list topics", e);
-      return [];
-    }
-  }
-
-  async forgetTopic(topic: string): Promise<void> {
-    try {
-      const db = await this.getDb();
-      await db.longTermFacts.deleteMany({
-        filter: (doc) => doc.value.topic === topic,
-      });
-      log.debug(`Forgot facts [${topic}]`);
-    } catch (e) {
-      log.error(`Failed to forgetTopic (${topic})`, e);
-    }
   }
 
   close(): void {

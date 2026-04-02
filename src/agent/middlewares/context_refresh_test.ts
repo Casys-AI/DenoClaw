@@ -6,16 +6,15 @@ import type { SessionState } from "../middleware.ts";
 function makeSession(): SessionState {
   return {
     agentId: "a", sessionId: "s",
-    memoryTopics: ["old-topic"], memoryFiles: ["old-file.md"],
+    memoryFiles: ["old-file.md"],
   };
 }
 
 Deno.test("contextRefreshMiddleware reloads skills after write_file to skills/", async () => {
   let reloaded = false;
   const skills = { reload: () => { reloaded = true; return Promise.resolve(); } };
-  const memory = { listTopics: () => Promise.resolve(["t1"]) };
   const refreshFiles = () => Promise.resolve(["new.md"]);
-  const mw = contextRefreshMiddleware({ skills, memory, refreshMemoryFiles: refreshFiles });
+  const mw = contextRefreshMiddleware({ skills, refreshMemoryFiles: refreshFiles });
   const session = makeSession();
 
   const toolResult: ToolResultEvent = {
@@ -37,9 +36,8 @@ Deno.test("contextRefreshMiddleware reloads skills after write_file to skills/",
 
 Deno.test("contextRefreshMiddleware reloads memory files after write_file to memories/", async () => {
   const skills = { reload: () => Promise.resolve() };
-  const memory = { listTopics: () => Promise.resolve([]) };
   const refreshFiles = () => Promise.resolve(["new-mem.md"]);
-  const mw = contextRefreshMiddleware({ skills, memory, refreshMemoryFiles: refreshFiles });
+  const mw = contextRefreshMiddleware({ skills, refreshMemoryFiles: refreshFiles });
   const session = makeSession();
 
   const toolResult: ToolResultEvent = {
@@ -58,35 +56,11 @@ Deno.test("contextRefreshMiddleware reloads memory files after write_file to mem
   assertEquals(session.memoryFiles, ["new-mem.md"]);
 });
 
-Deno.test("contextRefreshMiddleware reloads topics after memory remember/forget", async () => {
-  const skills = { reload: () => Promise.resolve() };
-  const memory = { listTopics: () => Promise.resolve(["new-topic"]) };
-  const refreshFiles = () => Promise.resolve([]);
-  const mw = contextRefreshMiddleware({ skills, memory, refreshMemoryFiles: refreshFiles });
-  const session = makeSession();
-
-  const toolResult: ToolResultEvent = {
-    eventId: 3, timestamp: Date.now(), iterationId: 1,
-    type: "tool_result", callId: "tc1", name: "memory",
-    arguments: { action: "remember", topic: "cats", content: "cats are great" },
-    result: { success: true, output: "remembered" },
-  };
-  await mw({ event: toolResult, session }, () => Promise.resolve(undefined));
-
-  const llmReq: LlmRequestEvent = {
-    eventId: 4, timestamp: Date.now(), iterationId: 2,
-    type: "llm_request",  tools: [], config: { model: "m" },
-  };
-  await mw({ event: llmReq, session }, () => Promise.resolve({ type: "llm" as const, content: "ok" }));
-  assertEquals(session.memoryTopics, ["new-topic"]);
-});
-
 Deno.test("contextRefreshMiddleware ignores dry_run writes", async () => {
   let reloaded = false;
   const skills = { reload: () => { reloaded = true; return Promise.resolve(); } };
-  const memory = { listTopics: () => Promise.resolve([]) };
   const refreshFiles = () => Promise.resolve([]);
-  const mw = contextRefreshMiddleware({ skills, memory, refreshMemoryFiles: refreshFiles });
+  const mw = contextRefreshMiddleware({ skills, refreshMemoryFiles: refreshFiles });
   const session = makeSession();
 
   const toolResult: ToolResultEvent = {

@@ -35,7 +35,7 @@ class RecordingTraceWriter {
 }
 
 function makeSession(): SessionState {
-  return { agentId: "agent-1", sessionId: "sess-1", memoryTopics: [], memoryFiles: [] };
+  return { agentId: "agent-1", sessionId: "sess-1", memoryFiles: [] };
 }
 
 Deno.test("observabilityMiddleware starts trace on first event", async () => {

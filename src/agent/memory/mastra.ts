@@ -2,8 +2,9 @@
 // Requires: @mastra/memory, @mastra/pg in deno.json imports (added in Task 13)
 
 import type { Message } from "../../shared/types.ts";
-import type { LongTermFact, MemoryPort } from "./port.ts";
+import type { MemoryPort } from "./port.ts";
 import type { EmbedderPort } from "./embedder_port.ts";
+import type { WorkingMemoryPort } from "../tools/working_memory.ts";
 import { log } from "../../shared/log.ts";
 
 const DEFAULT_WORKING_MEMORY_TEMPLATE = `
@@ -52,6 +53,8 @@ interface MastraMemoryInstance {
   getThreadById(opts: { threadId: string }): Promise<unknown | null>;
   createThread(opts: Record<string, unknown>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
+  getWorkingMemory(opts: { threadId: string }): Promise<string | null>;
+  updateWorkingMemory(opts: { threadId: string; workingMemory: string }): Promise<void>;
 }
 
 function toMastraMessage(msg: Message): MastraMessage {
@@ -82,7 +85,7 @@ function toMastraEmbedder(port: EmbedderPort) {
   };
 }
 
-export class MastraMemory implements MemoryPort {
+export class MastraMemory implements MemoryPort, WorkingMemoryPort {
   private initPromise: Promise<MastraMemoryInstance> | null = null;
   private threadId: string;
   private config: MastraMemoryConfig;
@@ -197,42 +200,14 @@ export class MastraMemory implements MemoryPort {
     return result.messages.map(fromMastraMessage);
   }
 
-  remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
-    // With working memory enabled, facts are managed by Mastra through
-    // the working memory template. The agent updates it conversationally.
-    log.debug(`MastraMemory: remember(${fact.topic}) — handled by working memory`);
-    return Promise.resolve();
+  async getWorkingMemory(): Promise<string> {
+    const mastra = await this.getMastra();
+    const wm = await mastra.getWorkingMemory({ threadId: this.threadId });
+    return wm ?? "";
   }
 
-  async recallTopic(topic: string, _limit?: number): Promise<LongTermFact[]> {
-    try {
-      const mastra = await this.getMastra();
-      const result = await mastra.recall({
-        threadId: this.threadId,
-        vectorSearchString: topic,
-        threadConfig: { semanticRecall: { topK: 5, messageRange: 0 } },
-      });
-      return result.messages
-        .map(fromMastraMessage)
-        .map((m) => ({
-          topic,
-          content: m.content,
-          timestamp: new Date().toISOString(),
-        }));
-    } catch (e) {
-      log.error(`MastraMemory: recallTopic failed (topic: ${topic})`, e);
-      return [];
-    }
-  }
-
-  listTopics(): Promise<string[]> {
-    // Working memory replaces topic-based facts.
-    // The agent's knowledge is in the working memory template.
-    return Promise.resolve([]);
-  }
-
-  forgetTopic(_topic: string): Promise<void> {
-    log.warn("MastraMemory: forgetTopic not supported — use working memory");
-    return Promise.resolve();
+  async updateWorkingMemory(content: string): Promise<void> {
+    const mastra = await this.getMastra();
+    await mastra.updateWorkingMemory({ threadId: this.threadId, workingMemory: content });
   }
 }

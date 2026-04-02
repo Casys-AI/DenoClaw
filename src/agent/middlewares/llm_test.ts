@@ -3,7 +3,7 @@ import { llmMiddleware } from "./llm.ts";
 import type { SessionState } from "../middleware.ts";
 
 function makeSession(): SessionState {
-  return { agentId: "a", sessionId: "s", memoryTopics: [], memoryFiles: [] };
+  return { agentId: "a", sessionId: "s", memoryFiles: [] };
 }
 
 Deno.test("llmMiddleware resolves llm_request events", async () => {

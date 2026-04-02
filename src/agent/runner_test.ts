@@ -21,7 +21,7 @@ class StubMemory {
 function makeSession(): SessionState {
   return {
     agentId: "agent-1", sessionId: "sess-1",
-    memoryTopics: [], memoryFiles: [],
+    memoryFiles: [],
   };
 }
 
@@ -148,7 +148,6 @@ Deno.test("createLocalRunner works when analytics are explicitly disabled", asyn
   const { runner, kernelInput } = createLocalRunner({
     agentId: "agent-1",
     sessionId: "sess-1",
-    memoryTopics: [],
     memoryFiles: [],
     memory,
     complete: () => Promise.resolve({
@@ -164,7 +163,6 @@ Deno.test("createLocalRunner works when analytics are explicitly disabled", asyn
     },
     contextRefresh: {
       skills: { reload: () => Promise.resolve() },
-      memory: { listTopics: () => Promise.resolve([]) },
       refreshMemoryFiles: undefined,
     },
     analytics: null,

@@ -1,5 +1,5 @@
 import type { EmbedderPort } from "../embedder_port.ts";
-import { ProviderError } from "../../shared/errors.ts";
+import { ProviderError } from "../../../shared/errors.ts";
 
 export class OllamaEmbedder implements EmbedderPort {
   readonly dimension: number;

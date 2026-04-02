@@ -1,7 +1,7 @@
-import type { MemoryPort } from "./memory_port.ts";
+import type { MemoryPort } from "./port.ts";
 import type { EmbedderPort } from "./embedder_port.ts";
-import { KvdexMemory } from "./memory_kvdex.ts";
-import { log } from "../shared/log.ts";
+import { KvdexMemory } from "./kvdex.ts";
+import { log } from "../../shared/log.ts";
 
 export async function createEmbedder(): Promise<EmbedderPort> {
   const provider = Deno.env.get("EMBEDDER_PROVIDER") ?? "fastembed";

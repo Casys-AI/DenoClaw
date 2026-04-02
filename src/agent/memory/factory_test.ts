@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { createMemory, createEmbedder } from "./memory_factory.ts";
-import { KvdexMemory } from "./memory_kvdex.ts";
+import { createMemory, createEmbedder } from "./factory.ts";
+import { KvdexMemory } from "./kvdex.ts";
 
 Deno.test({
   name: "createMemory returns KvdexMemory when DATABASE_URL is absent",

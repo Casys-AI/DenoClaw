@@ -1,4 +1,4 @@
-import type { Message } from "../shared/types.ts";
+import type { Message } from "../../shared/types.ts";
 
 export interface LongTermFact {
   topic: string;

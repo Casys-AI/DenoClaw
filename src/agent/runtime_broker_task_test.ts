@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { AgentRuntime } from "./runtime.ts";
-import type { MemoryPort } from "./memory_port.ts";
+import type { MemoryPort } from "./memory/port.ts";
 import type {
   RuntimeTaskContinueMessage,
   RuntimeTaskSubmitMessage,

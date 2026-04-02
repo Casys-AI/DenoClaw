@@ -3,7 +3,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from "../../shared/types.ts";
-import type { MemoryPort } from "../memory_port.ts";
+import type { MemoryPort } from "../memory/port.ts";
 import { BaseTool } from "./registry.ts";
 
 /**

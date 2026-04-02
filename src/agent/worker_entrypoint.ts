@@ -15,7 +15,7 @@
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
-import { createMemory } from "./memory_factory.ts";
+import { createMemory } from "./memory/factory.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
 import type { AgentEntry } from "../shared/types.ts";

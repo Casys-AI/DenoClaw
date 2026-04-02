@@ -1,10 +1,10 @@
 // src/agent/memory_mastra.ts
 // Requires: @mastra/memory, @mastra/pg in deno.json imports (added in Task 13)
 
-import type { Message } from "../shared/types.ts";
-import type { LongTermFact, MemoryPort } from "./memory_port.ts";
+import type { Message } from "../../shared/types.ts";
+import type { LongTermFact, MemoryPort } from "./port.ts";
 import type { EmbedderPort } from "./embedder_port.ts";
-import { log } from "../shared/log.ts";
+import { log } from "../../shared/log.ts";
 
 export interface MastraMemoryConfig {
   connectionString: string;

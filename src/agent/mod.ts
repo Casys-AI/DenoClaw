@@ -1,6 +1,6 @@
 export { AgentLoop } from "./loop.ts";
 export { AgentRuntime } from "./runtime.ts";
-export { KvdexMemory } from "./memory_kvdex.ts";
+export { KvdexMemory } from "./memory/kvdex.ts";
 export { WorkerPool } from "./worker_pool.ts";
 export type { WorkerPoolCallbacks } from "./worker_pool.ts";
 export type {
@@ -43,11 +43,11 @@ export { WebFetchTool } from "./tools/web.ts";
 export type { BuiltinToolName } from "./tools/types.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./tools/types.ts";
 
-// Mastra memory
-export type { EmbedderPort } from "./embedder_port.ts";
-export type { LongTermFact, MemoryPort } from "./memory_port.ts";
-export type { MastraMemoryConfig } from "./memory_mastra.ts";
-export { createEmbedder, createMemory } from "./memory_factory.ts";
+// Memory
+export type { EmbedderPort } from "./memory/embedder_port.ts";
+export type { LongTermFact, MemoryPort } from "./memory/port.ts";
+export type { MastraMemoryConfig } from "./memory/mastra.ts";
+export { createEmbedder, createMemory } from "./memory/factory.ts";
 
 // Kaku kernel
 export { AgentRunner, createBrokerRunner, createLocalRunner } from "./runner.ts";

@@ -16,7 +16,7 @@ interface AgentLoopConfig {
   providers: ProvidersConfig;
   tools?: ToolsConfig;
 }
-import type { MemoryPort } from "./memory_port.ts";
+import type { MemoryPort } from "./memory/port.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
 import { EmptySkillLoader, KvSkillsLoader, SkillsLoader } from "./skills.ts";

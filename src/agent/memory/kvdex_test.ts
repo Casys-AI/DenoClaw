@@ -1,5 +1,5 @@
 import { assertEquals, assertGreater } from "@std/assert";
-import { KvdexMemory } from "./memory_kvdex.ts";
+import { KvdexMemory } from "./kvdex.ts";
 
 const testOpts = { sanitizeResources: false, sanitizeOps: false };
 

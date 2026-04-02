@@ -3,7 +3,7 @@ import { join } from "@std/path";
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopLike } from "./loop.ts";
 import { ToolRegistry } from "./tools/registry.ts";
-import type { LongTermFact, MemoryPort } from "./memory_port.ts";
+import type { LongTermFact, MemoryPort } from "./memory/port.ts";
 import type {
   LLMResponse,
   Message,

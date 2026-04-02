@@ -1,0 +1,6 @@
+export type { LongTermFact, MemoryPort } from "./port.ts";
+export type { EmbedderPort } from "./embedder_port.ts";
+export { KvdexMemory } from "./kvdex.ts";
+export { MastraMemory } from "./mastra.ts";
+export type { MastraMemoryConfig } from "./mastra.ts";
+export { createMemory, createEmbedder } from "./factory.ts";

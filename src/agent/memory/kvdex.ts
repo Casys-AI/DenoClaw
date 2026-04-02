@@ -1,7 +1,7 @@
 import { collection, kvdex, model } from "@olli/kvdex";
-import type { Message } from "../shared/types.ts";
-import type { LongTermFact, MemoryPort } from "./memory_port.ts";
-import { log } from "../shared/log.ts";
+import type { Message } from "../../shared/types.ts";
+import type { LongTermFact, MemoryPort } from "./port.ts";
+import { log } from "../../shared/log.ts";
 
 type ConvMessageDoc = {
   sessionId: string;

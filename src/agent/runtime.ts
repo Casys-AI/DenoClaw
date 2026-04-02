@@ -5,7 +5,7 @@ import type {
 } from "../shared/types.ts";
 import { DenoClawError } from "../shared/errors.ts";
 import type { AgentConfig } from "./types.ts";
-import type { MemoryPort } from "./memory_port.ts";
+import type { MemoryPort } from "./memory/port.ts";
 import type { Task } from "../messaging/a2a/types.ts";
 import {
   extractContinuationTaskMessage,
@@ -16,7 +16,7 @@ import {
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
 import { mapTaskErrorToTerminalStatus } from "../messaging/a2a/task_mapping.ts";
-import { createMemory } from "./memory_factory.ts";
+import { createMemory } from "./memory/factory.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
 import { KvSkillsLoader, SkillsLoader } from "./skills.ts";

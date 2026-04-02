@@ -9,9 +9,9 @@
 export { AgentLoop } from "./src/agent/loop.ts";
 export { AgentRuntime } from "./src/agent/runtime.ts";
 export { startDeployedAgentRuntime } from "./src/agent/deploy_runtime.ts";
-export { KvdexMemory } from "./src/agent/memory_kvdex.ts";
-export { createMemory, createEmbedder } from "./src/agent/memory_factory.ts";
-export type { LongTermFact, MemoryPort } from "./src/agent/memory_port.ts";
+export { KvdexMemory } from "./src/agent/memory/kvdex.ts";
+export { createMemory, createEmbedder } from "./src/agent/memory/factory.ts";
+export type { LongTermFact, MemoryPort } from "./src/agent/memory/port.ts";
 export { WorkspaceLoader } from "./src/agent/workspace.ts";
 export type { AgentWorkspace } from "./src/agent/workspace.ts";
 export { ContextBuilder } from "./src/agent/context.ts";

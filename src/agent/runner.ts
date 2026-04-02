@@ -2,7 +2,7 @@ import type { AgentResponse } from "./types.ts";
 import type { FinalEvent } from "./events.ts";
 import { agentKernel } from "./kernel.ts";
 import type { KernelInput } from "./kernel.ts";
-import { MiddlewarePipeline } from "./middleware.ts";
+import type { MiddlewarePipeline } from "./middleware.ts";
 import type { SessionState } from "./middleware.ts";
 import type { EventStore } from "./event_store.ts";
 import { PrivilegeElevationPause } from "./middlewares/a2a_task.ts";

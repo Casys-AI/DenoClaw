@@ -42,3 +42,25 @@ export { ReadFileTool, WriteFileTool } from "./tools/file.ts";
 export { WebFetchTool } from "./tools/web.ts";
 export type { BuiltinToolName } from "./tools/types.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./tools/types.ts";
+
+// Kaku kernel
+export { AgentRunner } from "./runner.ts";
+export { MiddlewarePipeline } from "./middleware.ts";
+export type { Middleware, MiddlewareContext, SessionState } from "./middleware.ts";
+export { agentKernel } from "./kernel.ts";
+export type { KernelInput } from "./kernel.ts";
+export { InMemoryEventStore } from "./event_store.ts";
+export type { EventStore } from "./event_store.ts";
+export type {
+  AgentEvent,
+  CompleteEvent,
+  ErrorEvent,
+  EventResolution,
+  FinalEvent,
+  LlmRequestEvent,
+  LlmResolution,
+  LlmResponseEvent,
+  ToolCallEvent,
+  ToolResolution,
+  ToolResultEvent,
+} from "./events.ts";

@@ -25,8 +25,8 @@ Deno.test("empty pipeline returns undefined", async () => {
 
 Deno.test("middleware can resolve an event", async () => {
   const pipeline = new MiddlewarePipeline();
-  pipeline.use(async (_ctx, _next) => {
-    return { type: "llm" as const, content: "hello", toolCalls: [] };
+  pipeline.use((_ctx, _next) => {
+    return Promise.resolve({ type: "llm" as const, content: "hello", toolCalls: [] });
   });
   const result = await pipeline.execute(makeEvent(), makeSession());
   assertEquals(result?.type, "llm");
@@ -47,9 +47,9 @@ Deno.test("middleware chain executes in order (onion model)", async () => {
     order.push("B-after");
     return res;
   });
-  pipeline.use(async (_ctx, _next) => {
+  pipeline.use((_ctx, _next) => {
     order.push("C-resolve");
-    return { type: "llm" as const, content: "ok", toolCalls: [] };
+    return Promise.resolve({ type: "llm" as const, content: "ok", toolCalls: [] });
   });
   await pipeline.execute(makeEvent(), makeSession());
   assertEquals(order, ["A-before", "B-before", "C-resolve", "B-after", "A-after"]);
@@ -59,10 +59,10 @@ Deno.test("middleware receives event and session in context", async () => {
   const pipeline = new MiddlewarePipeline();
   let capturedEvent: unknown;
   let capturedSession: unknown;
-  pipeline.use(async (ctx, _next) => {
+  pipeline.use((ctx, _next) => {
     capturedEvent = ctx.event;
     capturedSession = ctx.session;
-    return undefined;
+    return Promise.resolve(undefined);
   });
   const event = makeEvent();
   const session = makeSession();

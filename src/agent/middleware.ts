@@ -32,13 +32,13 @@ export class MiddlewarePipeline {
     return this;
   }
 
-  async execute(
+  execute(
     event: AgentEvent,
     session: SessionState,
   ): Promise<EventResolution | undefined> {
     let index = 0;
-    const next = async (): Promise<EventResolution | undefined> => {
-      if (index >= this.stack.length) return undefined;
+    const next = (): Promise<EventResolution | undefined> => {
+      if (index >= this.stack.length) return Promise.resolve(undefined);
       const mw = this.stack[index++];
       return mw({ event, session }, next);
     };

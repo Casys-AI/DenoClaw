@@ -8,11 +8,12 @@ export interface EventStore {
 export class InMemoryEventStore implements EventStore {
   private events: AgentEvent[] = [];
 
-  async commit(event: AgentEvent): Promise<void> {
+  commit(event: AgentEvent): Promise<void> {
     this.events.push(event);
+    return Promise.resolve();
   }
 
-  async getEvents(): Promise<AgentEvent[]> {
-    return [...this.events];
+  getEvents(): Promise<AgentEvent[]> {
+    return Promise.resolve([...this.events]);
   }
 }

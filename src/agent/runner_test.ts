@@ -27,9 +27,9 @@ function makeSession(): SessionState {
 Deno.test("AgentRunner orchestrates kernel + pipeline to completion", async () => {
   const pipeline = new MiddlewarePipeline();
   // LLM middleware: returns text-only response
-  pipeline.use(async (ctx, next) => {
+  pipeline.use((ctx, next) => {
     if (ctx.event.type === "llm_request") {
-      return { type: "llm" as const, content: "Hello!", finishReason: "stop" } as LlmResolution;
+      return Promise.resolve({ type: "llm" as const, content: "Hello!", finishReason: "stop" } as LlmResolution);
     }
     return next();
   });
@@ -76,23 +76,23 @@ Deno.test("AgentRunner handles tool calls across iterations", async () => {
   });
 
   // LLM middleware
-  pipeline.use(async (ctx, next) => {
+  pipeline.use((ctx, next) => {
     if (ctx.event.type === "llm_request") {
       llmCalls++;
       if (llmCalls === 1) {
-        return {
+        return Promise.resolve({
           type: "llm" as const, content: "",
           toolCalls: [{ id: "tc1", type: "function" as const, function: { name: "shell", arguments: '{"command":"ls"}' } }],
-        };
+        });
       }
-      return { type: "llm" as const, content: "Done!", finishReason: "stop" };
+      return Promise.resolve({ type: "llm" as const, content: "Done!", finishReason: "stop" });
     }
     return next();
   });
   // Tool middleware
-  pipeline.use(async (ctx, next) => {
+  pipeline.use((ctx, next) => {
     if (ctx.event.type === "tool_call") {
-      return { type: "tool" as const, result: { success: true, output: "file.txt" } };
+      return Promise.resolve({ type: "tool" as const, result: { success: true, output: "file.txt" } });
     }
     return next();
   });
@@ -127,18 +127,18 @@ Deno.test("AgentRunner returns last assistant message on max_iterations", async 
   });
 
   // Always return tool calls (forces looping until max_iterations)
-  pipeline.use(async (ctx, next) => {
+  pipeline.use((ctx, next) => {
     if (ctx.event.type === "llm_request") {
-      return {
+      return Promise.resolve({
         type: "llm" as const, content: "still thinking...",
         toolCalls: [{ id: "tc", type: "function" as const, function: { name: "shell", arguments: '{"command":"ls"}' } }],
-      };
+      });
     }
     return next();
   });
-  pipeline.use(async (ctx, next) => {
+  pipeline.use((ctx, next) => {
     if (ctx.event.type === "tool_call") {
-      return { type: "tool" as const, result: { success: true, output: "ok" } };
+      return Promise.resolve({ type: "tool" as const, result: { success: true, output: "ok" } });
     }
     return next();
   });

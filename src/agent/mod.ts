@@ -1,6 +1,6 @@
 export { AgentLoop } from "./loop.ts";
 export { AgentRuntime } from "./runtime.ts";
-export { Memory } from "./memory.ts";
+export { KvdexMemory } from "./memory_kvdex.ts";
 export { WorkerPool } from "./worker_pool.ts";
 export type { WorkerPoolCallbacks } from "./worker_pool.ts";
 export type {

@@ -1,15 +1,15 @@
 import { assertEquals } from "@std/assert";
 import { createMemory, createEmbedder } from "./memory_factory.ts";
-import { Memory } from "./memory.ts";
+import { KvdexMemory } from "./memory_kvdex.ts";
 
 Deno.test({
-  name: "createMemory returns Memory when DATABASE_URL is absent",
+  name: "createMemory returns KvdexMemory when DATABASE_URL is absent",
   async fn() {
     const orig = Deno.env.get("DATABASE_URL");
     Deno.env.delete("DATABASE_URL");
     try {
       const mem = await createMemory("agent-1", "sess-1");
-      assertEquals(mem instanceof Memory, true);
+      assertEquals(mem instanceof KvdexMemory, true);
       mem.close();
     } finally {
       if (orig) Deno.env.set("DATABASE_URL", orig);

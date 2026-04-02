@@ -45,6 +45,7 @@ export { BUILTIN_TOOL_PERMISSIONS } from "./tools/types.ts";
 
 // Mastra memory
 export type { EmbedderPort } from "./embedder_port.ts";
+export type { LongTermFact, MemoryPort } from "./memory_port.ts";
 export type { MastraMemoryConfig } from "./memory_mastra.ts";
 export { createEmbedder, createMemory } from "./memory_factory.ts";
 

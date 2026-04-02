@@ -8,7 +8,7 @@ import type {
 import { parseBrokerMessage } from "../types.ts";
 import type { StructuredError, ToolResult } from "../../shared/types.ts";
 import type { AgentStatusValue } from "../monitoring_types.ts";
-import type { ExecPolicy } from "../../agent/sandbox_types.ts";
+import type { ExecPolicy } from "../../shared/types.ts";
 import type { Config } from "../../config/types.ts";
 import type { ChannelMessage } from "../../messaging/types.ts";
 import { AuthManager } from "../auth.ts";

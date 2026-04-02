@@ -16,7 +16,6 @@ interface AgentLoopConfig {
   providers: ProvidersConfig;
   tools?: ToolsConfig;
 }
-import { AgentError } from "../shared/errors.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
@@ -40,6 +39,7 @@ import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
 import { createLocalRunner } from "./runner.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
+import { getConfiguredAnalyticsStore } from "../db/analytics.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
 import { join } from "@std/path";
@@ -99,9 +99,9 @@ export class AgentLoop implements AgentLoopLike {
   constructor(
     sessionId: string,
     config: AgentLoopConfig,
-    agentConfig?: Partial<AgentConfig>,
-    maxIterations = 10,
-    deps?: AgentLoopDeps,
+    agentConfig: Partial<AgentConfig> | undefined,
+    maxIterations: number,
+    deps: AgentLoopDeps & { memory: MemoryPort },
   ) {
     this.config = {
       model: config.agents?.defaults?.model || "anthropic/claude-sonnet-4-6",
@@ -112,13 +112,6 @@ export class AgentLoop implements AgentLoopLike {
     };
 
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
-    if (!deps?.memory) {
-      throw new AgentError(
-        "MEMORY_REQUIRED",
-        { sessionId },
-        "AgentLoop requires a MemoryPort instance via deps.memory — use createMemory() to create one",
-      );
-    }
     this.memory = deps.memory;
     this.tools = deps?.tools ?? new ToolRegistry();
     if (!deps?.agentId) {
@@ -258,6 +251,7 @@ export class AgentLoop implements AgentLoopLike {
         memory: this.memory,
         refreshMemoryFiles: () => this.refreshMemoryFiles(),
       },
+      analytics: getConfiguredAnalyticsStore(),
       buildMessages: async (memoryTopics, memoryFiles) => {
         const raw = this.context.buildContextMessages(
           await this.memory.getMessages(),

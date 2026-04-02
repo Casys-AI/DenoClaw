@@ -434,16 +434,14 @@ export class PrismaAnalyticsStore implements AnalyticsStore {
   }
 }
 
-const configuredAnalyticsStore = new PrismaAnalyticsStore();
+let configuredAnalyticsStore: PrismaAnalyticsStore | null = null;
 
 export function getConfiguredAnalyticsStore(): AnalyticsStore | null {
-  return isAnalyticsConfigured() ? configuredAnalyticsStore : null;
-}
-
-export function resolveAnalyticsStore(
-  analytics: AnalyticsStore | null | undefined,
-): AnalyticsStore | null {
-  return analytics === undefined ? getConfiguredAnalyticsStore() : analytics;
+  if (!isAnalyticsConfigured()) return null;
+  if (!configuredAnalyticsStore) {
+    configuredAnalyticsStore = new PrismaAnalyticsStore();
+  }
+  return configuredAnalyticsStore;
 }
 
 function readGroupCount(value: { _all?: number } | number | undefined): number {

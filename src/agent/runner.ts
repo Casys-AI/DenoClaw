@@ -27,7 +27,6 @@ import { a2aTaskMiddleware } from "./middlewares/a2a_task.ts";
 import type { A2ATaskDeps } from "./middlewares/a2a_task.ts";
 import { analyticsMiddleware } from "./middlewares/analytics.ts";
 import type { AnalyticsStore } from "../db/analytics.ts";
-import { resolveAnalyticsStore } from "../db/analytics.ts";
 
 // ── Runner ───────────────────────────────────────────
 
@@ -146,8 +145,6 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
     memoryTopics: deps.memoryTopics,
     memoryFiles: deps.memoryFiles,
   };
-  const analytics = resolveAnalyticsStore(deps.analytics);
-
   // getMessages reads session.memoryTopics/memoryFiles so context refreshes
   // applied by contextRefreshMiddleware are visible on the next iteration.
   const getMessages: GetMessagesFn = () =>
@@ -158,8 +155,8 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
     .use(memoryMiddleware(deps.memory))
     .use(contextRefreshMiddleware(deps.contextRefresh));
 
-  if (analytics) {
-    pipeline.use(analyticsMiddleware({ analytics }));
+  if (deps.analytics) {
+    pipeline.use(analyticsMiddleware({ analytics: deps.analytics }));
   }
 
   pipeline
@@ -220,8 +217,6 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
     canonicalTask: deps.canonicalTask,
     runtimeGrants: deps.runtimeGrants,
   };
-  const analytics = resolveAnalyticsStore(deps.analytics);
-
   const getMessages: GetMessagesFn = () =>
     deps.buildMessages(session.memoryTopics, session.memoryFiles);
 
@@ -229,8 +224,8 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
     .use(memoryMiddleware(deps.memory))
     .use(contextRefreshMiddleware(deps.contextRefresh));
 
-  if (analytics) {
-    pipeline.use(analyticsMiddleware({ analytics }));
+  if (deps.analytics) {
+    pipeline.use(analyticsMiddleware({ analytics: deps.analytics }));
   }
 
   pipeline

@@ -16,7 +16,7 @@ import {
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
 import { mapTaskErrorToTerminalStatus } from "../messaging/a2a/task_mapping.ts";
-import { KvdexMemory } from "./memory_kvdex.ts";
+import { createMemory } from "./memory_factory.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
 import { KvSkillsLoader, SkillsLoader } from "./skills.ts";
@@ -27,6 +27,7 @@ import {
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
 import { createBrokerRunner } from "./runner.ts";
+import { getConfiguredAnalyticsStore } from "../db/analytics.ts";
 import { PrivilegeElevationPause } from "./middlewares/a2a_task.ts";
 import {
   extractApprovedPrivilegeElevationGrant,
@@ -59,11 +60,13 @@ import { listAgentMemoryFiles } from "./loop_workspace.ts";
  * - Receives work via handleIncomingMessage() (transport-agnostic)
  * - Calls LLM via AgentBrokerPort (never directly)
  * - Dispatches tool execution to Sandbox (via AgentBrokerPort)
- * - Persists state via MemoryPort (KvdexMemory by default)
+ * - Persists state via MemoryPort (createMemory factory by default)
  *
  * Transport is decided by the caller. The runtime does not assume any
  * specific delivery mechanism.
  */
+
+type MemoryFactory = (agentId: string, sessionId: string) => Promise<MemoryPort>;
 
 export class AgentRuntime {
   private agentId: string;
@@ -77,6 +80,7 @@ export class AgentRuntime {
   private memories: Map<string, MemoryPort> = new Map();
   private toolDefinitions: ToolDefinition[];
   private memoryFiles: string[] = [];
+  private memoryFactory: MemoryFactory;
 
   constructor(
     agentId: string,
@@ -85,6 +89,7 @@ export class AgentRuntime {
     canonicalTaskPort: AgentCanonicalTaskPort<Task>,
     maxIterations = 10,
     runtimeCapabilities?: AgentRuntimeCapabilities,
+    memoryFactory?: MemoryFactory,
   ) {
     this.agentId = agentId;
     this.config = config;
@@ -94,6 +99,7 @@ export class AgentRuntime {
     this.skills = new SkillsLoader(getAgentSkillsDir(agentId));
     this.maxIterations = maxIterations;
     this.toolDefinitions = createBrokerBackedRuntimeToolDefinitions();
+    this.memoryFactory = memoryFactory ?? createMemory;
   }
 
   private async getKv(): Promise<Deno.Kv> {
@@ -104,8 +110,7 @@ export class AgentRuntime {
   private async getMemory(sessionId: string): Promise<MemoryPort> {
     let mem = this.memories.get(sessionId);
     if (!mem) {
-      mem = new KvdexMemory(this.agentId, sessionId);
-      await mem.load();
+      mem = await this.memoryFactory(this.agentId, sessionId);
       this.memories.set(sessionId, mem);
     }
     return mem;
@@ -227,6 +232,7 @@ export class AgentRuntime {
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
+      analytics: getConfiguredAnalyticsStore(),
       buildMessages: async (memoryTopics, memoryFiles) =>
         this.context.buildContextMessages(
           await memory.getMessages(),
@@ -364,6 +370,7 @@ export class AgentRuntime {
       a2aTask: {
         reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
       },
+      analytics: getConfiguredAnalyticsStore(),
       buildMessages: async (memoryTopics, memoryFiles) =>
         this.context.buildContextMessages(
           await memory.getMessages(),

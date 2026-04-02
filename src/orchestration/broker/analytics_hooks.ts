@@ -1,5 +1,5 @@
 import type { AnalyticsStore } from "../../db/analytics.ts";
-import { resolveAnalyticsStore } from "../../db/analytics.ts";
+import { getConfiguredAnalyticsStore } from "../../db/analytics.ts";
 import {
   scheduleAnalyticsWrite,
 } from "../../db/analytics_async.ts";
@@ -28,7 +28,7 @@ export interface RecordTaskResultHookInput {
 }
 
 export function recordTaskSubmission(input: RecordTaskSubmissionHookInput): void {
-  const analytics = resolveAnalyticsStore(input.analytics);
+  const analytics = input.analytics ?? getConfiguredAnalyticsStore();
   if (!analytics) return;
 
   scheduleWrite(input, "record task submission", () => analytics.recordTaskSubmission({
@@ -41,7 +41,7 @@ export function recordTaskSubmission(input: RecordTaskSubmissionHookInput): void
 }
 
 export function recordTaskResult(input: RecordTaskResultHookInput): void {
-  const analytics = resolveAnalyticsStore(input.analytics);
+  const analytics = input.analytics ?? getConfiguredAnalyticsStore();
   if (!analytics) return;
 
   scheduleWrite(input, "record task result", () => analytics.recordTaskResult({

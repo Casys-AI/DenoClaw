@@ -1,5 +1,5 @@
 import type { AnalyticsStore } from "../../db/analytics.ts";
-import { resolveAnalyticsStore as resolveOptionalAnalyticsStore } from "../../db/analytics.ts";
+import { getConfiguredAnalyticsStore } from "../../db/analytics.ts";
 import { DenoClawError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 
@@ -142,5 +142,5 @@ function parsePositiveInt(value: string | null): number | null {
 function resolveAnalyticsStoreConfig(
   analytics: AnalyticsStore | null | undefined,
 ): AnalyticsStore | null {
-  return resolveOptionalAnalyticsStore(analytics);
+  return analytics ?? getConfiguredAnalyticsStore();
 }

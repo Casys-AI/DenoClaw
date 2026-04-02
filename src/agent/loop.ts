@@ -85,6 +85,7 @@ export class AgentLoop implements AgentLoopLike {
   private tools: ToolRegistry;
   private maxIterations: number;
   private traceWriter: TraceWriter | null;
+  private traceId: string | undefined;
   private taskId: string | undefined;
   private contextId: string | undefined;
   private agentId: string;
@@ -120,6 +121,7 @@ export class AgentLoop implements AgentLoopLike {
     this.skills = this.createSkillsLoader(deps);
     this.maxIterations = maxIterations;
     this.traceWriter = deps?.traceWriter ?? null;
+    this.traceId = deps?.traceId;
     this.taskId = deps?.taskId;
     this.contextId = deps?.contextId ?? deps?.taskId;
     this.getRuntimeGrants = deps?.getRuntimeGrants;
@@ -228,6 +230,7 @@ export class AgentLoop implements AgentLoopLike {
       executeTool: (name, args) => this.tools.execute(name, args),
       observability: {
         traceWriter: this.traceWriter,
+        traceId: this.traceId,
         agentId: this.agentId,
         sessionId: this.sessionId,
         correlationIds: {

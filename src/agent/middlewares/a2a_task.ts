@@ -7,6 +7,7 @@ import {
 import { extractRuntimePrivilegeElevationPause } from "../runtime_message_mapping.ts";
 import type { CompleteEvent, ErrorEvent, ToolCallEvent, ToolResolution } from "../events.ts";
 import type { Middleware } from "../middleware.ts";
+import { log } from "../../shared/log.ts";
 
 export class PrivilegeElevationPause extends Error {
   constructor(public readonly task: Task) {
@@ -36,7 +37,12 @@ export function a2aTaskMiddleware(deps: A2ATaskDeps): Middleware {
             pendingTool: { tool: toolEvent.name, args: toolEvent.arguments, toolCallId: toolEvent.callId },
             expiresAt: pause.expiresAt,
           });
-          await deps.reportTaskResult(pausedTask);
+          try {
+            await deps.reportTaskResult(pausedTask);
+          } catch (reportErr) {
+            log.error(`Failed to report INPUT_REQUIRED for privilege elevation (task ${task.id})`, reportErr);
+            throw reportErr;
+          }
           throw new PrivilegeElevationPause(pausedTask);
         }
       }
@@ -54,7 +60,14 @@ export function a2aTaskMiddleware(deps: A2ATaskDeps): Middleware {
     // Report FAILED on error event
     if (ctx.event.type === "error" && task) {
       const e = ctx.event as ErrorEvent;
-      const failed = mapTaskErrorToTerminalStatus(task, new Error(e.code));
+      log.warn(`Agent kernel error: ${e.code}${e.recovery ? ` — ${e.recovery}` : ""}`, {
+        taskId: task.id,
+        agentId: ctx.session.agentId,
+      });
+      const failed = mapTaskErrorToTerminalStatus(
+        task,
+        new Error(`${e.code}${e.recovery ? ` — ${e.recovery}` : ""}`),
+      );
       await deps.reportTaskResult(failed);
       return next();
     }

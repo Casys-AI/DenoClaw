@@ -15,7 +15,7 @@ function makeTask(): Task {
 function makeSession(task?: Task): SessionState {
   return {
     agentId: "agent-1", sessionId: "s",
-    memoryTopics: [], memoryFiles: [], currentIteration: 1,
+    memoryTopics: [], memoryFiles: [],
     canonicalTask: task ?? makeTask(),
   };
 }

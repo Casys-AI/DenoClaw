@@ -28,11 +28,14 @@ class RecordingTraceWriter {
     this.calls.push({ method: "writeToolSpan", args: [traceId, tool, success] });
     return Promise.resolve("tool-span");
   }
-  endSpan(): Promise<void> { return Promise.resolve(); }
+  endSpan(traceId: string, spanId: string, duration: number): Promise<void> {
+    this.calls.push({ method: "endSpan", args: [traceId, spanId, duration] });
+    return Promise.resolve();
+  }
 }
 
 function makeSession(): SessionState {
-  return { agentId: "agent-1", sessionId: "sess-1", memoryTopics: [], memoryFiles: [], currentIteration: 0 };
+  return { agentId: "agent-1", sessionId: "sess-1", memoryTopics: [], memoryFiles: [] };
 }
 
 Deno.test("observabilityMiddleware starts trace on first event", async () => {
@@ -99,4 +102,64 @@ Deno.test("observabilityMiddleware works without traceWriter (no-op)", async () 
     () => Promise.resolve({ type: "llm" as const, content: "ok" }),
   );
   assertEquals(result?.type, "llm");
+});
+
+Deno.test("observabilityMiddleware writes tool span on tool_call", async () => {
+  const writer = new RecordingTraceWriter();
+  const mw = observabilityMiddleware({
+    traceWriter: writer as never, agentId: "agent-1", sessionId: "sess-1", correlationIds: {},
+  });
+  const session = makeSession();
+  // Start trace via llm_request
+  await mw(
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    () => Promise.resolve({ type: "llm" as const, content: "ok" }),
+  );
+  // tool_call
+  await mw(
+    { event: { eventId: 2, timestamp: Date.now(), iterationId: 1, type: "tool_call", callId: "tc1", name: "shell", arguments: { cmd: "ls" } }, session },
+    () => Promise.resolve({ type: "tool" as const, result: { success: true, output: "ok" } }),
+  );
+  const toolCall = writer.calls.find((c) => c.method === "writeToolSpan");
+  assertEquals(toolCall !== undefined, true);
+});
+
+Deno.test("observabilityMiddleware ends trace with failed on error event", async () => {
+  const writer = new RecordingTraceWriter();
+  const mw = observabilityMiddleware({
+    traceWriter: writer as never, agentId: "agent-1", sessionId: "sess-1", correlationIds: {},
+  });
+  const session = makeSession();
+  await mw(
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    () => Promise.resolve({ type: "llm" as const, content: "ok" }),
+  );
+  await mw(
+    { event: { eventId: 2, timestamp: Date.now(), iterationId: 1, type: "error", code: "max_iterations", recovery: "try again" }, session },
+    () => Promise.resolve(undefined),
+  );
+  const endCall = writer.calls.find((c) => c.method === "endTrace");
+  assertEquals(endCall?.args[1], "failed");
+});
+
+Deno.test("observabilityMiddleware handles iteration span transitions", async () => {
+  const writer = new RecordingTraceWriter();
+  const mw = observabilityMiddleware({
+    traceWriter: writer as never, agentId: "agent-1", sessionId: "sess-1", correlationIds: {},
+  });
+  const session = makeSession();
+  // Iteration 1
+  await mw(
+    { event: { eventId: 0, timestamp: Date.now(), iterationId: 1, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    () => Promise.resolve({ type: "llm" as const, content: "ok" }),
+  );
+  // Iteration 2 - should end iter 1 span and start iter 2
+  await mw(
+    { event: { eventId: 3, timestamp: Date.now(), iterationId: 2, type: "llm_request", messages: [], tools: [], config: { model: "m" } }, session },
+    () => Promise.resolve({ type: "llm" as const, content: "ok" }),
+  );
+  const iterCalls = writer.calls.filter((c) => c.method === "writeIterationSpan");
+  assertEquals(iterCalls.length, 2);
+  const endSpanCalls = writer.calls.filter((c) => c.method === "endSpan");
+  assertEquals(endSpanCalls.length >= 1, true);
 });

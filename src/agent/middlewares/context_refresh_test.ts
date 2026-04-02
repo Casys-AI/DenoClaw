@@ -7,7 +7,6 @@ function makeSession(): SessionState {
   return {
     agentId: "a", sessionId: "s",
     memoryTopics: ["old-topic"], memoryFiles: ["old-file.md"],
-    currentIteration: 0,
   };
 }
 

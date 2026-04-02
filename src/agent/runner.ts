@@ -1,6 +1,7 @@
 import type { AgentResponse } from "./types.ts";
 import type { AgentConfig } from "./types.ts";
 import type { FinalEvent } from "./events.ts";
+import { log } from "../shared/log.ts";
 import { agentKernel } from "./kernel.ts";
 import type { KernelInput } from "./kernel.ts";
 import { MiddlewarePipeline } from "./middleware.ts";
@@ -61,12 +62,14 @@ export class AgentRunner {
         finishReason: event.finishReason ?? "stop",
       };
     }
+    // event.type === "error"
+    log.warn(`Agent kernel error: ${event.code}${event.recovery ? ` — ${event.recovery}` : ""}`);
     const messages = this.memory.getMessages();
     const last = messages.findLast((m) => m.role === "assistant");
     return {
       content: last?.content ??
         "Max iterations reached without a final response.",
-      finishReason: "max_iterations",
+      finishReason: event.code,
     };
   }
 }
@@ -107,7 +110,6 @@ export function createLocalRunner(deps: LocalRunnerDeps): RunnerBundle {
     sessionId: deps.sessionId,
     memoryTopics: deps.memoryTopics,
     memoryFiles: deps.memoryFiles,
-    currentIteration: 0,
   };
 
   // getMessages reads session.memoryTopics/memoryFiles so context refreshes
@@ -174,7 +176,6 @@ export function createBrokerRunner(deps: BrokerRunnerDeps): RunnerBundle {
     sessionId: `agent:${deps.canonicalTask.contextId ?? deps.canonicalTask.id}`,
     memoryTopics: [],
     memoryFiles: deps.memoryFiles,
-    currentIteration: 0,
     canonicalTask: deps.canonicalTask,
     runtimeGrants: deps.runtimeGrants,
   };

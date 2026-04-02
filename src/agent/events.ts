@@ -19,6 +19,8 @@ interface BaseEvent {
 
 export interface LlmRequestEvent extends BaseEvent {
   type: "llm_request";
+  /** Messages snapshot at kernel yield time. May be stale if context was refreshed by middleware.
+   *  The llmMiddleware uses getMessages() fresh — this field is for event store auditing only. */
   messages: Message[];
   tools: ToolDefinition[];
   config: AgentConfig;
@@ -31,23 +33,25 @@ export interface ToolCallEvent extends BaseEvent {
   arguments: Record<string, unknown>;
 }
 
+/** Reserved — not yet emitted by agentKernel. */
 export interface ConfirmationRequestEvent extends BaseEvent {
   type: "confirmation_request";
   callId: string;
   toolName: string;
   confirmationType: "boolean" | "structured";
   prompt: string;
-  schema?: object;
+  schema?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
 
+/** Reserved — not yet emitted by agentKernel. */
 export interface DelegationEvent extends BaseEvent {
   type: "delegation";
   targetAgent: string;
   message: string;
 }
 
-// ── Observation events (fire-and-forget) ────────────
+// ── Observation events (kernel ignores resolution; middlewares observe) ──
 
 export interface LlmResponseEvent extends BaseEvent {
   type: "llm_response";
@@ -81,6 +85,7 @@ export interface CompleteEvent extends BaseEvent {
 export interface ErrorEvent extends BaseEvent {
   type: "error";
   code: string;
+  context?: Record<string, unknown>;
   recovery?: string;
 }
 

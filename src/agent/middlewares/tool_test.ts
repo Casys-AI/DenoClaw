@@ -5,7 +5,7 @@ import type { SessionState } from "../middleware.ts";
 import type { ToolResult } from "../../shared/types.ts";
 
 function makeSession(): SessionState {
-  return { agentId: "a", sessionId: "s", memoryTopics: [], memoryFiles: [], currentIteration: 0 };
+  return { agentId: "a", sessionId: "s", memoryTopics: [], memoryFiles: [] };
 }
 
 Deno.test("toolMiddleware resolves tool_call events", async () => {

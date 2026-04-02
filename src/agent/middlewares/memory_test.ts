@@ -5,7 +5,7 @@ import type { SessionState } from "../middleware.ts";
 import type { Message } from "../../shared/types.ts";
 
 function makeSession(): SessionState {
-  return { agentId: "a", sessionId: "s", memoryTopics: [], memoryFiles: [], currentIteration: 0 };
+  return { agentId: "a", sessionId: "s", memoryTopics: [], memoryFiles: [] };
 }
 
 Deno.test("memoryMiddleware persists assistant message on llm_response with tool calls", async () => {

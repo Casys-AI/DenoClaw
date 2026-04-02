@@ -10,6 +10,7 @@ import type {
   ToolResolution,
 } from "./events.ts";
 import { createEventFactory } from "./events.ts";
+import { log } from "../shared/log.ts";
 
 export interface KernelInput {
   getMessages: () => Message[];
@@ -28,7 +29,7 @@ export async function* agentKernel(
     iteration++;
 
     // 1. Request LLM call
-    const llmResolution = (yield event<AgentEvent>(
+    const rawLlm = yield event<AgentEvent>(
       {
         type: "llm_request",
         messages: input.getMessages(),
@@ -36,7 +37,20 @@ export async function* agentKernel(
         config: input.llmConfig,
       },
       iteration,
-    )) as LlmResolution;
+    );
+
+    if (!rawLlm || (rawLlm as { type?: string }).type !== "llm") {
+      return event<ErrorEvent>(
+        {
+          type: "error",
+          code: "MISSING_LLM_RESOLUTION",
+          context: { received: rawLlm ? (rawLlm as { type?: string }).type : "undefined" },
+          recovery: "Ensure llmMiddleware is registered in the pipeline",
+        },
+        iteration,
+      );
+    }
+    const llmResolution = rawLlm as LlmResolution;
 
     // 2. Observe LLM response
     yield event<AgentEvent>(
@@ -56,7 +70,8 @@ export async function* agentKernel(
         try {
           args = JSON.parse(tc.function.arguments);
         } catch {
-          // Invalid JSON — yield error tool_result and skip
+          // Invalid JSON — log, yield error tool_result and skip
+          log.warn(`Invalid JSON for tool ${tc.function.name}: ${tc.function.arguments.slice(0, 200)}`);
           yield event<AgentEvent>(
             {
               type: "tool_result",
@@ -65,11 +80,11 @@ export async function* agentKernel(
               arguments: {},
               result: {
                 success: false,
-                output: `Invalid JSON arguments for ${tc.function.name}`,
+                output: `Invalid JSON arguments for ${tc.function.name}: ${tc.function.arguments.slice(0, 200)}`,
                 error: {
                   code: "INVALID_JSON",
-                  context: { tool: tc.function.name },
-                  recovery: "Fix the JSON arguments",
+                  context: { tool: tc.function.name, raw: tc.function.arguments.slice(0, 200) },
+                  recovery: "Fix the JSON syntax in your arguments",
                 },
               },
             },
@@ -79,7 +94,7 @@ export async function* agentKernel(
         }
 
         // Request tool execution
-        const toolResolution = (yield event<AgentEvent>(
+        const rawTool = yield event<AgentEvent>(
           {
             type: "tool_call",
             callId: tc.id,
@@ -87,7 +102,20 @@ export async function* agentKernel(
             arguments: args,
           },
           iteration,
-        )) as ToolResolution;
+        );
+
+        if (!rawTool || (rawTool as { type?: string }).type !== "tool") {
+          return event<ErrorEvent>(
+            {
+              type: "error",
+              code: "MISSING_TOOL_RESOLUTION",
+              context: { tool: tc.function.name, received: rawTool ? (rawTool as { type?: string }).type : "undefined" },
+              recovery: "Ensure toolMiddleware is registered in the pipeline",
+            },
+            iteration,
+          );
+        }
+        const toolResolution = rawTool as ToolResolution;
 
         // Observe tool result
         yield event<AgentEvent>(
@@ -116,6 +144,7 @@ export async function* agentKernel(
     {
       type: "error",
       code: "max_iterations",
+      context: { iteration, maxIterations: input.maxIterations },
       recovery: "increase limit or simplify task",
     },
     iteration,

@@ -7,9 +7,6 @@ export interface SessionState {
   sessionId: string;
   memoryTopics: string[];
   memoryFiles: string[];
-  currentIteration: number;
-  traceId?: string;
-  currentIterationSpanId?: string;
   canonicalTask?: Task;
   runtimeGrants?: AgentRuntimeGrant[];
 }

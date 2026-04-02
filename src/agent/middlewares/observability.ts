@@ -1,5 +1,6 @@
 import type { TraceCorrelationIds, TraceWriter } from "../../telemetry/traces.ts";
 import { spanAgentLoop, spanToolCall } from "../../telemetry/mod.ts";
+import { log } from "../../shared/log.ts";
 import type {
   LlmRequestEvent,
   LlmResponseEvent,
@@ -9,6 +10,7 @@ import type { Middleware } from "../middleware.ts";
 
 export interface ObservabilityDeps {
   traceWriter: TraceWriter | null;
+  traceId?: string;
   agentId: string;
   sessionId: string;
   correlationIds: TraceCorrelationIds;
@@ -16,7 +18,7 @@ export interface ObservabilityDeps {
 
 export function observabilityMiddleware(deps: ObservabilityDeps): Middleware {
   const { traceWriter, agentId, sessionId, correlationIds } = deps;
-  let traceId: string | undefined;
+  let traceId: string | undefined = deps.traceId;
   let currentIteration = 0;
   let iterSpanId: string | undefined;
   let iterStart = 0;
@@ -26,7 +28,11 @@ export function observabilityMiddleware(deps: ObservabilityDeps): Middleware {
   return async (ctx, next) => {
     // Initialize trace on first event
     if (!traceId && traceWriter) {
-      traceId = await traceWriter.startTrace(agentId, sessionId, correlationIds);
+      try {
+        traceId = await traceWriter.startTrace(agentId, sessionId, correlationIds);
+      } catch (err) {
+        log.warn(`Failed to start trace, continuing without tracing: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // New iteration — manage iteration spans
@@ -93,7 +99,9 @@ export function observabilityMiddleware(deps: ObservabilityDeps): Middleware {
           traceId,
           ctx.event.type === "complete" ? "completed" : "failed",
           currentIteration,
-        ).catch(() => {});
+        ).catch((err) => {
+          log.warn(`Failed to end trace ${traceId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
       return next();
     }

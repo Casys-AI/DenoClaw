@@ -70,12 +70,16 @@ export class Memory implements MemoryPort {
     await this.save();
   }
 
-  getMessages(): Message[] {
+  async getMessages(): Promise<Message[]> {
     return [...this.messages];
   }
 
-  getRecentMessages(count: number): Message[] {
+  async getRecentMessages(count: number): Promise<Message[]> {
     return this.messages.slice(-count);
+  }
+
+  async semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return [];
   }
 
   async clear(): Promise<void> {
@@ -98,7 +102,7 @@ export class Memory implements MemoryPort {
   remember(_fact: Omit<LongTermFact, "timestamp">): Promise<void> {
     return Promise.resolve();
   }
-  recall(_topic: string, _limit?: number): Promise<LongTermFact[]> {
+  recallTopic(_topic: string, _limit?: number): Promise<LongTermFact[]> {
     return Promise.resolve([]);
   }
   listTopics(): Promise<string[]> {

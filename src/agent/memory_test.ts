@@ -17,8 +17,8 @@ Deno.test({
       await mem.addMessage({ role: "assistant", content: "hi back" });
 
       assertEquals(mem.count, 2);
-      assertEquals(mem.getMessages()[0].content, "hello");
-      assertEquals(mem.getMessages()[1].content, "hi back");
+      assertEquals((await mem.getMessages())[0].content, "hello");
+      assertEquals((await mem.getMessages())[1].content, "hi back");
     } finally {
       mem.close();
       await Deno.remove(kvPath).catch(() => {});
@@ -40,7 +40,7 @@ Deno.test({
         await mem.addMessage({ role: "user", content: `msg-${i}` });
       }
 
-      const msgs = mem.getMessages();
+      const msgs = await mem.getMessages();
       assertEquals(msgs.length, 3);
       assertEquals(msgs[0].content, "msg-2");
     } finally {

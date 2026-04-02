@@ -37,7 +37,15 @@ import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
-import { processAgentLoopMessage } from "./loop_process.ts";
+import { AgentRunner } from "./runner.ts";
+import { MiddlewarePipeline } from "./middleware.ts";
+import type { SessionState } from "./middleware.ts";
+import { InMemoryEventStore } from "./event_store.ts";
+import { llmMiddleware } from "./middlewares/llm.ts";
+import { toolMiddleware } from "./middlewares/tool.ts";
+import { memoryMiddleware } from "./middlewares/memory.ts";
+import { observabilityMiddleware } from "./middlewares/observability.ts";
+import { contextRefreshMiddleware } from "./middlewares/context_refresh.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
@@ -85,7 +93,6 @@ export class AgentLoop implements AgentLoopLike {
   private tools: ToolRegistry;
   private maxIterations: number;
   private traceWriter: TraceWriter | null;
-  private traceId: string | undefined;
   private taskId: string | undefined;
   private contextId: string | undefined;
   private agentId: string;
@@ -121,7 +128,6 @@ export class AgentLoop implements AgentLoopLike {
     this.skills = this.createSkillsLoader(deps);
     this.maxIterations = maxIterations;
     this.traceWriter = deps?.traceWriter ?? null;
-    this.traceId = deps?.traceId;
     this.taskId = deps?.taskId;
     this.contextId = deps?.contextId ?? deps?.taskId;
     this.getRuntimeGrants = deps?.getRuntimeGrants;
@@ -212,25 +218,71 @@ export class AgentLoop implements AgentLoopLike {
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
     await this.initialize();
-    return await processAgentLoopMessage({
-      userMessage,
-      config: this.config,
-      providers: this.providers,
-      memory: this.memory,
-      context: this.context,
-      skills: this.skills,
-      tools: this.tools,
-      memoryTopics: this.memoryTopics,
-      memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.refreshMemoryFiles(),
-      getRuntimeGrants: this.getRuntimeGrants,
-      maxIterations: this.maxIterations,
-      traceWriter: this.traceWriter,
-      traceId: this.traceId,
-      taskId: this.taskId,
-      contextId: this.contextId,
+
+    // Add user message to memory
+    await this.memory.addMessage({ role: "user", content: userMessage });
+
+    // Build session state
+    const session: SessionState = {
       agentId: this.agentId,
       sessionId: this.sessionId,
+      memoryTopics: this.memoryTopics,
+      memoryFiles: this.memoryFiles,
+      currentIteration: 0,
+    };
+
+    // Build getMessages callback with context building + truncation
+    const CHARS_PER_TOKEN = 4;
+    const CONTEXT_RATIO = 4;
+    const maxChars = (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
+    const getMessages = () => {
+      const raw = this.context.buildContextMessages(
+        this.memory.getMessages(),
+        this.skills.getSkills(),
+        this.tools.getDefinitions(),
+        session.memoryTopics,
+        session.memoryFiles,
+        this.getRuntimeGrants?.() ?? [],
+      );
+      return this.context.truncateContext(raw, maxChars);
+    };
+
+    // Build middleware pipeline
+    // llmMiddleware calls getMessages() fresh so context refreshes (skills/memory)
+    // applied by contextRefreshMiddleware are visible to the LLM.
+    const pipeline = new MiddlewarePipeline()
+      .use(observabilityMiddleware({
+        traceWriter: this.traceWriter,
+        agentId: this.agentId,
+        sessionId: this.sessionId,
+        correlationIds: {
+          ...(this.taskId ? { taskId: this.taskId } : {}),
+          ...(this.contextId ? { contextId: this.contextId } : {}),
+        },
+      }))
+      .use(memoryMiddleware(this.memory))
+      .use(contextRefreshMiddleware({
+        skills: this.skills,
+        memory: this.memory,
+        refreshMemoryFiles: () => this.refreshMemoryFiles(),
+      }))
+      .use(toolMiddleware((name, args) => this.tools.execute(name, args)))
+      .use(llmMiddleware((_messages, model, temperature, maxTokens, tools) =>
+        this.providers.complete(getMessages(), model, temperature, maxTokens, tools)
+      ));
+
+    const runner = new AgentRunner(
+      pipeline,
+      new InMemoryEventStore(),
+      session,
+      this.memory,
+    );
+
+    return await runner.run({
+      getMessages,
+      toolDefinitions: this.tools.getDefinitions(),
+      llmConfig: this.config,
+      maxIterations: this.maxIterations,
     });
   }
 

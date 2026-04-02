@@ -1,6 +1,7 @@
 import type { LLMResponse, Message, ToolDefinition } from "../../shared/types.ts";
 import type { LlmRequestEvent, LlmResolution } from "../events.ts";
 import type { Middleware } from "../middleware.ts";
+import { log } from "../../shared/log.ts";
 
 export type CompleteFn = (
   messages: Message[],
@@ -21,7 +22,13 @@ export function llmMiddleware(deps: LlmMiddlewareDeps): Middleware {
   return async (ctx, next) => {
     if (ctx.event.type !== "llm_request") return next();
     const req = ctx.event as LlmRequestEvent;
-    const messages = await deps.getMessages();
+    let messages: Message[];
+    try {
+      messages = await deps.getMessages();
+    } catch (e) {
+      log.error("llmMiddleware: failed to assemble messages for LLM request", e);
+      throw e;
+    }
     const response = await deps.complete(
       messages, req.config.model, req.config.temperature,
       req.config.maxTokens, req.tools,

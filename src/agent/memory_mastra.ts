@@ -31,8 +31,8 @@ interface MastraMemoryInstance {
   recall(opts: Record<string, unknown>): Promise<MastraRecallResult>;
   saveMessages(opts: { threadId: string; messages: MastraMessage[] }): Promise<void>;
   getThreadById(opts: { threadId: string }): Promise<unknown | null>;
-  createThread(opts: { threadId: string }): Promise<void>;
-  deleteThread(opts: { threadId: string }): Promise<void>;
+  createThread(opts: Record<string, unknown>): Promise<void>;
+  deleteThread(threadId: string): Promise<void>;
 }
 
 function toMastraMessage(msg: Message): MastraMessage {
@@ -64,7 +64,7 @@ function toMastraEmbedder(port: EmbedderPort) {
 }
 
 export class MastraMemory implements MemoryPort {
-  private mastra: MastraMemoryInstance | null = null;
+  private initPromise: Promise<MastraMemoryInstance> | null = null;
   private threadId: string;
   private config: MastraMemoryConfig;
   private messageCount = 0;
@@ -74,38 +74,52 @@ export class MastraMemory implements MemoryPort {
     this.config = config;
   }
 
-  private async getMastra(): Promise<MastraMemoryInstance> {
-    if (this.mastra) return this.mastra;
-    const { Memory } = await import("@mastra/memory");
-    const { PgStore, PgVector } = await import("@mastra/pg");
-    this.mastra = new Memory({
-      storage: new PgStore({
-        id: `denoclaw-storage`,
-        connectionString: this.config.connectionString,
-      }),
-      vector: new PgVector({
-        id: `denoclaw-vector`,
-        connectionString: this.config.connectionString,
-      }),
-      embedder: toMastraEmbedder(this.config.embedder),
-      options: {
-        lastMessages: this.config.lastMessages ?? 50,
-        semanticRecall: this.config.semanticRecall ?? { topK: 3, messageRange: 2 },
-      },
-    }) as unknown as MastraMemoryInstance;
-    return this.mastra;
+  private get factsThreadId(): string {
+    return `${this.threadId}:facts`;
+  }
+
+  private getMastra(): Promise<MastraMemoryInstance> {
+    if (!this.initPromise) {
+      this.initPromise = this.initMastra();
+    }
+    return this.initPromise;
+  }
+
+  private async initMastra(): Promise<MastraMemoryInstance> {
+    try {
+      const { Memory } = await import("@mastra/memory");
+      const { PostgresStore, PgVector } = await import("@mastra/pg");
+      const memoryConfig = {
+        storage: new PostgresStore({ connectionString: this.config.connectionString }),
+        vector: new PgVector({ connectionString: this.config.connectionString }),
+        embedder: toMastraEmbedder(this.config.embedder),
+        options: {
+          lastMessages: this.config.lastMessages ?? 50,
+          semanticRecall: this.config.semanticRecall ?? { topK: 3, messageRange: 2 },
+        },
+      };
+      const instance = new Memory(memoryConfig as unknown as ConstructorParameters<typeof Memory>[0]);
+      return instance as unknown as MastraMemoryInstance;
+    } catch (e) {
+      this.initPromise = null; // allow retry on next call
+      log.error(`MastraMemory: failed to initialize Pg backend (thread ${this.threadId})`, e);
+      throw e;
+    }
   }
 
   async load(): Promise<void> {
-    try {
-      const mastra = await this.getMastra();
-      const existing = await mastra.getThreadById({ threadId: this.threadId });
+    // Let errors propagate — createMemory() catches and falls back to KV
+    const mastra = await this.getMastra();
+    // Ensure both threads exist
+    for (const tid of [this.threadId, this.factsThreadId]) {
+      const existing = await mastra.getThreadById({ threadId: tid });
       if (!existing) {
-        await mastra.createThread({ threadId: this.threadId });
+        await mastra.createThread({ threadId: tid, resourceId: this.threadId });
       }
-    } catch (e) {
-      log.error(`MastraMemory: failed to load thread ${this.threadId}`, e);
     }
+    // Initialize count from stored messages
+    const result = await mastra.recall({ threadId: this.threadId });
+    this.messageCount = result.messages.length;
   }
 
   close(): void {
@@ -138,10 +152,18 @@ export class MastraMemory implements MemoryPort {
   }
 
   async clear(): Promise<void> {
-    const mastra = await this.getMastra();
-    await mastra.deleteThread({ threadId: this.threadId });
-    await mastra.createThread({ threadId: this.threadId });
-    this.messageCount = 0;
+    try {
+      const mastra = await this.getMastra();
+      await mastra.deleteThread(this.threadId);
+      await mastra.createThread({ threadId: this.threadId, resourceId: this.threadId });
+      // Also recreate facts thread
+      await mastra.deleteThread(this.factsThreadId).catch(() => {});
+      await mastra.createThread({ threadId: this.factsThreadId, resourceId: this.threadId });
+      this.messageCount = 0;
+    } catch (e) {
+      log.error(`MastraMemory: failed to clear thread ${this.threadId}`, e);
+      throw e;
+    }
   }
 
   async semanticRecall(query: string, topK = 3): Promise<Message[]> {
@@ -155,31 +177,53 @@ export class MastraMemory implements MemoryPort {
   }
 
   async remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
-    await this.addMessage({
-      role: "system",
-      content: `[memory:${fact.topic}] ${fact.content}`,
-    });
+    try {
+      const mastra = await this.getMastra();
+      await mastra.saveMessages({
+        threadId: this.factsThreadId,
+        messages: [{ role: "user", content: `[memory:${fact.topic}] ${fact.content}` }],
+      });
+    } catch (e) {
+      log.error(`MastraMemory: remember failed (topic: ${fact.topic})`, e);
+    }
   }
 
   async recallTopic(topic: string, _limit?: number): Promise<LongTermFact[]> {
-    const messages = await this.semanticRecall(`topic: ${topic}`, 5);
-    return messages
-      .filter((m) => m.content.startsWith(`[memory:${topic}]`))
-      .map((m) => ({
-        topic,
-        content: m.content.replace(`[memory:${topic}] `, ""),
-        timestamp: new Date().toISOString(),
-      }));
+    try {
+      const mastra = await this.getMastra();
+      const result = await mastra.recall({
+        threadId: this.factsThreadId,
+        vectorSearchString: `topic: ${topic}`,
+        threadConfig: { semanticRecall: { topK: 5, messageRange: 0 } },
+      });
+      return result.messages
+        .map(fromMastraMessage)
+        .filter((m) => m.content.startsWith(`[memory:${topic}]`))
+        .map((m) => ({
+          topic,
+          content: m.content.replace(`[memory:${topic}] `, ""),
+          timestamp: new Date().toISOString(),
+        }));
+    } catch (e) {
+      log.error(`MastraMemory: recallTopic failed (topic: ${topic})`, e);
+      return [];
+    }
   }
 
   async listTopics(): Promise<string[]> {
-    const messages = await this.getMessages();
-    const topics = new Set<string>();
-    for (const m of messages) {
-      const match = m.content.match(/^\[memory:([^\]]+)\]/);
-      if (match) topics.add(match[1]);
+    try {
+      const mastra = await this.getMastra();
+      const result = await mastra.recall({ threadId: this.factsThreadId });
+      const topics = new Set<string>();
+      for (const m of result.messages) {
+        const match = (typeof m.content === "string" ? m.content : "").match(/^\[memory:([^\]]+)\]/);
+        if (match) topics.add(match[1]);
+      }
+      return [...topics];
+    } catch (e) {
+      log.error(`MastraMemory: listTopics failed`, e);
+      return [];
     }
-    return [...topics];
   }
 
   forgetTopic(_topic: string): Promise<void> {

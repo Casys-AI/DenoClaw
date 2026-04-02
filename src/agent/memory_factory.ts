@@ -9,13 +9,18 @@ export async function createEmbedder(): Promise<EmbedderPort> {
     const { OllamaEmbedder } = await import("./embedders/ollama.ts");
     const url = Deno.env.get("OLLAMA_EMBED_URL");
     if (!url) throw new Error("OLLAMA_EMBED_URL required when EMBEDDER_PROVIDER=ollama");
-    return new OllamaEmbedder(url, Deno.env.get("OLLAMA_EMBED_MODEL"));
+    const dim = Deno.env.get("OLLAMA_EMBED_DIM");
+    return new OllamaEmbedder(url, Deno.env.get("OLLAMA_EMBED_MODEL"), dim ? parseInt(dim, 10) : undefined);
   }
   try {
     const { MastraEmbedder } = await import("./embedders/mastra.ts");
     return new MastraEmbedder();
-  } catch {
-    log.warn("fastembed unavailable, falling back to noop embedder");
+  } catch (e) {
+    log.error(
+      "fastembed (MastraEmbedder) failed to load — falling back to noop embedder. " +
+        "Semantic recall will be disabled.",
+      e,
+    );
     const { NoopEmbedder } = await import("./embedders/noop.ts");
     return new NoopEmbedder();
   }
@@ -27,7 +32,9 @@ export async function createMemory(agentId: string, sessionId: string): Promise<
     try {
       const embedder = await createEmbedder();
       const { MastraMemory } = await import("./memory_mastra.ts");
-      return new MastraMemory(agentId, sessionId, { connectionString: dbUrl, embedder });
+      const mem = new MastraMemory(agentId, sessionId, { connectionString: dbUrl, embedder });
+      await mem.load(); // validates Pg connection + creates thread
+      return mem;
     } catch (e) {
       log.warn("MastraMemory initialization failed, falling back to KV memory", e);
     }

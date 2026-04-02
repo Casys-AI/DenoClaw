@@ -27,6 +27,34 @@ Deno.test("llmMiddleware resolves llm_request events", async () => {
   if (result?.type === "llm") assertEquals(result.content, "response");
 });
 
+Deno.test("llmMiddleware calls getMessages fresh on each invocation", async () => {
+  let callCount = 0;
+  const mw = llmMiddleware({
+    getMessages: () => {
+      callCount++;
+      return Promise.resolve([{ role: "user" as const, content: "hi" }]);
+    },
+    complete: () =>
+      Promise.resolve({
+        content: "ok",
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      }),
+  });
+  const event = {
+    eventId: 0,
+    timestamp: Date.now(),
+    iterationId: 1,
+    type: "llm_request" as const,
+    tools: [],
+    config: { model: "m" },
+  };
+  await mw({ event, session: makeSession() }, () => Promise.resolve(undefined));
+  await mw({ event, session: makeSession() }, () => Promise.resolve(undefined));
+  assertEquals(callCount, 2);
+});
+
 Deno.test("llmMiddleware passes through non-llm_request events", async () => {
   const mw = llmMiddleware({
     getMessages: () => { throw new Error("should not be called"); },

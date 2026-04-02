@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { assertRejects } from "@std/assert";
 import { OllamaEmbedder } from "./ollama.ts";
 
 Deno.test({
@@ -31,6 +32,21 @@ Deno.test({
     const embedder = new OllamaEmbedder(`http://localhost:${port}`, "test", 2);
     const result = await embedder.embedBatch(["a", "b"]);
     assertEquals(result, [[0.1, 0.2], [0.3, 0.4]]);
+    await server.shutdown();
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
+  name: "OllamaEmbedder.embed throws on non-ok response",
+  async fn() {
+    const server = Deno.serve({ port: 0 }, () =>
+      new Response("model not found", { status: 404 })
+    );
+    const port = server.addr.port;
+    const embedder = new OllamaEmbedder(`http://localhost:${port}`);
+    await assertRejects(() => embedder.embed("test"), Error, "Ollama embed failed");
     await server.shutdown();
   },
   sanitizeResources: false,

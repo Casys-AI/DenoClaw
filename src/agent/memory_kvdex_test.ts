@@ -3,6 +3,29 @@ import { KvdexMemory } from "./memory_kvdex.ts";
 
 const testOpts = { sanitizeResources: false, sanitizeOps: false };
 
+Deno.test({
+  name: "KvdexMemory.semanticRecall always returns empty array",
+  async fn() {
+    const kvPath = await makeTempKvPath();
+    const mem = new KvdexMemory(
+      "test",
+      `sess-semantic-${crypto.randomUUID()}`,
+      10,
+      kvPath,
+    );
+    try {
+      await mem.load();
+      await mem.addMessage({ role: "user", content: "hello" });
+      const result = await mem.semanticRecall("hello");
+      assertEquals(result, []);
+    } finally {
+      mem.close();
+      await Deno.remove(kvPath).catch(() => {});
+    }
+  },
+  ...testOpts,
+});
+
 async function makeTempKvPath(): Promise<string> {
   return await Deno.makeTempFile({ suffix: ".db" });
 }

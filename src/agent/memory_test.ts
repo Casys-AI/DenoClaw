@@ -6,6 +6,25 @@ async function makeTempKvPath(): Promise<string> {
 }
 
 Deno.test({
+  name: "Memory.semanticRecall always returns empty array",
+  async fn() {
+    const kvPath = await makeTempKvPath();
+    const mem = new Memory(`test-semantic-${crypto.randomUUID()}`, 10, kvPath);
+    try {
+      await mem.load();
+      await mem.addMessage({ role: "user", content: "hello" });
+      const result = await mem.semanticRecall("hello");
+      assertEquals(result, []);
+    } finally {
+      mem.close();
+      await Deno.remove(kvPath).catch(() => {});
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+Deno.test({
   name: "Memory stores and retrieves messages",
   async fn() {
     const kvPath = await makeTempKvPath();

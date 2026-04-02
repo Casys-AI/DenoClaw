@@ -91,7 +91,12 @@ export class AgentRunner {
 
     // Graceful degradation (max_iterations etc.)
     log.warn(`Agent kernel error: ${event.code}${event.recovery ? ` — ${event.recovery}` : ""}`);
-    const messages = await this.memory.getMessages();
+    let messages: Message[] = [];
+    try {
+      messages = await this.memory.getMessages();
+    } catch (e) {
+      log.error(`toAgentResult: failed to read messages during ${event.code} recovery`, e);
+    }
     const last = messages.findLast((m) => m.role === "assistant");
     return {
       content: last?.content ??

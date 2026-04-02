@@ -10,12 +10,20 @@ export type CompleteFn = (
   tools?: ToolDefinition[],
 ) => Promise<LLMResponse>;
 
-export function llmMiddleware(complete: CompleteFn): Middleware {
+export type GetMessagesFn = () => Promise<Message[]>;
+
+export interface LlmMiddlewareDeps {
+  getMessages: GetMessagesFn;
+  complete: CompleteFn;
+}
+
+export function llmMiddleware(deps: LlmMiddlewareDeps): Middleware {
   return async (ctx, next) => {
     if (ctx.event.type !== "llm_request") return next();
     const req = ctx.event as LlmRequestEvent;
-    const response = await complete(
-      req.messages, req.config.model, req.config.temperature,
+    const messages = await deps.getMessages();
+    const response = await deps.complete(
+      messages, req.config.model, req.config.temperature,
       req.config.maxTokens, req.tools,
     );
     const resolution: LlmResolution = {

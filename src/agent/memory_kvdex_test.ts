@@ -24,8 +24,8 @@ Deno.test({
       await mem.addMessage({ role: "assistant", content: "hi back" });
 
       assertEquals(mem.count, 2);
-      assertEquals(mem.getMessages()[0].content, "hello");
-      assertEquals(mem.getMessages()[1].content, "hi back");
+      assertEquals((await mem.getMessages())[0].content, "hello");
+      assertEquals((await mem.getMessages())[1].content, "hi back");
     } finally {
       mem.close();
       await Deno.remove(kvPath).catch(() => {});
@@ -51,7 +51,7 @@ Deno.test({
         await mem.addMessage({ role: "user", content: `msg-${i}` });
       }
 
-      const msgs = mem.getMessages();
+      const msgs = await mem.getMessages();
       assertEquals(msgs.length, 3);
       assertEquals(msgs[0].content, "msg-2");
     } finally {
@@ -80,7 +80,7 @@ Deno.test({
         await mem.addMessage({ role: "user", content: `msg-${i}` });
       }
 
-      const msgs = mem.getMessages();
+      const msgs = await mem.getMessages();
       assertEquals(msgs[0].role, "system");
       assertEquals(msgs[0].content, "system prompt");
       assertGreater(msgs.length, 1);
@@ -143,11 +143,11 @@ Deno.test({
       });
       await mem.remember({ topic: "math", content: "2+2=4" });
 
-      const colors = await mem.recall("color");
+      const colors = await mem.recallTopic("color");
       assertEquals(colors.length, 2);
       assertEquals(colors[0].topic, "color");
 
-      const math = await mem.recall("math");
+      const math = await mem.recallTopic("math");
       assertEquals(math.length, 1);
       assertEquals(math[0].content, "2+2=4");
     } finally {
@@ -172,10 +172,10 @@ Deno.test({
       await mem.load();
 
       await mem.remember({ topic: "temp", content: "ephemeral fact" });
-      assertEquals((await mem.recall("temp")).length, 1);
+      assertEquals((await mem.recallTopic("temp")).length, 1);
 
       await mem.forgetTopic("temp");
-      assertEquals((await mem.recall("temp")).length, 0);
+      assertEquals((await mem.recallTopic("temp")).length, 0);
     } finally {
       mem.close();
       await Deno.remove(kvPath).catch(() => {});
@@ -199,9 +199,9 @@ Deno.test({
       await mem2.addMessage({ role: "user", content: "for session B" });
 
       assertEquals(mem1.count, 1);
-      assertEquals(mem1.getMessages()[0].content, "for session A");
+      assertEquals((await mem1.getMessages())[0].content, "for session A");
       assertEquals(mem2.count, 1);
-      assertEquals(mem2.getMessages()[0].content, "for session B");
+      assertEquals((await mem2.getMessages())[0].content, "for session B");
     } finally {
       mem1.close();
       mem2.close();

@@ -151,12 +151,16 @@ export class KvdexMemory implements MemoryPort {
     }
   }
 
-  getMessages(): Message[] {
+  async getMessages(): Promise<Message[]> {
     return [...this.cache];
   }
 
-  getRecentMessages(count: number): Message[] {
+  async getRecentMessages(count: number): Promise<Message[]> {
     return this.cache.slice(-count);
+  }
+
+  async semanticRecall(_query: string, _topK?: number): Promise<Message[]> {
+    return [];
   }
 
   async clear(): Promise<void> {
@@ -195,7 +199,7 @@ export class KvdexMemory implements MemoryPort {
     }
   }
 
-  async recall(topic: string, limit = 10): Promise<LongTermFact[]> {
+  async recallTopic(topic: string, limit = 10): Promise<LongTermFact[]> {
     try {
       const db = await this.getDb();
       const result = await db.longTermFacts.findBySecondaryIndex(

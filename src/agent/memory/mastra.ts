@@ -6,11 +6,30 @@ import type { LongTermFact, MemoryPort } from "./port.ts";
 import type { EmbedderPort } from "./embedder_port.ts";
 import { log } from "../../shared/log.ts";
 
+const DEFAULT_WORKING_MEMORY_TEMPLATE = `
+# Agent Knowledge
+
+## User Info
+- Name:
+- Preferences:
+- Context:
+
+## Project State
+- Current Task:
+- Key Facts:
+- Decisions Made:
+
+## Session
+- Open Questions:
+- Action Items:
+`;
+
 export interface MastraMemoryConfig {
   connectionString: string;
   embedder: EmbedderPort;
   lastMessages?: number;
   semanticRecall?: { topK: number; messageRange: number };
+  workingMemoryTemplate?: string;
 }
 
 interface MastraMessage {
@@ -68,14 +87,11 @@ export class MastraMemory implements MemoryPort {
   private threadId: string;
   private config: MastraMemoryConfig;
   private messageCount = 0;
+  private lastUserMessage: string | undefined;
 
   constructor(agentId: string, sessionId: string, config: MastraMemoryConfig) {
     this.threadId = `${agentId}:${sessionId}`;
     this.config = config;
-  }
-
-  private get factsThreadId(): string {
-    return `${this.threadId}:facts`;
   }
 
   private getMastra(): Promise<MastraMemoryInstance> {
@@ -96,6 +112,10 @@ export class MastraMemory implements MemoryPort {
         options: {
           lastMessages: this.config.lastMessages ?? 50,
           semanticRecall: this.config.semanticRecall ?? { topK: 3, messageRange: 2 },
+          workingMemory: {
+            enabled: true,
+            template: this.config.workingMemoryTemplate ?? DEFAULT_WORKING_MEMORY_TEMPLATE,
+          },
         },
       };
       const instance = new Memory(memoryConfig as unknown as ConstructorParameters<typeof Memory>[0]);
@@ -110,12 +130,9 @@ export class MastraMemory implements MemoryPort {
   async load(): Promise<void> {
     // Let errors propagate — createMemory() catches and falls back to KV
     const mastra = await this.getMastra();
-    // Ensure both threads exist
-    for (const tid of [this.threadId, this.factsThreadId]) {
-      const existing = await mastra.getThreadById({ threadId: tid });
-      if (!existing) {
-        await mastra.createThread({ threadId: tid, resourceId: this.threadId });
-      }
+    const existing = await mastra.getThreadById({ threadId: this.threadId });
+    if (!existing) {
+      await mastra.createThread({ threadId: this.threadId, resourceId: this.threadId });
     }
     // Initialize count from stored messages
     const result = await mastra.recall({ threadId: this.threadId });
@@ -133,11 +150,17 @@ export class MastraMemory implements MemoryPort {
       messages: [toMastraMessage(message)],
     });
     this.messageCount++;
+    if (message.role === "user") {
+      this.lastUserMessage = message.content;
+    }
   }
 
   async getMessages(): Promise<Message[]> {
     const mastra = await this.getMastra();
-    const result = await mastra.recall({ threadId: this.threadId });
+    const result = await mastra.recall({
+      threadId: this.threadId,
+      ...(this.lastUserMessage ? { vectorSearchString: this.lastUserMessage } : {}),
+    });
     return result.messages.map(fromMastraMessage);
   }
 
@@ -156,10 +179,8 @@ export class MastraMemory implements MemoryPort {
       const mastra = await this.getMastra();
       await mastra.deleteThread(this.threadId);
       await mastra.createThread({ threadId: this.threadId, resourceId: this.threadId });
-      // Also recreate facts thread
-      await mastra.deleteThread(this.factsThreadId).catch(() => {});
-      await mastra.createThread({ threadId: this.factsThreadId, resourceId: this.threadId });
       this.messageCount = 0;
+      this.lastUserMessage = undefined;
     } catch (e) {
       log.error(`MastraMemory: failed to clear thread ${this.threadId}`, e);
       throw e;
@@ -176,32 +197,26 @@ export class MastraMemory implements MemoryPort {
     return result.messages.map(fromMastraMessage);
   }
 
-  async remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
-    try {
-      const mastra = await this.getMastra();
-      await mastra.saveMessages({
-        threadId: this.factsThreadId,
-        messages: [{ role: "user", content: `[memory:${fact.topic}] ${fact.content}` }],
-      });
-    } catch (e) {
-      log.error(`MastraMemory: remember failed (topic: ${fact.topic})`, e);
-    }
+  remember(fact: Omit<LongTermFact, "timestamp">): Promise<void> {
+    // With working memory enabled, facts are managed by Mastra through
+    // the working memory template. The agent updates it conversationally.
+    log.debug(`MastraMemory: remember(${fact.topic}) — handled by working memory`);
+    return Promise.resolve();
   }
 
   async recallTopic(topic: string, _limit?: number): Promise<LongTermFact[]> {
     try {
       const mastra = await this.getMastra();
       const result = await mastra.recall({
-        threadId: this.factsThreadId,
-        vectorSearchString: `topic: ${topic}`,
+        threadId: this.threadId,
+        vectorSearchString: topic,
         threadConfig: { semanticRecall: { topK: 5, messageRange: 0 } },
       });
       return result.messages
         .map(fromMastraMessage)
-        .filter((m) => m.content.startsWith(`[memory:${topic}]`))
         .map((m) => ({
           topic,
-          content: m.content.replace(`[memory:${topic}] `, ""),
+          content: m.content,
           timestamp: new Date().toISOString(),
         }));
     } catch (e) {
@@ -210,24 +225,14 @@ export class MastraMemory implements MemoryPort {
     }
   }
 
-  async listTopics(): Promise<string[]> {
-    try {
-      const mastra = await this.getMastra();
-      const result = await mastra.recall({ threadId: this.factsThreadId });
-      const topics = new Set<string>();
-      for (const m of result.messages) {
-        const match = (typeof m.content === "string" ? m.content : "").match(/^\[memory:([^\]]+)\]/);
-        if (match) topics.add(match[1]);
-      }
-      return [...topics];
-    } catch (e) {
-      log.error(`MastraMemory: listTopics failed`, e);
-      return [];
-    }
+  listTopics(): Promise<string[]> {
+    // Working memory replaces topic-based facts.
+    // The agent's knowledge is in the working memory template.
+    return Promise.resolve([]);
   }
 
   forgetTopic(_topic: string): Promise<void> {
-    log.warn("MastraMemory: forgetTopic not supported in v1");
+    log.warn("MastraMemory: forgetTopic not supported — use working memory");
     return Promise.resolve();
   }
 }

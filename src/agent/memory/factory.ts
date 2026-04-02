@@ -30,7 +30,7 @@ export async function createMemory(
   const dbUrl = Deno.env.get("DATABASE_URL");
   if (dbUrl) {
     const embedder = await createEmbedder();
-    const { MastraMemory } = await import("./memory_mastra.ts");
+    const { MastraMemory } = await import("./mastra.ts");
     const mem = new MastraMemory(agentId, sessionId, { connectionString: dbUrl, embedder });
     await mem.load();
     log.info(`MastraMemory initialized for ${agentId}:${sessionId}`);

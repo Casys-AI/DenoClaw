@@ -16,7 +16,7 @@ import {
   transitionTask,
 } from "../messaging/a2a/internal_contract.ts";
 import { mapTaskErrorToTerminalStatus } from "../messaging/a2a/task_mapping.ts";
-import { KvdexMemory } from "./memory_kvdex.ts";
+import { createMemory } from "./memory_factory.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
 import { KvSkillsLoader, SkillsLoader } from "./skills.ts";
@@ -104,8 +104,7 @@ export class AgentRuntime {
   private async getMemory(sessionId: string): Promise<MemoryPort> {
     let mem = this.memories.get(sessionId);
     if (!mem) {
-      mem = new KvdexMemory(this.agentId, sessionId);
-      await mem.load();
+      mem = await createMemory(this.agentId, sessionId);
       this.memories.set(sessionId, mem);
     }
     return mem;

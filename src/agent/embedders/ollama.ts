@@ -3,14 +3,23 @@ import type { EmbedderPort } from "../embedder_port.ts";
 export class OllamaEmbedder implements EmbedderPort {
   readonly dimension: number;
   readonly modelName: string;
+  private apiKey?: string;
 
   constructor(
     private baseUrl: string,
     model = "nomic-embed-text",
     dimension = 768,
+    apiKey?: string,
   ) {
     this.modelName = model;
     this.dimension = dimension;
+    this.apiKey = apiKey;
+  }
+
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { "content-type": "application/json" };
+    if (this.apiKey) h["authorization"] = `Bearer ${this.apiKey}`;
+    return h;
   }
 
   async embed(text: string): Promise<number[]> {
@@ -19,7 +28,7 @@ export class OllamaEmbedder implements EmbedderPort {
     try {
       const res = await fetch(`${this.baseUrl}/api/embed`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: this.headers(),
         body: JSON.stringify({ model: this.modelName, input: text }),
         signal: controller.signal,
       });
@@ -50,7 +59,7 @@ export class OllamaEmbedder implements EmbedderPort {
     try {
       const res = await fetch(`${this.baseUrl}/api/embed`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: this.headers(),
         body: JSON.stringify({ model: this.modelName, input: texts }),
         signal: controller.signal,
       });

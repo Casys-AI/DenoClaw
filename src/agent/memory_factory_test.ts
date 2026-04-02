@@ -1,5 +1,4 @@
 import { assertEquals } from "@std/assert";
-import { assertRejects } from "@std/assert";
 import { createMemory, createEmbedder } from "./memory_factory.ts";
 import { Memory } from "./memory.ts";
 
@@ -21,14 +20,15 @@ Deno.test({
 });
 
 Deno.test({
-  name: "createEmbedder throws when EMBEDDER_PROVIDER=ollama and OLLAMA_EMBED_URL missing",
+  name: "createEmbedder returns OllamaEmbedder with default cloud URL when OLLAMA_EMBED_URL absent",
   async fn() {
     const origProvider = Deno.env.get("EMBEDDER_PROVIDER");
     const origUrl = Deno.env.get("OLLAMA_EMBED_URL");
     Deno.env.set("EMBEDDER_PROVIDER", "ollama");
     Deno.env.delete("OLLAMA_EMBED_URL");
     try {
-      await assertRejects(() => createEmbedder(), Error, "OLLAMA_EMBED_URL required");
+      const embedder = await createEmbedder();
+      assertEquals(embedder.modelName, "nomic-embed-text");
     } finally {
       if (origProvider) Deno.env.set("EMBEDDER_PROVIDER", origProvider);
       else Deno.env.delete("EMBEDDER_PROVIDER");

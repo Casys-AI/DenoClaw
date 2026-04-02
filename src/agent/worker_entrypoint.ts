@@ -15,7 +15,7 @@
 import { AgentLoop } from "./loop.ts";
 import type { AgentLoopFactoryContext, AgentLoopLike } from "./loop.ts";
 import type { AgentResponse } from "./types.ts";
-import { KvdexMemory } from "./memory_kvdex.ts";
+import { createMemory } from "./memory_factory.ts";
 import { TraceWriter } from "../telemetry/traces.ts";
 import type { ResolvedAgentRegistry } from "./registry.ts";
 import type { AgentEntry } from "../shared/types.ts";
@@ -57,7 +57,7 @@ export type CanonicalWorkerTaskRequest = WorkerRunRequest;
  * Decoupled from Worker globals for testability.
  */
 export interface CanonicalWorkerTaskDeps {
-  createLoop: (ctx: AgentLoopFactoryContext) => AgentLoopLike;
+  createLoop: (ctx: AgentLoopFactoryContext) => AgentLoopLike | Promise<AgentLoopLike>;
   onTaskUpdate?: (task: Task) => void;
 }
 
@@ -103,7 +103,7 @@ export async function executeCanonicalWorkerTask(
   deps.onTaskUpdate?.(task);
 
   // Create the loop with canonical context
-  const loop = deps.createLoop({
+  const loop = await deps.createLoop({
     sessionId: request.sessionId,
     model: request.model,
     traceId: request.traceId,
@@ -141,6 +141,7 @@ let agentId = "default";
 let config: WorkerConfig | null = null;
 let agentRegistry: ResolvedAgentRegistry = {};
 let kvPrivatePath: string | undefined;
+let workspaceKv: Deno.Kv | null = null;
 let traceWriter: TraceWriter | null = null;
 let sharedKv: Deno.Kv | null = null;
 let injectedRuntimeCapabilities: AgentRuntimeCapabilities | undefined;
@@ -180,13 +181,13 @@ broadcast.onmessage = (e: MessageEvent) => {
 
 // ── Helpers ──────────────────────────────────────────────
 
-function createAgentLoop(
+async function createAgentLoop(
   sessionId: string,
   model?: string,
   traceId?: string,
   taskId?: string,
   contextId?: string,
-): AgentLoop {
+): Promise<AgentLoop> {
   if (!config) {
     throw new AgentError(
       "WORKER_NOT_INITIALIZED",
@@ -195,7 +196,7 @@ function createAgentLoop(
     );
   }
 
-  const memory = new KvdexMemory(agentId, sessionId, 100, kvPrivatePath);
+  const memory = await createMemory(agentId, sessionId);
   const entry = agentRegistry[agentId];
   const peers = entry?.peers ?? [];
   const sandboxConfig = entry?.sandbox ??
@@ -225,6 +226,7 @@ function createAgentLoop(
       contextId,
       agentId,
       workspaceDir,
+      workspaceKv: workspaceKv ?? undefined,
       runtimeCapabilities: effectiveRuntimeCapabilities,
     },
   );
@@ -242,6 +244,15 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       agentRegistry = msg.agentRegistry;
       injectedRuntimeCapabilities = msg.runtimeCapabilities;
       kvPrivatePath = msg.kvPaths.private;
+      // Open private KV for workspace (skills, memory files in deploy)
+      try {
+        workspaceKv = await Deno.openKv(kvPrivatePath);
+      } catch (e) {
+        log.warn(
+          "Private KV unavailable — workspace KV features disabled",
+          e instanceof Error ? e.message : String(e),
+        );
+      }
       // Open shared KV for trace writing (best-effort observability)
       try {
         sharedKv = await Deno.openKv(msg.kvPaths.shared);
@@ -291,7 +302,7 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           taskId,
           contextId,
         ) => {
-          const loop = createAgentLoop(
+          const loop = await createAgentLoop(
             sessionId,
             undefined,
             traceId,

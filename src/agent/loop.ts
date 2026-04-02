@@ -15,7 +15,7 @@ interface AgentLoopConfig {
   providers: ProvidersConfig;
   tools?: ToolsConfig;
 }
-import { Memory } from "./memory.ts";
+import { AgentError } from "../shared/errors.ts";
 import type { MemoryPort } from "./memory_port.ts";
 import { ContextBuilder } from "./context.ts";
 import type { SkillLoader } from "./skills.ts";
@@ -111,7 +111,14 @@ export class AgentLoop implements AgentLoopLike {
     };
 
     this.providers = deps?.providers ?? new ProviderManager(config.providers);
-    this.memory = deps?.memory ?? new Memory(sessionId);
+    if (!deps?.memory) {
+      throw new AgentError(
+        "MEMORY_REQUIRED",
+        { sessionId },
+        "AgentLoop requires a MemoryPort instance via deps.memory — use createMemory() to create one",
+      );
+    }
+    this.memory = deps.memory;
     this.tools = deps?.tools ?? new ToolRegistry();
     this.agentId = deps?.agentId ?? sessionId;
     this.sessionId = sessionId;

@@ -185,6 +185,7 @@ Deno.test({
 
     const loop = new AgentLoop("test-session", minimalConfig, {}, 10, {
       tools: registry,
+      memory: new FakeMemory(),
     });
 
     const tools = loop.getTools();
@@ -204,7 +205,9 @@ Deno.test({
 Deno.test({
   name: "AgentLoop registers built-in tools by default (no deps)",
   fn() {
-    const loop = new AgentLoop("test-session-defaults", minimalConfig);
+    const loop = new AgentLoop("test-session-defaults", minimalConfig, {}, 10, {
+      memory: new FakeMemory(),
+    });
 
     const tools = loop.getTools();
     // 9 built-in tools + memory tool
@@ -233,8 +236,9 @@ Deno.test({
 Deno.test({
   name: "AgentLoop close() does not throw",
   fn() {
-    const loop = new AgentLoop("test-session-close", minimalConfig);
-    // close() should not throw even if KV was never opened
+    const loop = new AgentLoop("test-session-close", minimalConfig, {}, 10, {
+      memory: new FakeMemory(),
+    });
     loop.close();
   },
   sanitizeResources: false,
@@ -283,6 +287,7 @@ Deno.test({
       3,
       {
         providers: provider,
+        memory: new FakeMemory(),
         workspaceDir,
         agentId: "agent-skill-reload",
       },
@@ -341,7 +346,9 @@ Deno.test({
 Deno.test({
   name: "AgentLoop satisfies the canonical worker loop interface",
   fn() {
-    const loop = new AgentLoop("session-interface", minimalConfig);
+    const loop = new AgentLoop("session-interface", minimalConfig, {}, 10, {
+      memory: new FakeMemory(),
+    });
     const loopPort: AgentLoopLike = loop;
     const processMessage: (message: string) => Promise<AgentResponse> = loopPort
       .processMessage.bind(loopPort);

@@ -103,7 +103,7 @@ export function getAgentMetrics(
 export async function getAgents(
   options?: string | BrokerRequestOptions,
 ): Promise<AgentStatusEntry[]> {
-  return (await fetchJSON<AgentStatusEntry[]>("/agents", options)) ?? [];
+  return (await fetchJSON<AgentStatusEntry[]>("/agents/status", options)) ?? [];
 }
 
 export function getAgent(
@@ -111,7 +111,7 @@ export function getAgent(
   options?: string | BrokerRequestOptions,
 ): Promise<AgentStatusEntry | null> {
   return fetchJSON<AgentStatusEntry>(
-    `/agents/${encodeURIComponent(agentId)}`,
+    `/agents/${encodeURIComponent(agentId)}/status`,
     options,
   );
 }
@@ -125,7 +125,7 @@ export function getHealth(
 export async function getCronJobs(
   options?: string | BrokerRequestOptions,
 ): Promise<CronJob[]> {
-  return (await fetchJSON<CronJob[]>("/cron", options)) ?? [];
+  return (await fetchJSON<CronJob[]>("/cron/jobs", options)) ?? [];
 }
 
 export function getFederationStats(

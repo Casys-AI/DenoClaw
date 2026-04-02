@@ -145,11 +145,9 @@ Method: 4 parallel review agents (orchestration, agent runtime, messaging/A2A, e
 
 ### AX-16 — `webhook.ts`: empty content dispatched silently
 
+- **Status:** By design — empty content is used as an interrupt signal for running tasks.
 - **Principle:** AX#5 Fast Fail Early
 - **File:** `src/messaging/channels/webhook.ts:64-88`
-- **Impact:** `body.content || ""` substitutes empty string for missing content.
-  Downstream agents receive a valid-looking `ChannelMessage` with blank payload.
-- **Fix:** Return 400 if `content` is absent or empty.
 
 ### AX-17 — `session.ts`: magic default `channelType = "cli"`
 

@@ -84,6 +84,12 @@ export class A2AServer {
       return Response.json(this.rpcError(rpc.id, -32600, "Invalid Request"));
     }
 
+    if (rpc.id === undefined || rpc.id === null) {
+      return Response.json(
+        this.rpcError(null, -32600, "Missing request id — notifications are not supported"),
+      );
+    }
+
     log.debug(`A2A RPC: ${rpc.method} (${rpc.id})`);
 
     switch (rpc.method as A2AMethod) {
@@ -113,6 +119,11 @@ export class A2AServer {
     if (!params?.message) {
       return Response.json(
         this.rpcError(rpc.id, -32602, "Missing message param"),
+      );
+    }
+    if (!Array.isArray(params.message.parts) || params.message.parts.length === 0) {
+      return Response.json(
+        this.rpcError(rpc.id, -32602, "Message must include a non-empty parts array"),
       );
     }
 
@@ -168,6 +179,11 @@ export class A2AServer {
     if (!params?.message) {
       return Response.json(
         this.rpcError(rpc.id, -32602, "Missing message param"),
+      );
+    }
+    if (!Array.isArray(params.message.parts) || params.message.parts.length === 0) {
+      return Response.json(
+        this.rpcError(rpc.id, -32602, "Message must include a non-empty parts array"),
       );
     }
 

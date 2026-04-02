@@ -28,9 +28,12 @@ async function proxyAgentsRequest(ctx: FreshContext): Promise<Response> {
   }
 
   const body = ctx.req.method === "GET" ? undefined : await ctx.req.text();
-  let response: Response;
+-  let response: Response;
   try {
-    response = await fetch(`${config.brokerUrl}/api/agents`, {
+    const brokerPath = ctx.req.method === "GET"
+      ? "/agents/status"
+      : "/api/agents";
+    response = await fetch(`${config.brokerUrl}${brokerPath}`, {
       method: ctx.req.method,
       headers,
       body,

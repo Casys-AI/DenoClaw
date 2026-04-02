@@ -72,7 +72,18 @@ export class WebhookChannel extends BaseChannel {
           content?: string;
           sessionId?: string;
           agentId?: string;
+          interrupt?: boolean;
         };
+
+        if (!body.content && !body.interrupt) {
+          return Response.json({
+            error: {
+              code: "WEBHOOK_EMPTY_CONTENT",
+              recovery: "Provide 'content' or set 'interrupt: true' for empty messages",
+            },
+          }, { status: 400 });
+        }
+
         const taskId = generateId();
         const messageId = generateId();
 

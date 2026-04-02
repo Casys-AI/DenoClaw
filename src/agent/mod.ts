@@ -43,6 +43,11 @@ export { WebFetchTool } from "./tools/web.ts";
 export type { BuiltinToolName } from "./tools/types.ts";
 export { BUILTIN_TOOL_PERMISSIONS } from "./tools/types.ts";
 
+// Mastra memory
+export type { EmbedderPort } from "./embedder_port.ts";
+export type { MastraMemoryConfig } from "./memory_mastra.ts";
+export { createEmbedder, createMemory } from "./memory_factory.ts";
+
 // Kaku kernel
 export { AgentRunner, createBrokerRunner, createLocalRunner } from "./runner.ts";
 export type { BrokerRunnerDeps, LocalRunnerDeps, RunnerBundle } from "./runner.ts";

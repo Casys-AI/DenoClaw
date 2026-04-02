@@ -51,7 +51,10 @@
     "tailwindcss": "npm:tailwindcss@^4",
     "daisyui": "npm:daisyui@^5.5.19",
     "@prisma/client": "npm:@prisma/client@^7",
-    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7"
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7",
+    "@mastra/memory": "npm:@mastra/memory@^0",
+    "@mastra/pg": "npm:@mastra/pg@^0",
+    "@mastra/fastembed": "npm:@mastra/fastembed@^0"
   },
   "compilerOptions": {
     "strict": true,

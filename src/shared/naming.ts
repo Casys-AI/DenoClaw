@@ -27,6 +27,12 @@ export function deriveBrokerKvName(
   return `${normalizeDeploySlug(appName)}-kv`;
 }
 
+export function deriveBrokerPrismaName(
+  appName = deriveBrokerAppName(),
+): string {
+  return `${normalizeDeploySlug(appName)}-db`;
+}
+
 export function deriveAgentAppName(
   agentId: string,
   projectName = DENOCLAW_DEPLOY_PREFIX,

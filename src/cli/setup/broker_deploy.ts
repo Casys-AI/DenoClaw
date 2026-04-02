@@ -1,6 +1,9 @@
 import { getConfigOrDefault, saveConfig } from "../../config/mod.ts";
 import { getDeployOrgToken } from "../../shared/deploy_credentials.ts";
-import { deriveBrokerAppName } from "../../shared/naming.ts";
+import {
+  deriveBrokerAppName,
+  deriveBrokerPrismaName,
+} from "../../shared/naming.ts";
 import { ask, error, print, success } from "../prompt.ts";
 import {
   createDeployApiHeaders,
@@ -215,6 +218,60 @@ export async function deployBroker(opts?: {
 
   await ensureBrokerKvDatabase();
 
+  async function ensureBrokerPrismaDatabase(): Promise<void> {
+    const prismaDatabase = deriveBrokerPrismaName(app);
+    print(`Ensuring Prisma Postgres database ${prismaDatabase}...`);
+
+    const provisionResult = await runDeployCli([
+      "deploy",
+      "database",
+      "provision",
+      prismaDatabase,
+      "--kind",
+      "prisma",
+      "--region",
+      region,
+      "--org",
+      org,
+    ], { cwd: "/tmp" });
+
+    if (!provisionResult.success) {
+      const provisionOutput =
+        `${provisionResult.stdout}\n${provisionResult.stderr}`;
+      if (!provisionOutput.includes("already in use")) {
+        throw new Error(
+          `failed to provision Prisma database ${prismaDatabase}: ${provisionOutput.trim()}`
+            .trim(),
+        );
+      }
+    }
+
+    const assignResult = await runDeployCli([
+      "deploy",
+      "database",
+      "assign",
+      prismaDatabase,
+      "--org",
+      org,
+      "--app",
+      app,
+    ], { cwd: "/tmp" });
+
+    if (!assignResult.success) {
+      const assignOutput = `${assignResult.stdout}\n${assignResult.stderr}`;
+      if (!assignOutput.includes("already")) {
+        throw new Error(
+          `failed to assign Prisma database ${prismaDatabase}: ${assignOutput.trim()}`
+            .trim(),
+        );
+      }
+    }
+
+    success(`Prisma database ${prismaDatabase} assigned to ${app}`);
+  }
+
+  await ensureBrokerPrismaDatabase();
+
   async function upsertDeployEnvVar(key: string, value: string): Promise<void> {
     const addResult = await runDeployCli([
       "deploy",
@@ -306,6 +363,7 @@ export async function deployBroker(opts?: {
     app,
     region,
     kvDatabase,
+    prismaDatabase: deriveBrokerPrismaName(app),
     url: deployedUrl,
   };
   await saveConfig(config);

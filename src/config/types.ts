@@ -17,6 +17,7 @@ export interface Config {
     app?: string;
     region?: string;
     kvDatabase?: string;
+    prismaDatabase?: string;
     url?: string;
     oidcAudience?: string;
   };

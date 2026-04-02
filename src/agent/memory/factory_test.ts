@@ -1,22 +1,22 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { createMemory, createEmbedder } from "./factory.ts";
-import { KvdexMemory } from "./kvdex.ts";
+import { ConfigError } from "../../shared/errors.ts";
 
 Deno.test({
-  name: "createMemory returns KvdexMemory when DATABASE_URL is absent",
+  name: "createMemory throws when DATABASE_URL is absent",
   async fn() {
     const orig = Deno.env.get("DATABASE_URL");
     Deno.env.delete("DATABASE_URL");
     try {
-      const mem = await createMemory("agent-1", "sess-1");
-      assertEquals(mem instanceof KvdexMemory, true);
-      mem.close();
+      await assertRejects(
+        () => createMemory("agent-1", "sess-1"),
+        ConfigError,
+        "DATABASE_URL_REQUIRED",
+      );
     } finally {
       if (orig) Deno.env.set("DATABASE_URL", orig);
     }
   },
-  sanitizeResources: false,
-  sanitizeOps: false,
 });
 
 Deno.test({

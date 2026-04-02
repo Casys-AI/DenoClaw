@@ -1,6 +1,6 @@
 import type { MemoryPort } from "./port.ts";
 import type { EmbedderPort } from "./embedder_port.ts";
-import { KvdexMemory } from "./kvdex.ts";
+import { ConfigError } from "../../shared/errors.ts";
 import { log } from "../../shared/log.ts";
 
 export async function createEmbedder(): Promise<EmbedderPort> {
@@ -25,19 +25,19 @@ export async function createEmbedder(): Promise<EmbedderPort> {
 export async function createMemory(
   agentId: string,
   sessionId: string,
-  kvPath?: string,
 ): Promise<MemoryPort> {
   const dbUrl = Deno.env.get("DATABASE_URL");
-  if (dbUrl) {
-    const embedder = await createEmbedder();
-    const { MastraMemory } = await import("./mastra.ts");
-    const mem = new MastraMemory(agentId, sessionId, { connectionString: dbUrl, embedder });
-    await mem.load();
-    log.info(`MastraMemory initialized for ${agentId}:${sessionId}`);
-    return mem;
+  if (!dbUrl) {
+    throw new ConfigError(
+      "DATABASE_URL_REQUIRED",
+      { agentId, sessionId },
+      "Set DATABASE_URL to a Postgres connection string. Local: docker-compose up -d + see .env.example",
+    );
   }
-  // Local dev: KvdexMemory with per-agent KV isolation
-  const mem = new KvdexMemory(agentId, sessionId, 100, kvPath);
+  const embedder = await createEmbedder();
+  const { MastraMemory } = await import("./mastra.ts");
+  const mem = new MastraMemory(agentId, sessionId, { connectionString: dbUrl, embedder });
   await mem.load();
+  log.info(`MastraMemory initialized for ${agentId}:${sessionId}`);
   return mem;
 }

@@ -26,7 +26,16 @@ import {
   type RuntimeTaskContinueMessage,
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
-import { executeAgentConversation } from "./runtime_conversation.ts";
+import { AgentRunner } from "./runner.ts";
+import { MiddlewarePipeline } from "./middleware.ts";
+import type { SessionState } from "./middleware.ts";
+import { InMemoryEventStore } from "./event_store.ts";
+import type { KernelInput } from "./kernel.ts";
+import { llmMiddleware } from "./middlewares/llm.ts";
+import { toolMiddleware } from "./middlewares/tool.ts";
+import { memoryMiddleware } from "./middlewares/memory.ts";
+import { contextRefreshMiddleware } from "./middlewares/context_refresh.ts";
+import { a2aTaskMiddleware } from "./middlewares/a2a_task.ts";
 import {
   extractApprovedPrivilegeElevationGrant,
   extractRuntimeTaskText,
@@ -191,28 +200,28 @@ export class AgentRuntime {
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
-    await executeAgentConversation({
-      config: this.config,
-      llmToolPort: this.llmToolPort,
-      tools: this.toolDefinitions,
-      context: this.context,
-      skills: this.skills,
-      memory,
-      fromAgentId: msg.from,
-      inputText,
-      canonicalTask: createCanonicalTask({
-        id: payload.taskId,
-        contextId: payload.contextId,
-        initialMessage: taskMessage,
-      }),
-      memoryTopics: await memory.listTopics(),
-      memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.loadMemoryFiles(),
-      getRuntimeGrants: undefined,
-      reportWorkingTransition: true,
-      maxIterations: this.maxIterations,
-      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+    const canonicalTask = createCanonicalTask({
+      id: payload.taskId,
+      contextId: payload.contextId,
+      initialMessage: taskMessage,
     });
+
+    // Report WORKING transition
+    const workingTask = transitionTask(canonicalTask, "WORKING");
+    await this.reportCanonicalTaskResult(workingTask);
+
+    // Add user message
+    if (inputText.trim().length > 0) {
+      await memory.addMessage({ role: "user", content: inputText });
+    }
+
+    const { runner, session } = this.createBrokerRunner({
+      memory,
+      canonicalTask: workingTask,
+    });
+    session.memoryTopics = await memory.listTopics();
+
+    await runner.run(this.buildBrokerKernelInput(memory, session));
   }
 
   private async handleTaskContinueMessage(
@@ -256,6 +265,7 @@ export class AgentRuntime {
       this.memoryFiles = await this.loadMemoryFiles();
     }
 
+    // Auto-retry pending tool if privilege was approved
     if (approvedPrivilegeGrant && pendingTool) {
       log.info(
         `Canonical continuation received from ${msg.from}: auto-retrying pending tool ${pendingTool.tool}`,
@@ -263,10 +273,7 @@ export class AgentRuntime {
       const result = await this.llmToolPort.execTool(
         pendingTool.tool,
         pendingTool.args,
-        {
-          taskId: resumed.id,
-          contextId: resumed.contextId,
-        },
+        { taskId: resumed.id, contextId: resumed.contextId },
       );
       const privilegePause = extractRuntimePrivilegeElevationPause(result);
       if (privilegePause) {
@@ -299,52 +306,102 @@ export class AgentRuntime {
           ? { tool_call_id: pendingTool.toolCallId }
           : {}),
       });
+    }
 
-      await executeAgentConversation({
-        config: this.config,
-        llmToolPort: this.llmToolPort,
-        tools: this.toolDefinitions,
-        context: this.context,
-        skills: this.skills,
-        memory,
-        fromAgentId: msg.from,
-        inputText,
-        canonicalTask: resumed,
-        memoryTopics: await memory.listTopics(),
-        memoryFiles: this.memoryFiles,
-        refreshMemoryFiles: () => this.loadMemoryFiles(),
-        getRuntimeGrants: () => runtimeGrantStore.list(),
-        reportWorkingTransition: false,
-        maxIterations: this.maxIterations,
-        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
-      });
-      return;
+    // Add continuation input
+    if (inputText.trim().length > 0) {
+      await memory.addMessage({ role: "user", content: inputText });
     }
 
     log.info(
-      `Canonical continuation received from ${msg.from}: ${
-        inputText.slice(0, 100)
-      }`,
+      `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
-    await executeAgentConversation({
-      config: this.config,
-      llmToolPort: this.llmToolPort,
-      tools: this.toolDefinitions,
-      context: this.context,
-      skills: this.skills,
+    const { runner, session } = this.createBrokerRunner({
       memory,
-      fromAgentId: msg.from,
-      inputText,
       canonicalTask: resumed,
-      memoryTopics: await memory.listTopics(),
-      memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.loadMemoryFiles(),
-      getRuntimeGrants: () => runtimeGrantStore.list(),
-      reportWorkingTransition: false,
-      maxIterations: this.maxIterations,
-      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+      runtimeGrants: runtimeGrantStore,
     });
+    session.memoryTopics = await memory.listTopics();
+
+    await runner.run(this.buildBrokerKernelInput(memory, session));
+  }
+
+  private createBrokerRunner(deps: {
+    memory: MemoryPort;
+    canonicalTask: Task;
+    runtimeGrants?: AgentRuntimeGrantStore;
+  }): { runner: AgentRunner; session: SessionState } {
+    const session: SessionState = {
+      agentId: this.agentId,
+      sessionId: `agent:${deps.canonicalTask.contextId ?? deps.canonicalTask.id}`,
+      memoryTopics: [],
+      memoryFiles: this.memoryFiles,
+      currentIteration: 0,
+      canonicalTask: deps.canonicalTask,
+      runtimeGrants: deps.runtimeGrants?.list(),
+    };
+
+    // Capture getMessages so llmMiddleware can call it fresh (same pattern as loop.ts).
+    // This ensures context refreshes applied by contextRefreshMiddleware are visible to LLM.
+    const getMessages = () =>
+      this.context.buildContextMessages(
+        deps.memory.getMessages(),
+        this.skills.getSkills(),
+        this.toolDefinitions,
+        session.memoryTopics,
+        session.memoryFiles,
+        session.runtimeGrants ?? [],
+      );
+
+    const pipeline = new MiddlewarePipeline()
+      .use(memoryMiddleware(deps.memory))
+      .use(contextRefreshMiddleware({
+        skills: this.skills,
+        memory: deps.memory,
+        refreshMemoryFiles: () => this.loadMemoryFiles(),
+      }))
+      .use(a2aTaskMiddleware({
+        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+      }))
+      .use(toolMiddleware((name, args) =>
+        this.llmToolPort.execTool(name, args, {
+          taskId: session.canonicalTask!.id,
+          contextId: session.canonicalTask!.contextId,
+        })
+      ))
+      .use(llmMiddleware((_messages, model, temperature, maxTokens, tools) =>
+        this.llmToolPort.complete(getMessages(), model, temperature, maxTokens, tools)
+      ));
+
+    const runner = new AgentRunner(
+      pipeline,
+      new InMemoryEventStore(),
+      session,
+      deps.memory,
+    );
+
+    return { runner, session };
+  }
+
+  private buildBrokerKernelInput(
+    memory: MemoryPort,
+    session: SessionState,
+  ): KernelInput {
+    return {
+      getMessages: () =>
+        this.context.buildContextMessages(
+          memory.getMessages(),
+          this.skills.getSkills(),
+          this.toolDefinitions,
+          session.memoryTopics,
+          session.memoryFiles,
+          session.runtimeGrants ?? [],
+        ),
+      toolDefinitions: this.toolDefinitions,
+      llmConfig: this.config,
+      maxIterations: this.maxIterations,
+    };
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {

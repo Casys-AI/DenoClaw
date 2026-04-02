@@ -26,7 +26,8 @@ import {
   type RuntimeTaskContinueMessage,
   type RuntimeTaskSubmitMessage,
 } from "./runtime_transport.ts";
-import { executeAgentConversation } from "./runtime_conversation.ts";
+import { createBrokerRunner } from "./runner.ts";
+import { PrivilegeElevationPause } from "./middlewares/a2a_task.ts";
 import {
   extractApprovedPrivilegeElevationGrant,
   extractRuntimeTaskText,
@@ -191,28 +192,61 @@ export class AgentRuntime {
       `Canonical task received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
-    await executeAgentConversation({
-      config: this.config,
-      llmToolPort: this.llmToolPort,
-      tools: this.toolDefinitions,
-      context: this.context,
-      skills: this.skills,
-      memory,
-      fromAgentId: msg.from,
-      inputText,
-      canonicalTask: createCanonicalTask({
-        id: payload.taskId,
-        contextId: payload.contextId,
-        initialMessage: taskMessage,
-      }),
-      memoryTopics: await memory.listTopics(),
-      memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.loadMemoryFiles(),
-      getRuntimeGrants: undefined,
-      reportWorkingTransition: true,
-      maxIterations: this.maxIterations,
-      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+    const canonicalTask = createCanonicalTask({
+      id: payload.taskId,
+      contextId: payload.contextId,
+      initialMessage: taskMessage,
     });
+
+    // Report WORKING transition
+    const workingTask = transitionTask(canonicalTask, "WORKING");
+    await this.reportCanonicalTaskResult(workingTask);
+
+    // Add user message
+    if (inputText.trim().length > 0) {
+      await memory.addMessage({ role: "user", content: inputText });
+    }
+
+    const { runner, session, kernelInput } = createBrokerRunner({
+      agentId: this.agentId,
+      canonicalTask: workingTask,
+      memoryFiles: this.memoryFiles,
+      memory,
+      complete: (messages, model, temperature, maxTokens, tools) =>
+        this.llmToolPort.complete(messages, model, temperature, maxTokens, tools),
+      executeTool: (name, args) =>
+        this.llmToolPort.execTool(name, args, {
+          taskId: workingTask.id,
+          contextId: workingTask.contextId,
+        }),
+      contextRefresh: {
+        skills: this.skills,
+        memory,
+        refreshMemoryFiles: () => this.loadMemoryFiles(),
+      },
+      a2aTask: {
+        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+      },
+      buildMessages: (memoryTopics, memoryFiles) =>
+        this.context.buildContextMessages(
+          memory.getMessages(),
+          this.skills.getSkills(),
+          this.toolDefinitions,
+          memoryTopics,
+          memoryFiles,
+        ),
+      toolDefinitions: this.toolDefinitions,
+      llmConfig: this.config,
+      maxIterations: this.maxIterations,
+    });
+    session.memoryTopics = await memory.listTopics();
+
+    try {
+      await runner.run(kernelInput);
+    } catch (e) {
+      if (e instanceof PrivilegeElevationPause) return;
+      throw e;
+    }
   }
 
   private async handleTaskContinueMessage(
@@ -256,6 +290,7 @@ export class AgentRuntime {
       this.memoryFiles = await this.loadMemoryFiles();
     }
 
+    // Auto-retry pending tool if privilege was approved
     if (approvedPrivilegeGrant && pendingTool) {
       log.info(
         `Canonical continuation received from ${msg.from}: auto-retrying pending tool ${pendingTool.tool}`,
@@ -263,10 +298,7 @@ export class AgentRuntime {
       const result = await this.llmToolPort.execTool(
         pendingTool.tool,
         pendingTool.args,
-        {
-          taskId: resumed.id,
-          contextId: resumed.contextId,
-        },
+        { taskId: resumed.id, contextId: resumed.contextId },
       );
       const privilegePause = extractRuntimePrivilegeElevationPause(result);
       if (privilegePause) {
@@ -299,52 +331,60 @@ export class AgentRuntime {
           ? { tool_call_id: pendingTool.toolCallId }
           : {}),
       });
+    }
 
-      await executeAgentConversation({
-        config: this.config,
-        llmToolPort: this.llmToolPort,
-        tools: this.toolDefinitions,
-        context: this.context,
-        skills: this.skills,
-        memory,
-        fromAgentId: msg.from,
-        inputText,
-        canonicalTask: resumed,
-        memoryTopics: await memory.listTopics(),
-        memoryFiles: this.memoryFiles,
-        refreshMemoryFiles: () => this.loadMemoryFiles(),
-        getRuntimeGrants: () => runtimeGrantStore.list(),
-        reportWorkingTransition: false,
-        maxIterations: this.maxIterations,
-        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
-      });
-      return;
+    // Add continuation input
+    if (inputText.trim().length > 0) {
+      await memory.addMessage({ role: "user", content: inputText });
     }
 
     log.info(
-      `Canonical continuation received from ${msg.from}: ${
-        inputText.slice(0, 100)
-      }`,
+      `Canonical continuation received from ${msg.from}: ${inputText.slice(0, 100)}`,
     );
 
-    await executeAgentConversation({
-      config: this.config,
-      llmToolPort: this.llmToolPort,
-      tools: this.toolDefinitions,
-      context: this.context,
-      skills: this.skills,
-      memory,
-      fromAgentId: msg.from,
-      inputText,
+    const grants = runtimeGrantStore.list();
+    const { runner, session, kernelInput } = createBrokerRunner({
+      agentId: this.agentId,
       canonicalTask: resumed,
-      memoryTopics: await memory.listTopics(),
       memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.loadMemoryFiles(),
-      getRuntimeGrants: () => runtimeGrantStore.list(),
-      reportWorkingTransition: false,
+      runtimeGrants: grants,
+      memory,
+      complete: (messages, model, temperature, maxTokens, tools) =>
+        this.llmToolPort.complete(messages, model, temperature, maxTokens, tools),
+      executeTool: (name, args) =>
+        this.llmToolPort.execTool(name, args, {
+          taskId: resumed.id,
+          contextId: resumed.contextId,
+        }),
+      contextRefresh: {
+        skills: this.skills,
+        memory,
+        refreshMemoryFiles: () => this.loadMemoryFiles(),
+      },
+      a2aTask: {
+        reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
+      },
+      buildMessages: (memoryTopics, memoryFiles) =>
+        this.context.buildContextMessages(
+          memory.getMessages(),
+          this.skills.getSkills(),
+          this.toolDefinitions,
+          memoryTopics,
+          memoryFiles,
+          grants,
+        ),
+      toolDefinitions: this.toolDefinitions,
+      llmConfig: this.config,
       maxIterations: this.maxIterations,
-      reportTaskResult: (task) => this.reportCanonicalTaskResult(task),
     });
+    session.memoryTopics = await memory.listTopics();
+
+    try {
+      await runner.run(kernelInput);
+    } catch (e) {
+      if (e instanceof PrivilegeElevationPause) return;
+      throw e;
+    }
   }
 
   private async reportCanonicalTaskResult(task: Task): Promise<void> {

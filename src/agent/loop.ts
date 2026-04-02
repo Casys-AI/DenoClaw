@@ -37,7 +37,7 @@ import { SendToAgentTool } from "./tools/send_to_agent.ts";
 import type { SendToAgentFn } from "./tools/send_to_agent.ts";
 import { MemoryTool } from "./tools/memory.ts";
 import type { TraceWriter } from "../telemetry/traces.ts";
-import { processAgentLoopMessage } from "./loop_process.ts";
+import { createLocalRunner } from "./runner.ts";
 import { listAgentMemoryFiles } from "./loop_workspace.ts";
 import type { AgentRuntimeCapabilities } from "./runtime_capabilities.ts";
 import type { AgentRuntimeGrant } from "./runtime_capabilities.ts";
@@ -212,26 +212,54 @@ export class AgentLoop implements AgentLoopLike {
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
     await this.initialize();
-    return await processAgentLoopMessage({
-      userMessage,
-      config: this.config,
-      providers: this.providers,
-      memory: this.memory,
-      context: this.context,
-      skills: this.skills,
-      tools: this.tools,
-      memoryTopics: this.memoryTopics,
-      memoryFiles: this.memoryFiles,
-      refreshMemoryFiles: () => this.refreshMemoryFiles(),
-      getRuntimeGrants: this.getRuntimeGrants,
-      maxIterations: this.maxIterations,
-      traceWriter: this.traceWriter,
-      traceId: this.traceId,
-      taskId: this.taskId,
-      contextId: this.contextId,
+    await this.memory.addMessage({ role: "user", content: userMessage });
+
+    const CHARS_PER_TOKEN = 4;
+    const CONTEXT_RATIO = 4;
+    const maxChars =
+      (this.config.maxTokens || 4096) * CHARS_PER_TOKEN * CONTEXT_RATIO;
+
+    const { runner, kernelInput } = createLocalRunner({
       agentId: this.agentId,
       sessionId: this.sessionId,
+      memoryTopics: this.memoryTopics,
+      memoryFiles: this.memoryFiles,
+      memory: this.memory,
+      complete: (messages, model, temperature, maxTokens, tools) =>
+        this.providers.complete(messages, model, temperature, maxTokens, tools),
+      executeTool: (name, args) => this.tools.execute(name, args),
+      observability: {
+        traceWriter: this.traceWriter,
+        traceId: this.traceId,
+        agentId: this.agentId,
+        sessionId: this.sessionId,
+        correlationIds: {
+          ...(this.taskId ? { taskId: this.taskId } : {}),
+          ...(this.contextId ? { contextId: this.contextId } : {}),
+        },
+      },
+      contextRefresh: {
+        skills: this.skills,
+        memory: this.memory,
+        refreshMemoryFiles: () => this.refreshMemoryFiles(),
+      },
+      buildMessages: (memoryTopics, memoryFiles) => {
+        const raw = this.context.buildContextMessages(
+          this.memory.getMessages(),
+          this.skills.getSkills(),
+          this.tools.getDefinitions(),
+          memoryTopics,
+          memoryFiles,
+          this.getRuntimeGrants?.() ?? [],
+        );
+        return this.context.truncateContext(raw, maxChars);
+      },
+      toolDefinitions: this.tools.getDefinitions(),
+      llmConfig: this.config,
+      maxIterations: this.maxIterations,
     });
+
+    return await runner.run(kernelInput);
   }
 
   getMemory(): MemoryPort {

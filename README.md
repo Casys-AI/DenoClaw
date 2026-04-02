@@ -97,6 +97,9 @@ apps, and Sandbox-oriented execution paths.
 # Install Deno 2.7+
 curl -fsSL https://deno.land/install.sh | sh
 
+# Copy environment template and fill in your keys
+cp .env.example .env
+
 # Configure an LLM provider
 deno task start setup provider
 
@@ -111,25 +114,49 @@ deno task start agent -- -m "Hello DenoClaw"
 
 # Start the local gateway
 deno task start gateway
+```
 
-# Deploy or update the broker on Deno Deploy
+### Postgres analytics (optional)
+
+KV handles real-time metrics out of the box. For historical analytics and the
+full dashboard experience, add Postgres:
+
+```bash
+docker-compose up -d                # Local Postgres 17
+deno task db:generate               # Generate Prisma client
+deno task db:push                   # Push schema to local DB
+```
+
+Set `DATABASE_URL` in `.env` (see `.env.example`). Without it, analytics is
+a no-op and everything runs on KV alone.
+
+## Deploy
+
+A single command provisions everything and deploys:
+
+```bash
 deno task deploy
 ```
 
-## Deploy setup
+This automatically:
+1. Creates the broker app on Deno Deploy (if needed)
+2. Provisions and assigns a shared KV database
+3. Provisions and assigns a Prisma Postgres database
+4. Sets environment variables (API tokens, secrets)
+5. Deploys the code to production
 
-The broker deployment is source-controlled and pinned to `main.ts broker` in
-`deno.json` so Deno Deploy does not auto-detect the dashboard/Fresh preset or
-boot the local runtime path instead of the broker.
+Naming is derived automatically (`denoclaw-broker`, `denoclaw-broker-kv`,
+`denoclaw-broker-db`). No manual configuration needed.
+
+To publish agent definitions after deploy:
+
+```bash
+deno task publish           # All agents
+deno task publish alice     # Single agent
+```
 
 For the operator workflow and current deploy status, see
-`docs/setup-broker-and-agent-deploy.md`.
-
-Important: the broker deploy path is ready, and agent publication is no longer
-just a raw API v2 upload. Published agents now register their endpoint with the
-broker, wake up over `POST /tasks`, and connect back over the dedicated agent
-WebSocket. The remaining gap is live validation on real Deno Deploy credentials,
-not the local KV transport.
+`docs/users/setup-broker-and-agent-deploy.md`.
 
 ## Development
 

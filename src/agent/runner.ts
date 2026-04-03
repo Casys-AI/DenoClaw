@@ -49,8 +49,10 @@ export class AgentRunner {
     try {
       while (!next.done) {
         const event = next.value;
+        log.debug(`Kernel event: ${event.type}`);
         await this.eventStore.commit(event);
         const resolution = await this.pipeline.execute(event, this.session);
+        log.debug(`Pipeline resolved: ${event.type}`);
         next = await kernel.next(resolution);
       }
 

@@ -62,6 +62,7 @@ export async function* agentKernel(
     );
 
     // 3. Tool calls
+    log.debug(`Kernel: toolCalls=${llmResolution.toolCalls?.length ?? 0}, content=${(llmResolution.content ?? "").slice(0, 100)}`);
     if (llmResolution.toolCalls?.length) {
       for (const tc of llmResolution.toolCalls) {
         let args: Record<string, unknown>;
@@ -131,6 +132,7 @@ export async function* agentKernel(
     }
 
     // 4. No tool calls — final answer
+    log.debug("Kernel: returning complete event");
     return event<CompleteEvent>(
       { type: "complete", content: llmResolution.content, finishReason: llmResolution.finishReason },
       iteration,

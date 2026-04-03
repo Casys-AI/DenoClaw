@@ -2,6 +2,7 @@ import type { Message } from "../../shared/types.ts";
 import type { LlmResponseEvent, ToolResultEvent } from "../events.ts";
 import { formatToolResultContent } from "../events.ts";
 import type { Middleware } from "../middleware.ts";
+import { log } from "../../shared/log.ts";
 
 export interface MemoryWriter {
   addMessage(message: Message): Promise<void>;
@@ -16,7 +17,9 @@ export function memoryMiddleware(memory: MemoryWriter): Middleware {
           role: "assistant", content: e.content || "", tool_calls: e.toolCalls,
         });
       } else {
+        log.debug("Memory: saving assistant message");
         await memory.addMessage({ role: "assistant", content: e.content });
+        log.debug("Memory: assistant message saved");
       }
     }
     if (ctx.event.type === "tool_result") {

@@ -13,6 +13,16 @@ export async function createEmbedder(): Promise<EmbedderPort> {
     const dim = Deno.env.get("OLLAMA_EMBED_DIM");
     return new OllamaEmbedder(url, model, dim ? parseInt(dim, 10) : undefined, apiKey);
   }
+  if (provider === "openai") {
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) {
+      throw new ConfigError("OPENAI_API_KEY_REQUIRED", {}, "Set OPENAI_API_KEY for OpenAI embeddings");
+    }
+    const model = Deno.env.get("OPENAI_EMBED_MODEL") ?? "text-embedding-3-small";
+    const dim = Deno.env.get("OPENAI_EMBED_DIM");
+    const { OpenAIEmbedder } = await import("./embedders/openai.ts");
+    return new OpenAIEmbedder(apiKey, model, dim ? parseInt(dim, 10) : undefined);
+  }
   if (provider === "none") {
     const { NoopEmbedder } = await import("./embedders/noop.ts");
     return new NoopEmbedder();

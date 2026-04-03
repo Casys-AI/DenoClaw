@@ -223,7 +223,9 @@ export class AgentLoop implements AgentLoopLike {
   }
 
   async processMessage(userMessage: string): Promise<AgentResponse> {
+    log.info(`[${this.agentId}] processMessage start`);
     await this.initialize();
+    log.info(`[${this.agentId}] initialized, calling runner`);
     await this.memory.addMessage({ role: "user", content: userMessage });
 
     const { runner, kernelInput } = createLocalRunner({

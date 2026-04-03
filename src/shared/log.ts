@@ -1,33 +1,83 @@
-const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
-type LogLevel = keyof typeof LOG_LEVELS;
+import * as stdLog from "@std/log";
 
-const currentLevel: LogLevel = (Deno.env.get("LOG_LEVEL") as LogLevel) ||
-  "info";
-const threshold = LOG_LEVELS[currentLevel] ?? LOG_LEVELS.info;
+// ── Map env LOG_LEVEL to @std/log level names ──
+const ENV_TO_LEVEL: Record<string, string> = {
+  debug: "DEBUG",
+  info: "INFO",
+  warn: "WARN",
+  error: "ERROR",
+};
 
-function ts(): string {
-  return new Date().toISOString().slice(11, 19);
+const envLevel = Deno.env.get("LOG_LEVEL") ?? "info";
+const levelName = ENV_TO_LEVEL[envLevel] ?? "INFO";
+
+function formatArgs(args: unknown[]): string {
+  if (args.length === 0) return "";
+  return " " + args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
 }
 
+function formatRecord(record: stdLog.LogRecord): string {
+  const ts = record.datetime.toISOString().slice(11, 19);
+  return `${ts} [${record.levelName}] ${record.msg}${formatArgs(record.args)}`;
+}
+
+// ── Console handler with compact timestamp ──
+const consoleHandler = new stdLog.ConsoleHandler(levelName as stdLog.LevelName, {
+  formatter: formatRecord,
+  useColors: true,
+});
+
+// ── Optional file handler ──
+const logFile = Deno.env.get("LOG_FILE");
+const handlers: Record<string, stdLog.BaseHandler> = { console: consoleHandler };
+
+if (logFile) {
+  handlers.file = new stdLog.FileHandler(levelName as stdLog.LevelName, {
+    filename: logFile,
+    formatter: formatRecord,
+  });
+}
+
+stdLog.setup({
+  handlers,
+  loggers: {
+    default: {
+      level: levelName as stdLog.LevelName,
+      handlers: logFile ? ["console", "file"] : ["console"],
+    },
+  },
+});
+
+const logger = stdLog.getLogger();
+
+// ── Backward-compatible API — same signature as before ──
 export const log = {
   debug(msg: string, data?: unknown) {
-    if (threshold <= LOG_LEVELS.debug) {
-      console.debug(`%c${ts()} [DBG] ${msg}`, "color: gray", data ?? "");
+    if (data !== undefined) {
+      logger.debug(msg, data);
+    } else {
+      logger.debug(msg);
     }
   },
   info(msg: string, data?: unknown) {
-    if (threshold <= LOG_LEVELS.info) {
-      console.info(`${ts()} [INF] ${msg}`, data !== undefined ? data : "");
+    if (data !== undefined) {
+      logger.info(msg, data);
+    } else {
+      logger.info(msg);
     }
   },
   warn(msg: string, data?: unknown) {
-    if (threshold <= LOG_LEVELS.warn) {
-      console.warn(`${ts()} [WRN] ${msg}`, data !== undefined ? data : "");
+    if (data !== undefined) {
+      logger.warn(msg, data);
+    } else {
+      logger.warn(msg);
     }
   },
   error(msg: string, data?: unknown) {
-    if (threshold <= LOG_LEVELS.error) {
-      console.error(`${ts()} [ERR] ${msg}`, data !== undefined ? data : "");
+    if (data !== undefined) {
+      logger.error(msg, data);
+    } else {
+      logger.error(msg);
     }
   },
 };

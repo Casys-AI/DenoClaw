@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "DenoClaw: Deno-native AI agent framework — Subhosting + Sandbox + A2A protocol. Zero Node.js deps."
+authors:
+  - family-names: Pesle
+    given-names: Erwan Lee
+year: 2026
+license: MIT
+repository-code: https://github.com/Casys-AI/DenoClaw
+type: software
